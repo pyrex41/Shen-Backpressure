@@ -1,5 +1,5 @@
 ---
-name: shen-init
+name: init
 description: Generate Shen sequent-calculus type specifications from a natural language description of domain invariants
 ---
 

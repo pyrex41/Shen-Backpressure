@@ -1,5 +1,5 @@
 ---
-name: loop-setup
+name: setup
 description: Interactive setup for a Ralph-Shen backpressure loop — harness selection, directory scaffolding, and prompt generation
 ---
 
