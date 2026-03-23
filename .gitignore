@@ -1,5 +1,5 @@
 # Built binaries
-ralph
+/ralph
 bin/shen
 
 # Backpressure logs (generated at runtime)
