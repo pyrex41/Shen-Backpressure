@@ -119,17 +119,42 @@ Use Shen comment syntax `\* comment *\` to document each section:
 ...
 ```
 
-### Step 4: Verify
+### Step 4: Present Specs for Confirmation
 
-If `bin/shen-check.sh` and `bin/shen` exist, run the type check:
+Before writing any files, present the complete `specs/core.shen` content to the user. Explain:
+- Each datatype rule and what invariant it encodes
+- How each `verified` premise maps to a runtime check they'll need
+- Any simplifications or assumptions you made
+
+**Wait for the user to confirm** the specs look correct before proceeding. If they request changes, revise and present again.
+
+### Step 5: Install Shen-Go Binary
+
+After the user confirms the specs, check if `bin/shen` exists. If not, install it:
+
+```bash
+mkdir -p bin
+git clone https://github.com/tiancaiamao/shen-go /tmp/shen-go
+cd /tmp/shen-go && GOTOOLCHAIN=local make shen
+cp /tmp/shen-go/shen bin/shen
+rm -rf /tmp/shen-go
+```
+
+Also ensure `bin/shen-check.sh` exists and is executable. If not, create it (see the `loop-setup` skill for the template) and run `chmod +x bin/shen-check.sh`.
+
+Add `bin/shen` to `.gitignore` if not already there (it's a large binary that should be built locally).
+
+### Step 6: Write Files and Verify
+
+Write `specs/core.shen` with the confirmed content, then run the type check:
 
 ```bash
 ./bin/shen-check.sh
 ```
 
-The output should end with `RESULT: PASS`. If there's a type error, fix the rules until they pass.
+The output should end with `RESULT: PASS`. If there's a type error, fix the rules and re-run until they pass.
 
-### Step 5: Report
+### Step 7: Report
 
 Tell the user what types and invariants were encoded, and explain how each Shen rule maps to their domain requirements.
 
