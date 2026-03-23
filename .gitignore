@@ -1,0 +1,6 @@
+# Built binaries
+ralph
+bin/shen
+
+# Backpressure logs (generated at runtime)
+plans/backpressure.log
