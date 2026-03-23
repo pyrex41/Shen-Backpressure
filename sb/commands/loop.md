@@ -1,5 +1,5 @@
 ---
-name: ralph-shen-typed-loop
+name: loop
 description: Set up and run an autonomous AI coding loop with Shen sequent-calculus type backpressure
 ---
 

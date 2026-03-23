@@ -34,31 +34,39 @@ Most AI coding loops use tests as the only gate. Tests are empirical — they ch
 # Add this repo as a source
 skm sources add https://github.com/pyrex41/Shen-Backpressure
 
-# Install the skills into your project
+# Install the commands into your project
 cd your-project
-skm shen-backpressure
+skm sb
 ```
 
 ### Option B: Manual Claude Code install
 
-Copy the skill files directly:
+Copy the command files directly:
 
 ```bash
-mkdir -p .claude/skills/shen-backpressure
-cp Shen-Backpressure/shen-backpressure/skills/*.md .claude/skills/shen-backpressure/
+mkdir -p .claude/commands/sb
+cp Shen-Backpressure/sb/commands/*.md .claude/commands/sb/
 ```
 
-## Skills Included
+## Commands
 
-| Skill | Trigger | What it does |
-|-------|---------|-------------|
-| `ralph-shen-typed-loop` | "Ralph loop", "formal verification", "type-driven backpressure" | Full setup and execution of a backpressure loop |
-| `shen-init` | "generate Shen types", "create type specs", "Shen spec from description" | Generates `specs/core.shen` from natural language domain description |
-| `loop-setup` | "set up a loop", "configure Ralph harness", "scaffold backpressure loop" | Interactive setup: harness selection, directory scaffolding, prompt generation |
+| Command | Trigger | What it does |
+|---------|---------|-------------|
+| `/sb:loop` | "Ralph loop", "formal verification", "type-driven backpressure" | Full setup and execution of a backpressure loop |
+| `/sb:init` | "generate Shen types", "create type specs", "Shen spec from description" | Generates `specs/core.shen` from natural language domain description |
+| `/sb:setup` | "set up a loop", "configure Ralph harness", "scaffold backpressure loop" | Interactive setup: harness selection, directory scaffolding, prompt generation |
 
 ### Usage
 
-After installing, just describe what you want in Claude Code:
+After installing, invoke directly:
+
+```
+> /sb:setup
+> /sb:init
+> /sb:loop
+```
+
+Or describe what you want and Claude Code will activate the right command:
 
 ```
 > Set up a Ralph-Shen loop for my inventory management system
