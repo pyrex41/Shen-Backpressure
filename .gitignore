@@ -1,6 +1,12 @@
+# Claude Code local files
+.claude/
+
 # Built binaries
-/ralph
-bin/shen
+demo/*/ralph
+demo/*/bin/shen
 
 # Backpressure logs (generated at runtime)
-plans/backpressure.log
+demo/*/plans/backpressure.log
+
+# Thoughts directory (research notes)
+thoughts/
