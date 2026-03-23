@@ -1,6 +1,6 @@
 # Shen-Backpressure
 
-Autonomous coding loops with Shen sequent-calculus type system for formal backpressure. Works with any LLM harness: Claude Code, Cursor, Codex, Rho, or your own.
+AI coding skills for autonomous loops with **Shen sequent-calculus type backpressure**. Installable via [SKM](https://github.com/pyrex41/skill-manager) or manually as Claude Code skills.
 
 ## The Idea
 
@@ -26,51 +26,39 @@ Most AI coding loops use tests as the only gate. Tests are empirical — they ch
 └──────────────────────────────────────────────────────┘
 ```
 
-## Quick Start
+## Install
 
-### 1. Install Shen-Go (one-time)
-
-```bash
-git clone https://github.com/tiancaiamao/shen-go /tmp/shen-go
-cd /tmp/shen-go && GOTOOLCHAIN=local make shen
-cp shen /path/to/your/project/bin/
-```
-
-### 2. Run the included demo
+### Option A: SKM (recommended)
 
 ```bash
-cd Shen-Backpressure
+# Add this repo as a source
+skm sources add https://github.com/pyrex41/Shen-Backpressure
 
-# Build everything and run all gates
-make all
-
-# Run demo mode (single iteration, shows all gates passing)
-make demo
-
-# Run orchestrator in strict sequential mode
-make run
-
-# Run in relaxed parallel mode (tests + build concurrent, Shen serialized)
-make run-relaxed
+# Install the skills into your project
+cd your-project
+skm shen-backpressure
 ```
 
-### 3. Expected output
+### Option B: Manual Claude Code install
 
-```
-15:43:08 [ralph] Starting Ralph-Shen loop (mode=strict)
-15:43:08 [ralph] Tooling validated: go=OK, specs=OK, shen=OK
-15:43:08 [ralph] === Iteration 1 ===
-15:43:09 [ralph] PASS [go-test]
-15:43:09 [ralph] PASS [go-build]
-15:43:09 [ralph] PASS [shen-typecheck]
-15:43:09 [ralph] All gates passed on iteration 1
+Copy the skill files directly:
+
+```bash
+mkdir -p .claude/skills/shen-backpressure
+cp Shen-Backpressure/shen-backpressure/skills/*.md .claude/skills/shen-backpressure/
 ```
 
-## Using This for Your Own Project
+## Skills Included
 
-### Option A: Claude Code skills (recommended)
+| Skill | Trigger | What it does |
+|-------|---------|-------------|
+| `ralph-shen-typed-loop` | "Ralph loop", "formal verification", "type-driven backpressure" | Full setup and execution of a backpressure loop |
+| `shen-init` | "generate Shen types", "create type specs", "Shen spec from description" | Generates `specs/core.shen` from natural language domain description |
+| `loop-setup` | "set up a loop", "configure Ralph harness", "scaffold backpressure loop" | Interactive setup: harness selection, directory scaffolding, prompt generation |
 
-If you use Claude Code, the included skills let you set up a loop interactively:
+### Usage
+
+After installing, just describe what you want in Claude Code:
 
 ```
 > Set up a Ralph-Shen loop for my inventory management system
@@ -79,89 +67,9 @@ If you use Claude Code, the included skills let you set up a loop interactively:
 Claude Code will:
 1. Ask which LLM harness to use (Claude Code, Cursor, Codex, Rho, or custom)
 2. Ask you to describe your domain invariants in plain English
-3. Generate `specs/core.shen` with the formal type rules
+3. Generate `specs/core.shen` with formal type rules
 4. Generate the orchestrator, prompts, and plan files
 5. Run the gates to verify everything works
-
-See [Skills](#claude-code-skills) below.
-
-### Option B: Manual setup
-
-#### Step 1: Copy the scaffolding
-
-```bash
-mkdir -p my-project/{cmd/ralph,specs,prompts,plans,bin,src}
-cp Shen-Backpressure/cmd/ralph/main.go my-project/cmd/ralph/
-cp Shen-Backpressure/bin/shen-check.sh my-project/bin/
-cp Shen-Backpressure/Makefile my-project/
-cp /path/to/shen my-project/bin/
-```
-
-#### Step 2: Write your Shen spec
-
-Create `specs/core.shen` with datatypes for your domain. Example for an inventory system:
-
-```shen
-(datatype sku
-  X : string;
-  ==============
-  X : sku;)
-
-(datatype quantity
-  X : number;
-  (>= X 0) : verified;
-  ====================
-  X : quantity;)
-
-(datatype stock-entry
-  Item : sku;
-  Qty : quantity;
-  ========================
-  [Item Qty] : stock-entry;)
-
-(datatype withdrawal
-  Entry : stock-entry;
-  Amount : quantity;
-  (>= (head (tail Entry)) Amount) : verified;
-  ============================================
-  [Entry Amount] : safe-withdrawal;)
-```
-
-#### Step 3: Write your domain code + tests
-
-Write Go (or any language) code that enforces the same invariants at runtime. The Shen spec is the formal proof; the code is the implementation.
-
-#### Step 4: Configure the harness
-
-Edit `prompts/main_prompt.md` to describe your domain. Edit `plans/fix_plan.md` with your task list. The orchestrator reads these every iteration.
-
-#### Step 5: Choose your LLM harness
-
-The orchestrator's inner loop calls an LLM to propose changes. Configure this in `cmd/ralph/main.go` or via environment variable:
-
-| Harness | Command | Notes |
-|---------|---------|-------|
-| Claude Code | `claude -p "$(cat prompts/main_prompt.md)"` | Default, works out of the box |
-| Cursor | `cursor-agent -p "$(cat prompts/main_prompt.md)"` | Cursor's agent mode |
-| Codex | `codex -p "$(cat prompts/main_prompt.md)"` | OpenAI Codex CLI |
-| Rho | `rho-cli run --prompt prompts/main_prompt.md` | [github.com/pyrex41/rho](https://github.com/pyrex41/rho) |
-| Custom | Any CLI that reads a prompt and outputs code changes | Set `RALPH_HARNESS` env var |
-
-## Project Structure
-
-```
-├── cmd/ralph/main.go          # Go orchestrator — runs the loop
-├── bin/shen-check.sh           # Shen subprocess wrapper (handles shen-go EOF quirks)
-├── bin/shen                    # Shen-Go binary (build from source, gitignored)
-├── specs/core.shen             # Shen formal type specifications
-├── src/payment/                # Demo domain: payment processor
-│   ├── processor.go            #   Balance invariant enforcement
-│   └── processor_test.go       #   8 tests including invariant test
-├── prompts/main_prompt.md      # LLM instruction template
-├── plans/fix_plan.md           # Dynamic task plan
-├── Makefile                    # build / test / shen-check / demo
-└── go.mod
-```
 
 ## How Shen Backpressure Works
 
@@ -208,7 +116,7 @@ With Shen, the LLM must generate code that satisfies the *proof* — which cover
 
 ## Example Domains
 
-### Payment processor (included demo)
+### Payment processor ([demo included](demo/payment/))
 
 Invariant: *balance can never go negative through any sequence of transfers*
 
@@ -253,43 +161,23 @@ Invariant: *a resource can only be freed if it is currently allocated*
   [Alloc Requester] : safe-free;)
 ```
 
-## Modes
+## Demos
 
-- **Strict** (default): Gates run sequentially. Fail-fast on first error.
-- **Relaxed** (`--relaxed`): Go tests and build run in parallel via `errgroup`. Shen type check is always the final serialized gate.
+Working examples live in `demo/`:
 
-## Claude Code Skills
+- **[`demo/payment/`](demo/payment/)** — Payment processor with balance invariants
 
-Three skills are provided for Claude Code users:
+Each demo is a self-contained project with its own `go.mod`, `Makefile`, and Shen specs. See each demo's README for instructions.
 
-| Skill | Trigger | What it does |
-|-------|---------|-------------|
-| `ralph-shen-typed-loop` | "Ralph loop", "formal verification", "type-driven backpressure" | Full setup and execution of the loop |
-| `shen-init` | "generate Shen types", "create type specs", "Shen spec from description" | Generates `specs/core.shen` from natural language domain description |
-| `loop-setup` | "set up a loop", "configure Ralph harness", "scaffold backpressure loop" | Interactive setup: harness selection, directory scaffolding, prompt generation |
+## Supported Harnesses
 
-### Workflow
-
-```
-User: "I want to build an inventory system with Shen backpressure"
-
-Claude Code activates loop-setup:
-  → Asks: which harness? (claude -p / cursor-agent / codex / rho / custom)
-  → Asks: describe your invariants in English
-  → Generates specs/core.shen, prompts/, plans/, orchestrator
-  → Runs make all to verify gates pass
-  → Reports: "Ready. Run `make run` to start the loop."
-```
-
-## Troubleshooting
-
-| Problem | Cause | Fix |
-|---------|-------|-----|
-| `shen binary not found` | Haven't built shen-go | See [Install Shen-Go](#1-install-shen-go-one-time) |
-| `Shen type check timed out` | Turing-complete type system hit a loop | Simplify your sequent rules; check for circular dependencies |
-| `type error` in Shen output | A datatype rule is inconsistent | Read the error — it tells you which rule failed. Fix `specs/core.shen`. |
-| `shen-go requires go >= 1.25` | Your Go is too old for latest shen-go | Use `GOTOOLCHAIN=local` and patch go.mod, or upgrade Go |
-| Gates pass but LLM isn't called | Orchestrator demo mode only runs gates | Set `RALPH_HARNESS` and remove `RALPH_DEMO=1` for full loop |
+| Harness | Command | Notes |
+|---------|---------|-------|
+| Claude Code | `claude -p` | Default |
+| Cursor | `cursor-agent -p` | Cursor's agent mode |
+| Codex | `codex -p` | OpenAI Codex CLI |
+| Rho | `rho-cli run --prompt` | [github.com/pyrex41/rho](https://github.com/pyrex41/rho) |
+| Custom | Any CLI that reads stdin | Set `RALPH_HARNESS` env var |
 
 ## Design Decisions
 
