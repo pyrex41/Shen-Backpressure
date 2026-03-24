@@ -14,8 +14,10 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -157,9 +159,10 @@ func (st *SymbolTable) IsWrapper(shenType string) bool {
 type SExpr struct {
 	Atom     string
 	Children []*SExpr
+	IsLeaf   bool // true when this node is an intentional atom (set during parsing)
 }
 
-func (s *SExpr) IsAtom() bool { return s.Atom != "" || (s.Children == nil && s.Atom == "") }
+func (s *SExpr) IsAtom() bool { return s.IsLeaf }
 func (s *SExpr) IsCall() bool { return len(s.Children) > 0 }
 func (s *SExpr) Op() string {
 	if s.IsCall() && len(s.Children) > 0 && s.Children[0].Atom != "" {
@@ -181,7 +184,7 @@ func (s *SExpr) String() string {
 func parseSExpr(input string) *SExpr {
 	tokens := tokenize(strings.TrimSpace(input))
 	if len(tokens) == 0 {
-		return &SExpr{Atom: ""}
+		return &SExpr{Atom: "", IsLeaf: true}
 	}
 	expr, _ := parseTokens(tokens, 0)
 	return expr
@@ -213,7 +216,7 @@ func tokenize(s string) []string {
 
 func parseTokens(tokens []string, pos int) (*SExpr, int) {
 	if pos >= len(tokens) {
-		return &SExpr{Atom: ""}, pos
+		return &SExpr{Atom: "", IsLeaf: true}, pos
 	}
 	if tokens[pos] == "(" {
 		pos++
@@ -228,7 +231,7 @@ func parseTokens(tokens []string, pos int) (*SExpr, int) {
 		}
 		return &SExpr{Children: children}, pos
 	}
-	return &SExpr{Atom: tokens[pos]}, pos + 1
+	return &SExpr{Atom: tokens[pos], IsLeaf: true}, pos + 1
 }
 
 // ============================================================================
@@ -304,7 +307,7 @@ func (st *SymbolTable) accessFields(baseGo string, fields []FieldInfo, isHead bo
 
 	if isHead {
 		f := fields[0]
-		code := baseGo + "." + toPascalCase(f.ShenName)
+		code := baseGo + "." + toCamelCase(f.ShenName)
 		return &ResolvedExpr{GoCode: code, GoType: shenTypeToGo(f.ShenType), ShenType: f.ShenType}, true
 	}
 
@@ -316,7 +319,7 @@ func (st *SymbolTable) accessFields(baseGo string, fields []FieldInfo, isHead bo
 	if len(rest) == 1 {
 		// Single field remaining — resolve directly
 		f := rest[0]
-		code := baseGo + "." + toPascalCase(f.ShenName)
+		code := baseGo + "." + toCamelCase(f.ShenName)
 		return &ResolvedExpr{GoCode: code, GoType: shenTypeToGo(f.ShenType), ShenType: f.ShenType}, true
 	}
 	// Multiple fields remaining — return multi-field intermediate for further chaining
@@ -335,7 +338,7 @@ func (st *SymbolTable) resolveBinOp(expr *SExpr, varMap map[string]string, goOp 
 	if !ok {
 		return nil, false
 	}
-	goLhs := st.unwrapNumeric(lhs)
+	goLhs := st.unwrap(lhs)
 	goRhs := rhs.GoCode
 	code := fmt.Sprintf("%s %s %s", goLhs, goOp, goRhs)
 	if intCast {
@@ -352,7 +355,7 @@ func (st *SymbolTable) resolveLength(expr *SExpr, varMap map[string]string) (*Re
 	if !ok {
 		return nil, false
 	}
-	goInner := st.unwrapString(inner)
+	goInner := st.unwrap(inner)
 	return &ResolvedExpr{GoCode: fmt.Sprintf("len(%s)", goInner), GoType: "int", ShenType: "number"}, true
 }
 
@@ -367,14 +370,7 @@ func (st *SymbolTable) resolveNot(expr *SExpr, varMap map[string]string) (*Resol
 	return &ResolvedExpr{GoCode: fmt.Sprintf("!(%s)", inner.GoCode), GoType: "bool", ShenType: "boolean"}, true
 }
 
-func (st *SymbolTable) unwrapNumeric(r *ResolvedExpr) string {
-	if st.IsWrapper(r.ShenType) {
-		return r.GoCode + ".Val()"
-	}
-	return r.GoCode
-}
-
-func (st *SymbolTable) unwrapString(r *ResolvedExpr) string {
+func (st *SymbolTable) unwrap(r *ResolvedExpr) string {
 	if st.IsWrapper(r.ShenType) {
 		return r.GoCode + ".Val()"
 	}
@@ -414,8 +410,8 @@ func (st *SymbolTable) translateCmp(expr *SExpr, varMap map[string]string, op st
 	if !lok || !rok {
 		return fmt.Sprintf("/* TODO: %s */ true", expr.String()), "could not resolve comparison"
 	}
-	goL := st.unwrapNumeric(lhs)
-	goR := st.unwrapNumeric(rhs)
+	goL := st.unwrap(lhs)
+	goR := st.unwrap(rhs)
 	return fmt.Sprintf("%s %s %s", goL, op, goR),
 		fmt.Sprintf("%s must be %s %s", lhs.GoCode, op, rhs.GoCode)
 }
@@ -441,10 +437,10 @@ func (st *SymbolTable) translateEq(expr *SExpr, varMap map[string]string) (strin
 	goR := rhs.GoCode
 	// Unwrap if comparing wrapped type to primitive
 	if st.IsWrapper(lhs.ShenType) && isPrimitive(rhs.ShenType) {
-		goL = st.unwrapNumeric(lhs)
+		goL = st.unwrap(lhs)
 	}
 	if st.IsWrapper(rhs.ShenType) && isPrimitive(lhs.ShenType) {
-		goR = st.unwrapNumeric(rhs)
+		goR = st.unwrap(rhs)
 	}
 	return fmt.Sprintf("%s == %s", goL, goR),
 		fmt.Sprintf("%s must equal %s", lhs.GoCode, rhs.GoCode)
@@ -492,10 +488,10 @@ func (st *SymbolTable) structuralMatchFallback(expr *SExpr, varMap map[string]st
 	for _, lf := range lhsTarget {
 		for _, rf := range rhsTarget {
 			if lf.ShenType == rf.ShenType && !isPrimitive(lf.ShenType) {
-				goL := toCamelCase(lhsVar) + "." + toPascalCase(lf.ShenName)
-				goR := toCamelCase(rhsVar) + "." + toPascalCase(rf.ShenName)
+				goL := toCamelCase(lhsVar) + "." + toCamelCase(lf.ShenName)
+				goR := toCamelCase(rhsVar) + "." + toCamelCase(rf.ShenName)
 				return fmt.Sprintf("%s == %s", goL, goR),
-					fmt.Sprintf("%s.%s must equal %s.%s", toCamelCase(lhsVar), toPascalCase(lf.ShenName), toCamelCase(rhsVar), toPascalCase(rf.ShenName)),
+					fmt.Sprintf("%s.%s must equal %s.%s", toCamelCase(lhsVar), toCamelCase(lf.ShenName), toCamelCase(rhsVar), toCamelCase(rf.ShenName)),
 					true
 			}
 		}
@@ -505,10 +501,10 @@ func (st *SymbolTable) structuralMatchFallback(expr *SExpr, varMap map[string]st
 	for _, lf := range lhsInfo.Fields {
 		for _, rf := range rhsInfo.Fields {
 			if lf.ShenType == rf.ShenType && !isPrimitive(lf.ShenType) {
-				goL := toCamelCase(lhsVar) + "." + toPascalCase(lf.ShenName)
-				goR := toCamelCase(rhsVar) + "." + toPascalCase(rf.ShenName)
+				goL := toCamelCase(lhsVar) + "." + toCamelCase(lf.ShenName)
+				goR := toCamelCase(rhsVar) + "." + toCamelCase(rf.ShenName)
 				return fmt.Sprintf("%s == %s", goL, goR),
-					fmt.Sprintf("%s.%s must equal %s.%s", toCamelCase(lhsVar), toPascalCase(lf.ShenName), toCamelCase(rhsVar), toPascalCase(rf.ShenName)),
+					fmt.Sprintf("%s.%s must equal %s.%s", toCamelCase(lhsVar), toCamelCase(lf.ShenName), toCamelCase(rhsVar), toCamelCase(rf.ShenName)),
 					true
 			}
 		}
@@ -575,14 +571,40 @@ func (st *SymbolTable) translateNotPremise(expr *SExpr, varMap map[string]string
 }
 
 func (st *SymbolTable) translateElementPremise(expr *SExpr, varMap map[string]string) (string, string) {
-	if len(expr.Children) < 2 {
-		return "/* bad element? */ true", "element? needs args"
+	if len(expr.Children) < 3 {
+		return "/* TODO: element? */ true", "element? needs args"
 	}
 	resolved, ok := st.resolveExpr(expr.Children[1], varMap)
 	if !ok {
 		return "/* TODO: element? */ true", "could not resolve element?"
 	}
-	return fmt.Sprintf("/* element? %s in set */ true", resolved.GoCode),
+	// Collect set elements from remaining children.
+	// Shen list [a b c] tokenizes as atoms with brackets attached,
+	// e.g. "[a", "b", "c]" — strip brackets to get clean element names.
+	var elements []string
+	for i := 2; i < len(expr.Children); i++ {
+		atom := expr.Children[i].Atom
+		if atom == "" {
+			continue
+		}
+		atom = strings.TrimLeft(atom, "[")
+		atom = strings.TrimRight(atom, "]")
+		if atom != "" {
+			elements = append(elements, atom)
+		}
+	}
+	if len(elements) > 0 {
+		varCode := st.unwrap(resolved)
+		// Generate a map literal membership check
+		var pairs []string
+		for _, e := range elements {
+			pairs = append(pairs, fmt.Sprintf("%q: true", e))
+		}
+		mapLiteral := "map[string]bool{" + strings.Join(pairs, ", ") + "}"
+		return fmt.Sprintf("%s[%s]", mapLiteral, varCode),
+			resolved.GoCode + " must be in the valid set"
+	}
+	return fmt.Sprintf("/* TODO: element? %s */ true", resolved.GoCode),
 		resolved.GoCode + " must be in the valid set"
 }
 
@@ -659,6 +681,7 @@ func parseDatatype(block string) *Datatype {
 			if seenInf {
 				flush()
 				premLines, concLines = nil, nil
+				seenInf = false
 			}
 			seenInf = true
 			continue
@@ -731,12 +754,14 @@ func buildRule(premLines, concLines []string) *Rule {
 
 func shenTypeToGo(t string) string {
 	switch t {
-	case "string":
+	case "string", "symbol":
 		return "string"
 	case "number":
 		return "float64"
+	case "boolean":
+		return "bool"
 	case "":
-		return "interface{}"
+		return "any"
 	default:
 		return toPascalCase(t)
 	}
@@ -766,24 +791,16 @@ func toCamelCase(s string) string {
 	return string(runes)
 }
 
-func isPrimitive(t string) bool { return t == "string" || t == "number" }
+func isPrimitive(t string) bool {
+	return t == "string" || t == "number" || t == "boolean" || t == "symbol"
+}
 
 func isNumericLiteral(s string) bool {
-	if len(s) == 0 {
+	if s == "" {
 		return false
 	}
-	for i, ch := range s {
-		if ch == '-' && i == 0 {
-			continue
-		}
-		if ch == '.' {
-			continue
-		}
-		if ch < '0' || ch > '9' {
-			return false
-		}
-	}
-	return true
+	_, err := strconv.ParseFloat(s, 64)
+	return err == nil
 }
 
 // ============================================================================
@@ -813,15 +830,31 @@ func classify(dt Datatype, st *SymbolTable) []GeneratedType {
 	return out
 }
 
-func generateGo(types []Datatype, st *SymbolTable, pkg string) string {
+func generateGo(types []Datatype, st *SymbolTable, pkg string, specPath string) string {
 	var b strings.Builder
-	b.WriteString("// Code generated by shengen from specs/core.shen. DO NOT EDIT.\n")
+	b.WriteString(fmt.Sprintf("// Code generated by shengen from %s. DO NOT EDIT.\n", specPath))
 	b.WriteString("//\n")
 	b.WriteString("// These types enforce Shen sequent-calculus invariants at the Go level.\n")
 	b.WriteString("// Constructors are the ONLY way to create these types — bypassing them\n")
 	b.WriteString("// is a violation of the formal spec.\n\n")
 	b.WriteString(fmt.Sprintf("package %s\n\n", pkg))
-	b.WriteString("import (\n\t\"fmt\"\n)\n\n")
+
+	// Only import fmt if there are constrained or guarded types that use fmt.Errorf
+	needsFmt := false
+	for _, dt := range types {
+		for _, gt := range classify(dt, st) {
+			if gt.Category == "constrained" || gt.Category == "guarded" {
+				needsFmt = true
+				break
+			}
+		}
+		if needsFmt {
+			break
+		}
+	}
+	if needsFmt {
+		b.WriteString("import (\n\t\"fmt\"\n)\n\n")
+	}
 
 	for _, dt := range types {
 		for _, gt := range classify(dt, st) {
@@ -875,22 +908,27 @@ func generateComposite(b *strings.Builder, gt GeneratedType) {
 	b.WriteString(fmt.Sprintf("type %s struct {\n", gt.GoName))
 	var params []string
 	for _, p := range gt.Rule.Premises {
-		b.WriteString(fmt.Sprintf("\t%s %s\n", toPascalCase(p.VarName), shenTypeToGo(p.TypeName)))
+		b.WriteString(fmt.Sprintf("\t%s %s\n", toCamelCase(p.VarName), shenTypeToGo(p.TypeName)))
 		params = append(params, fmt.Sprintf("%s %s", toCamelCase(p.VarName), shenTypeToGo(p.TypeName)))
 	}
 	b.WriteString("}\n\n")
 	b.WriteString(fmt.Sprintf("func New%s(%s) %s {\n\treturn %s{\n", gt.GoName, strings.Join(params, ", "), gt.GoName, gt.GoName))
 	for _, p := range gt.Rule.Premises {
-		b.WriteString(fmt.Sprintf("\t\t%s: %s,\n", toPascalCase(p.VarName), toCamelCase(p.VarName)))
+		b.WriteString(fmt.Sprintf("\t\t%s: %s,\n", toCamelCase(p.VarName), toCamelCase(p.VarName)))
 	}
 	b.WriteString("\t}\n}\n\n")
+	// Accessor methods for each field
+	for _, p := range gt.Rule.Premises {
+		b.WriteString(fmt.Sprintf("func (t %s) %s() %s { return t.%s }\n\n",
+			gt.GoName, toPascalCase(p.VarName), shenTypeToGo(p.TypeName), toCamelCase(p.VarName)))
+	}
 }
 
 func generateGuarded(b *strings.Builder, gt GeneratedType, st *SymbolTable) {
 	b.WriteString(fmt.Sprintf("type %s struct {\n", gt.GoName))
 	var params []string
 	for _, p := range gt.Rule.Premises {
-		b.WriteString(fmt.Sprintf("\t%s %s\n", toPascalCase(p.VarName), shenTypeToGo(p.TypeName)))
+		b.WriteString(fmt.Sprintf("\t%s %s\n", toCamelCase(p.VarName), shenTypeToGo(p.TypeName)))
 		params = append(params, fmt.Sprintf("%s %s", toCamelCase(p.VarName), shenTypeToGo(p.TypeName)))
 	}
 	b.WriteString("}\n\n")
@@ -906,9 +944,14 @@ func generateGuarded(b *strings.Builder, gt GeneratedType, st *SymbolTable) {
 	}
 	b.WriteString(fmt.Sprintf("\treturn %s{\n", gt.GoName))
 	for _, p := range gt.Rule.Premises {
-		b.WriteString(fmt.Sprintf("\t\t%s: %s,\n", toPascalCase(p.VarName), toCamelCase(p.VarName)))
+		b.WriteString(fmt.Sprintf("\t\t%s: %s,\n", toCamelCase(p.VarName), toCamelCase(p.VarName)))
 	}
 	b.WriteString("\t}, nil\n}\n\n")
+	// Accessor methods for each field
+	for _, p := range gt.Rule.Premises {
+		b.WriteString(fmt.Sprintf("func (t %s) %s() %s { return t.%s }\n\n",
+			gt.GoName, toPascalCase(p.VarName), shenTypeToGo(p.TypeName), toCamelCase(p.VarName)))
+	}
 }
 
 func generateAlias(b *strings.Builder, gt GeneratedType) {
@@ -919,25 +962,7 @@ func generateAlias(b *strings.Builder, gt GeneratedType) {
 // Main
 // ============================================================================
 
-func main() {
-	path := "specs/core.shen"
-	if len(os.Args) > 1 {
-		path = os.Args[1]
-	}
-	pkg := "shenguard"
-	if len(os.Args) > 2 {
-		pkg = os.Args[2]
-	}
-
-	types, err := parseFile(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-
-	st := newSymbolTable()
-	st.Build(types)
-
+func printSymbolTable(types []Datatype, st *SymbolTable, path string) {
 	fmt.Fprintf(os.Stderr, "Parsed %d datatypes from %s\n\n", len(types), path)
 	fmt.Fprintf(os.Stderr, "Symbol table:\n")
 	for _, dt := range types {
@@ -972,6 +997,46 @@ func main() {
 		}
 	}
 	fmt.Fprintln(os.Stderr)
+}
 
-	fmt.Print(generateGo(types, st, pkg))
+func main() {
+	outFile := flag.String("out", "", "Output file path (default: stdout)")
+	dryRun := flag.Bool("dry-run", false, "Parse and show symbol table only, don't generate code")
+	flag.Parse()
+
+	path := "specs/core.shen"
+	if flag.NArg() > 0 {
+		path = flag.Arg(0)
+	}
+	pkg := "shenguard"
+	if flag.NArg() > 1 {
+		pkg = flag.Arg(1)
+	}
+
+	types, err := parseFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	st := newSymbolTable()
+	st.Build(types)
+
+	printSymbolTable(types, st, path)
+
+	if *dryRun {
+		return
+	}
+
+	output := generateGo(types, st, pkg, path)
+
+	if *outFile != "" {
+		if err := os.WriteFile(*outFile, []byte(output), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "error writing %s: %v\n", *outFile, err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "Generated %s from %s (package %s)\n", *outFile, path, pkg)
+	} else {
+		fmt.Print(output)
+	}
 }
