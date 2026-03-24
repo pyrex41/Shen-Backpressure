@@ -5,6 +5,8 @@
 demo/*/ralph
 demo/*/bin/shen
 demo/*/server
+bin/shengen
+cmd/shengen/shengen
 
 # Databases and WAL files
 *.db

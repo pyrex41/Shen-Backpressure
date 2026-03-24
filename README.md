@@ -1,29 +1,30 @@
 # Shen-Backpressure
 
-AI coding skills for autonomous loops with **Shen sequent-calculus type backpressure**. Installable via [SKM](https://github.com/pyrex41/skill-manager) or manually as Claude Code skills.
+AI coding skills for autonomous loops with **Shen sequent-calculus type backpressure** and a **Go codegen bridge**. Installable via [SKM](https://github.com/pyrex41/skill-manager) or manually as Claude Code skills.
 
 ## The Idea
 
-Most AI coding loops use tests as the only gate. Tests are empirical — they check specific cases. Shen adds a **deductive** gate: sequent-calculus type proofs that must hold for *all* cases. If the LLM breaks an invariant, the type check fails and the loop cannot advance. This is **backpressure** — the system rejects invalid states before they accumulate.
+Most AI coding loops use tests as the only gate. Tests are empirical — they check specific cases. This project adds two deductive gates:
+
+1. **Shen type checking** — sequent-calculus proofs that must hold for *all* cases
+2. **shengen codegen** — generated Go types with opaque constructors that enforce those proofs at compile time
+
+If the LLM breaks an invariant, either the type check fails (Shen) or the code won't compile (Go). This is **backpressure** — the system rejects invalid states before they accumulate.
 
 ```
-┌──────────────────────────────────────────────────────┐
-│                   Ralph Loop                          │
-│                                                       │
-│  ┌─────────┐    ┌─────────┐    ┌──────────────────┐  │
-│  │ LLM     │───▶│ Apply   │───▶│ Gates            │  │
-│  │ harness │    │ changes │    │                  │  │
-│  └─────────┘    └─────────┘    │ 1. go test       │  │
-│       ▲                        │ 2. go build      │  │
-│       │                        │ 3. shen (tc +)   │  │
-│       │                        └────────┬─────────┘  │
-│       │                                 │             │
-│       │    ┌──────────────┐    ALL PASS? │             │
-│       │    │ backpressure │◀── NO ───────┘             │
-│       │    │ log errors   │                           │
-│       │    └──────┬───────┘                           │
-│       └───────────┘           YES ──▶ commit + next   │
-└──────────────────────────────────────────────────────┘
+specs/core.shen          Shen sequent-calculus type rules
+       |
+       v  (shengen)
+internal/shenguard/      Generated Go guard types (opaque constructors)
+       |
+       v  (import)
+Application code         Uses guard types at domain boundaries
+       |
+       v  (four gates)
+Ralph loop               shengen -> go test -> go build -> shen tc+
+       |
+       v  (fail?)
+Backpressure             Gate errors injected into next LLM prompt
 ```
 
 ## Install
@@ -41,92 +42,48 @@ skm sb
 
 ### Option B: Manual Claude Code install
 
-Copy the command files directly:
-
 ```bash
-mkdir -p .claude/commands/sb
+mkdir -p .claude/commands/sb .claude/skills/shen-backpressure
 cp Shen-Backpressure/sb/commands/*.md .claude/commands/sb/
+cp Shen-Backpressure/sb/skills/shen-backpressure/SKILL.md .claude/skills/shen-backpressure/
 ```
 
 ## Commands
 
-| Command | Trigger | What it does |
-|---------|---------|-------------|
-| `/sb:loop` | "Ralph loop", "formal verification", "type-driven backpressure" | Full setup and execution of a backpressure loop |
-| `/sb:init` | "generate Shen types", "create type specs", "Shen spec from description" | Generates `specs/core.shen` from natural language domain description |
-| `/sb:setup` | "set up a loop", "configure Ralph harness", "scaffold backpressure loop" | Interactive setup: harness selection, directory scaffolding, prompt generation |
+| Command | What it does |
+|---------|-------------|
+| `/sb:scaffold` | All-in-one: domain description -> specs -> guard types -> orchestrator -> four gates verified |
+| `/sb:setup` | Scaffold directories, four-gate orchestrator, shengen, prompt, plan |
+| `/sb:init` | Generate Shen specs from English, run shengen to produce Go guard types |
+| `/sb:loop` | Verify prerequisites, confirm config, launch the Ralph loop |
 
-### Usage
-
-After installing, invoke directly:
-
-```
-> /sb:setup
-> /sb:init
-> /sb:loop
-```
-
-Or describe what you want and Claude Code will activate the right command:
+### Quick Start
 
 ```
-> Set up a Ralph-Shen loop for my inventory management system
+> /sb:scaffold
 ```
 
-Claude Code will:
-1. Ask which LLM harness to use (Claude Code, Cursor, Codex, Rho, or custom)
-2. Ask you to describe your domain invariants in plain English
-3. Generate `specs/core.shen` with formal type rules
-4. Generate the orchestrator, prompts, and plan files
-5. Run the gates to verify everything works
-
-## How Shen Backpressure Works
-
-### The three gates
-
-Every iteration of the loop must pass all three gates before advancing:
-
-1. **`go test ./...`** — Empirical correctness. Do the specific test cases pass?
-2. **`go build ./cmd/ralph`** — Compilation. Does the code even compile?
-3. **`shen (tc +)`** — Formal proof. Do the sequent-calculus types hold for *all* possible inputs?
-
-### Sequent calculus in 30 seconds
-
-Shen's type system uses sequent calculus — a proof system where you write rules of the form:
-
+Or step by step:
 ```
-premise1;
-premise2;
-premise3;
-============
-conclusion;
+> /sb:setup    # scaffold the infrastructure
+> /sb:init     # generate specs and guard types
+> /sb:loop     # launch the loop
 ```
 
-If all premises are true, the conclusion follows. Example:
+## The Four Gates
 
-```shen
-(datatype balance-invariant
-  Bal : number;                        \* premise: Bal is a number *\
-  Tx : transaction;                    \* premise: Tx is a transaction *\
-  (>= Bal (head Tx)) : verified;      \* premise: balance covers amount *\
-  =======================================
-  [Bal Tx] : balance-checked;)         \* conclusion: this pair is safe *\
-```
+Every iteration of the Ralph loop must pass all four gates:
 
-When Shen runs `(tc +)`, it verifies that all these rules are internally consistent. If someone adds code that could create a `balance-checked` pair without proving the balance covers the amount, the type check fails.
+| Gate | Command | What it catches |
+|------|---------|----------------|
+| 1. shengen | `./bin/shengen-codegen.sh` | Regenerates Go guard types from spec. Catches stale types. |
+| 2. go test | `go test ./...` | Tests against regenerated types. Catches runtime invariant violations. |
+| 3. go build | `go build ./cmd/server` | Compiles against regenerated types. Catches type signature mismatches. |
+| 4. shen tc+ | `./bin/shen-check.sh` | Verifies spec internal consistency. Catches contradictory rules. |
 
-### Why this matters for AI coding
+### The Codegen Bridge (shengen)
 
-Without Shen, an LLM might:
-1. Generate code that passes the 5 specific test cases you wrote
-2. But violates the invariant for case #6 that you didn't think to test
-
-With Shen, the LLM must generate code that satisfies the *proof* — which covers all cases by construction. The backpressure is: "your code is logically wrong, here's the type error, fix it."
-
-## Example Domains
-
-### Payment processor ([demo included](demo/payment/))
-
-Invariant: *balance can never go negative through any sequence of transfers*
+shengen parses `specs/core.shen` and emits Go types with **unexported fields** and **validated constructors**. You can't create a guard type without going through its constructor, and the constructor enforces the spec's invariants.
 
 ```shen
 (datatype balance-invariant
@@ -137,59 +94,67 @@ Invariant: *balance can never go negative through any sequence of transfers*
   [Bal Tx] : balance-checked;)
 ```
 
-### State machine (no deadlocks)
+Becomes:
 
-Invariant: *every reachable state has at least one valid transition*
+```go
+type BalanceChecked struct {
+    Bal float64
+    Tx  Transaction
+}
 
-```shen
-(datatype live-state
-  S : state;
-  Transitions : (list transition);
-  (not (= Transitions [])) : verified;
-  =====================================
-  [S Transitions] : live-state;)
+func NewBalanceChecked(bal float64, tx Transaction) (BalanceChecked, error) {
+    if !(bal >= tx.Amount.Val()) {
+        return BalanceChecked{}, fmt.Errorf("bal must be >= tx.Amount")
+    }
+    return BalanceChecked{Bal: bal, Tx: tx}, nil
+}
 ```
 
-### Resource allocator (no double-free)
+The LLM cannot bypass this — `Amount{v: 50}` won't compile (unexported `v`), and `SafeTransfer` requires a `BalanceChecked` proof that can only come from `NewBalanceChecked`.
 
-Invariant: *a resource can only be freed if it is currently allocated*
+### Guard Type Patterns
 
-```shen
-(datatype allocated-resource
-  R : resource-id;
-  Owner : process-id;
-  ========================
-  [R Owner] : allocated;)
-
-(datatype safe-free
-  Alloc : allocated;
-  Requester : process-id;
-  (= (tail Alloc) Requester) : verified;
-  =========================================
-  [Alloc Requester] : safe-free;)
-```
+| Shen pattern | Go output | Constructor |
+|-------------|-----------|-------------|
+| Wrapper (`X : string; ==> X : account-id`) | `struct{ v string }` | `NewAccountId(string) AccountId` |
+| Constrained (`(>= X 0) : verified`) | `struct{ v float64 }` | `NewAmount(float64) (Amount, error)` |
+| Composite (`[A B C] : transaction`) | `struct{ A, B, C }` | `NewTransaction(A, B, C) Transaction` |
+| Guarded (`(>= Bal (head Tx)) : verified`) | `struct{ Bal, Tx }` | `NewBalanceChecked(...) (BalanceChecked, error)` |
+| Proof chain (`Check : balance-checked`) | `struct{ Tx, Check }` | `NewSafeTransfer(Transaction, BalanceChecked) SafeTransfer` |
 
 ## Demos
 
-Working examples live in `demo/`:
-
 - **[`demo/payment/`](demo/payment/)** — Payment processor with balance invariants
+- **[`demo/email_crud/`](demo/email_crud/)** — Personalized email campaigns with demographic-based copy
 
-Each demo is a self-contained project with its own `go.mod`, `Makefile`, and Shen specs. See each demo's README for instructions.
+Reference guard type output in [`examples/`](examples/).
+
+## Project Structure
+
+```
+cmd/shengen/             Codegen tool source (stdlib only)
+sb/                      SKM bundle
+  commands/              /sb:scaffold, /sb:setup, /sb:init, /sb:loop
+  skills/                Auto-activated skill description
+  AGENT_PROMPT.md        Reference manual for inner LLM harness
+examples/                Reference shengen output for each domain
+demo/                    Working demo projects
+```
 
 ## Supported Harnesses
 
-| Harness | Command | Notes |
-|---------|---------|-------|
-| Claude Code | `claude -p` | Default |
-| Cursor | `cursor-agent -p` | Cursor's agent mode |
-| Codex | `codex -p` | OpenAI Codex CLI |
-| Rho | `rho-cli run --prompt` | [github.com/pyrex41/rho](https://github.com/pyrex41/rho) |
-| Custom | Any CLI that reads stdin | Set `RALPH_HARNESS` env var |
+| Harness | Command |
+|---------|---------|
+| Claude Code | `claude -p` (default) |
+| Cursor | `cursor-agent -p` |
+| Codex | `codex -p` |
+| Rho | `rho-cli run --prompt` |
+| Custom | Set `RALPH_HARNESS` env var |
 
 ## Design Decisions
 
-- **Why Go for the orchestrator?** Fast compilation, trivial cross-compilation, `errgroup` for parallel gates, static binary output.
-- **Why Shen over Coq/Lean/Agda?** Shen is Turing-complete (real programs, not just proofs), has a Lisp syntax (LLMs handle it well), and the type checker runs as a subprocess (no compilation step).
-- **Why shell wrapper for shen-go?** `shen-go` loops on EOF instead of exiting cleanly. The wrapper script manages the subprocess lifecycle.
-- **Why three gates instead of just Shen?** Defense in depth. Tests catch runtime bugs Shen can't see (I/O, timing). Shen catches logical bugs tests don't cover. Build catches syntax.
+- **Why shengen?** Shen proves invariants deductively but doesn't generate Go code. shengen bridges the gap — the formal spec becomes compile-time enforcement via opaque types.
+- **Why four gates?** Gate 1 (shengen) ensures generated types stay in sync with specs. Gate 2 (tests) catches runtime violations. Gate 3 (build) catches type mismatches from spec changes. Gate 4 (shen tc+) catches inconsistent specs. No gap.
+- **Why opaque constructors?** Unexported `v` fields mean the Go compiler enforces the spec. You literally cannot create an `Amount` without going through `NewAmount`, which validates `>= 0`.
+- **Why Go for the orchestrator?** Fast compilation, `errgroup` for parallel gates, static binary.
+- **Why Shen over Coq/Lean/Agda?** Turing-complete, Lisp syntax LLMs handle well, runs as subprocess.
