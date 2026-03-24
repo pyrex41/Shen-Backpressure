@@ -152,6 +152,14 @@ demo/                    Working demo projects
 | Rho | `rho-cli run --prompt` |
 | Custom | Set `RALPH_HARNESS` env var |
 
+## Further Reading
+
+- **[Don't Waste Your Backpressure](https://banay.me/dont-waste-your-backpressure/)** — The core principle behind this project. AI agents that work autonomously need automated feedback on quality and correctness. Without capturing backpressure metrics, you can't delegate longer-horizon tasks with confidence. Shen-Backpressure makes this concrete: every iteration gets formal verification feedback, not just test results.
+
+- **[Ralph](https://ghuntley.com/ralph/)** — The technique this project implements. Ralph is a bash loop that repeatedly calls an LLM harness (`while :; do cat PROMPT.md | claude-code; done`). The LLM does the coding, the loop provides structure and error recovery. This project adds Shen type checking and codegen guards as backpressure within that loop.
+
+- **[The Loop](https://ghuntley.com/loop/)** — Why loop-based development changes the economics of software. Instead of building brick-by-brick, you allocate specs and goals to an autonomous agent and let it cycle. The key insight: watch the loop itself — failures become learning opportunities fed back as backpressure, not dead ends.
+
 ## Design Decisions
 
 - **Why shengen?** Shen proves invariants deductively but doesn't generate Go code. shengen bridges the gap — the formal spec becomes compile-time enforcement via opaque types.
