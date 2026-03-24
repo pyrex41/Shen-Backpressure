@@ -1,45 +1,40 @@
 ---
 name: scaffold
-description: All-in-one setup for a Shen-backpressure project with codegen bridge. Gathers domain description, generates specs, builds shengen, produces guard types, scaffolds four-gate orchestrator, and verifies everything works.
+description: All-in-one setup for a Shen-backpressure project with Ralph loop. Combines /sb:init (specs, shengen, guard types) + /sb:loop (orchestrator, prompt, plan) into a single flow. Goes from zero to running four-gate verification.
 ---
 
-# Scaffold — Full Shen-Backpressure Setup
+# Scaffold — Full Setup in One Command
 
-One command to go from "I have a Go project" to "four-gate formal verification is running." This combines `/sb:setup` + `/sb:init` into a single flow.
+Combines `/sb:init` + `/sb:loop` into one flow. Goes from "I have a project" to "four-gate formal verification is running with a Ralph loop." If you don't want Ralph, use `/sb:init` instead.
 
-You scaffold everything and verify it works. You do NOT run the loop or implement domain code.
+You scaffold and verify everything. You do NOT run the loop or implement domain code.
 
 ## Step 1: Gather Everything
 
 Ask the user:
 
-1. **Domain description**: What are you building? What are the key entities, invariants, and operations?
-2. **LLM harness**: Which tool will Ralph call each iteration?
-   - `claude -p` (default), `cursor-agent -p`, `codex -p`, `rho-cli run --prompt`, or custom
-3. **Plan items**: What tasks should the loop work through? (becomes `- [ ]` items)
-4. **Module name**: Go module path for `go.mod` (e.g., `github.com/user/project`)
+1. **Domain description**: Entities, invariants, operations — plain English
+2. **Target language**: Go (default) or TypeScript for guard types
+3. **LLM harness**: `claude -p` (default), `cursor-agent -p`, `codex -p`, or custom
+4. **Build/test commands**: What builds and tests the project
+5. **Plan items**: What tasks should the loop work through
+6. **Module name**: e.g., `github.com/user/project`
 
-## Step 2: Create Directory Structure
+## Step 2: Create Directories
 
 ```bash
-mkdir -p cmd/ralph cmd/shengen bin specs prompts plans internal/shenguard
+mkdir -p cmd/ralph bin specs prompts plans internal/shenguard
 ```
 
 ## Step 3: Generate Shen Specs
 
-Translate the user's domain description into `specs/core.shen` with sequent-calculus datatypes. Follow the pattern hierarchy: wrappers → constrained → composites → guarded → proof chains.
+Draft `specs/core.shen` from the domain description. Use the standard pattern hierarchy: wrappers → constrained → composites → guarded → proof chains.
 
-**Present the complete spec to the user for confirmation before writing.** Explain each type and what invariant it encodes. Revise if requested.
+**Present to the user for confirmation before writing.** Explain each type. Revise if requested.
 
-## Step 4: Build shengen
+## Step 4: Install Tooling
 
-Place shengen source at `cmd/shengen/main.go` (copy from Shen-Backpressure repo) and create `cmd/shengen/go.mod`:
-
-```bash
-cd cmd/shengen && go build -o ../../bin/shengen .
-```
-
-Create `bin/shengen-codegen.sh` and `chmod +x`.
+Install shen-go, shen-check.sh, shengen, and shengen-codegen.sh. Build shengen from source.
 
 ## Step 5: Generate Guard Types
 
@@ -47,84 +42,45 @@ Create `bin/shengen-codegen.sh` and `chmod +x`.
 ./bin/shengen-codegen.sh specs/core.shen shenguard internal/shenguard/guards_gen.go
 ```
 
-Show the user what was generated — the Go types, constructors, and which ones return errors (constrained and guarded types).
+Show the user what was generated.
 
-## Step 6: Install Shen-Go
+## Step 6: Generate Ralph Infrastructure
 
+**`cmd/ralph/main.go`** — Orchestrator with four gates: shengen → test → build → shen-check. Harness set from Step 1.
+
+**`prompts/main_prompt.md`** — Inner harness prompt with guard type discipline, domain context, and backpressure errors section.
+
+**`plans/fix_plan.md`** — Task list from Step 1.
+
+**`Makefile`** — Targets: all, shengen, build, test, shen-check, run, clean.
+
+**`go.mod`** (if needed):
 ```bash
-git clone https://github.com/tiancaiamao/shen-go /tmp/shen-go
-cd /tmp/shen-go && GOTOOLCHAIN=local make shen
-cp /tmp/shen-go/shen bin/shen
-rm -rf /tmp/shen-go
+go mod init <module> && go get golang.org/x/sync && go mod tidy
 ```
 
-Create `bin/shen-check.sh` and `chmod +x`.
-
-## Step 7: Generate Orchestrator
-
-Create `cmd/ralph/main.go` with four gates:
-1. `shengen` — `./bin/shengen-codegen.sh`
-2. `go-test` — `go test ./...`
-3. `go-build` — `go build ./cmd/server` (or appropriate entry point)
-4. `shen-typecheck` — `./bin/shen-check.sh`
-
-Set `defaultHarness` to the user's choice.
-
-Create `go.mod`:
-```bash
-go mod init <module-name>
-go get golang.org/x/sync
-go mod tidy
-```
-
-## Step 8: Generate Prompt
-
-Create `prompts/main_prompt.md` with:
-- Domain context
-- Four-gate explanation
-- Guard type discipline (from AGENT_PROMPT.md): wrap at boundary, trust internally, follow proof chain, extract with .Val()
-- Rules: one plan item per iteration, fix backpressure first, never bypass constructors, never edit guards_gen.go
-- Gate failure diagnosis table
-- Backpressure errors section
-
-## Step 9: Generate Plan and Makefile
-
-Create `plans/fix_plan.md` with the user's task list.
-
-Create `Makefile` with targets: all, shengen, build, test, shen-check, run, run-relaxed, demo, clean.
-
-## Step 10: Update .gitignore
+## Step 7: Update .gitignore
 
 ```
-/ralph
-/server
 bin/shen
 bin/shengen
 plans/backpressure.log
-internal/shenguard/guards_gen.go
 ```
 
-## Step 11: Verify All Four Gates
+## Step 8: Verify All Four Gates
 
 ```bash
 make all
 ```
 
-Expected:
-```
-Generated internal/shenguard/guards_gen.go from specs/core.shen (package shenguard)
-ok   module/...
-RESULT: PASS
-```
+All gates must pass. Fix any failures before declaring setup complete.
 
-If any gate fails, fix the issue before declaring setup complete.
-
-## Step 12: Report
+## Step 9: Report
 
 Tell the user:
-- Everything that was created
-- The four-gate architecture
-- How to run: `make run` or `/sb:loop`
-- How to modify: edit `specs/core.shen` for types, `prompts/main_prompt.md` for instructions, `plans/fix_plan.md` for tasks
-- The generated guard types and how the harness should use them
-- Environment variables: `RALPH_HARNESS`, `RALPH_MAX_ITER`, `RALPH_DEMO`
+- What was created and where
+- The four gates and what each catches
+- The proof chain and how to use guard types
+- How to run: `make run` or `make run-relaxed`
+- How to modify: specs for types, prompt for instructions, plan for tasks
+- Environment variables: `RALPH_HARNESS`, `RALPH_MAX_ITER`

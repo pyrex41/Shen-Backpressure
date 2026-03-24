@@ -1,67 +1,89 @@
 ---
 name: loop
-description: Verify prerequisites and launch a Ralph loop with four-gate Shen backpressure (shengen, test, build, shen-check). Ralph calls the LLM harness — you configure and launch, not code.
+description: Configure and launch a Ralph loop — an autonomous outer loop that calls an LLM harness repeatedly with four-gate Shen backpressure. Requires /sb:init first.
 ---
 
-# Ralph Loop — Launch
+# Ralph Loop — Configure and Launch
 
-You are launching a Ralph loop. Ralph is the outer loop that calls an LLM harness repeatedly. Each iteration must pass four gates. You verify prerequisites, confirm config, then launch. You do NOT do the harness's work.
+You configure and launch a Ralph loop — an autonomous outer loop that repeatedly calls an LLM harness to do work, then validates through four gates before allowing the next iteration. This is ONE way to use Shen backpressure. For CI or manual workflows, see `/sb:init`.
+
+**Prerequisite**: Run `/sb:init` first to set up specs, shengen, and guard types.
 
 ```
 Ralph (outer loop)
-  └─▶ Gate 1: shengen (regenerate guard types from spec)
-  └─▶ call harness (claude -p, cursor-agent, etc.)
-       └─▶ harness makes code changes
-  └─▶ Gate 2: go test
-  └─▶ Gate 3: go build
-  └─▶ Gate 4: shen tc+
-       ├─▶ ALL PASS → next iteration (or done)
-       └─▶ FAIL → inject errors into prompt → call harness again
+  └─> Gate 1: shengen (regenerate guard types from spec)
+  └─> call harness (claude -p, cursor-agent, codex, etc.)
+       └─> harness makes code changes
+  └─> Gate 2: go test / npm test / etc.
+  └─> Gate 3: build (compile against regenerated types)
+  └─> Gate 4: shen tc+ (verify spec consistency)
+       ├─> ALL PASS → next iteration (or done)
+       └─> FAIL → inject errors into prompt → call harness again
 ```
 
 ## Step 1: Check Prerequisites
 
-Verify these exist:
-- `cmd/ralph/main.go` or `cmd/server/main.go` — application entry point
-- `bin/shengen` or `cmd/shengen/main.go` — codegen tool (binary or source)
-- `bin/shengen-codegen.sh` — codegen wrapper (executable)
-- `bin/shen-check.sh` — Shen subprocess wrapper (executable)
-- `bin/shen` — Shen-Go binary
-- `specs/core.shen` — Shen type specifications
-- `internal/shenguard/guards_gen.go` — generated guard types
-- `prompts/main_prompt.md` — prompt for the harness
-- `plans/fix_plan.md` — task plan with `- [ ]` items
+Verify `/sb:init` was already run:
+- `specs/core.shen` exists
+- Guard types exist (`internal/shenguard/`)
+- `bin/shen-check.sh` exists and is executable
+- shengen tooling exists
 
-If any are missing, tell the user and suggest `/sb:setup` or `/sb:scaffold`. Do not proceed.
+If any are missing, tell the user to run `/sb:init` first.
 
-## Step 2: Confirm Configuration
+## Step 2: Gather Loop Configuration
 
-Present:
-1. **Harness command** (from orchestrator or `RALPH_HARNESS` env)
-2. **Four gates**: shengen → go test → go build → shen tc+
-3. **Prompt summary** from `prompts/main_prompt.md`
-4. **Remaining plan items** from `plans/fix_plan.md`
-5. **Spec summary** from `specs/core.shen`
+Ask the user:
 
-Ask user to confirm or adjust.
+1. **Which LLM harness will Ralph call each iteration?**
+   - `claude -p` (default), `cursor-agent -p`, `codex -p`, `rho-cli run --prompt`, or custom command
 
-## Step 3: Verify Clean Starting State
+2. **What's the build command?** (e.g., `go build ./cmd/server`, `npm run build`, `cargo build`)
+
+3. **What's the test command?** (e.g., `go test ./...`, `npm test`, `cargo test`)
+
+4. **What should the plan contain?** Task items the loop should work through (`- [ ]` checklist)
+
+## Step 3: Generate Loop Infrastructure
+
+Create these files:
+
+**`cmd/ralph/main.go`** (or equivalent) — The orchestrator. Runs four gates in order:
+1. shengen (regenerate guard types)
+2. test
+3. build
+4. shen-check
+
+Set the harness command from Step 2.
+
+**`prompts/main_prompt.md`** — What the harness receives each iteration. Include:
+- Domain context and file locations
+- Guard type discipline (wrap at boundary, trust internally, follow proof chain)
+- Rules: one plan item per iteration, fix backpressure errors first
+- Gate failure diagnosis
+- Backpressure errors section (orchestrator injects here)
+
+**`plans/fix_plan.md`** — Task plan with `- [ ]` items from Step 2.
+
+**`Makefile`** — Targets: all, shengen, build, test, shen-check, run, clean.
+
+## Step 4: Verify Clean Starting State
 
 ```bash
 make all
 ```
 
-All four gates must pass before starting the loop. Fix any failures first.
+All four gates must pass. Fix any failures before launching.
 
-## Step 4: Launch
+## Step 5: Launch
 
 ```bash
 make run
 ```
 
 Options:
-- `make run-relaxed` — tests and build in parallel, shengen and shen-check serialized
+- `make run-relaxed` — test and build in parallel
 - `RALPH_HARNESS="<cmd>" make run` — override harness
-- `RALPH_MAX_ITER=20 make run` — change max iterations (default 10)
+- `RALPH_MAX_ITER=20 make run` — max iterations (default 10)
 
 The loop runs autonomously. Ctrl+C to stop.
