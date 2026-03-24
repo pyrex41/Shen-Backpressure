@@ -1,37 +1,33 @@
 ---
 name: shen-backpressure
-description: Autonomous AI coding loops with Shen sequent-calculus type backpressure and Go codegen bridge. Activates when the user mentions formal verification, Shen types, guard types, backpressure loops, or Ralph loops. Provides commands for scaffolding, spec generation, and loop execution.
+description: Formal backpressure for AI coding through Shen sequent-calculus types and a codegen bridge. Activates when the user mentions formal verification, Shen types, guard types, backpressure, or invariant enforcement. Works with any workflow — Ralph loops, CI, manual dev, or custom orchestrators.
 user-invocable: false
 ---
 
 # Shen-Backpressure
 
-This project uses Shen sequent-calculus types as formal specifications, with a codegen bridge (shengen) that generates Go guard types enforcing those specs at compile time.
+Formal type specs (Shen sequent calculus) + codegen bridge (shengen) that generates guard types with opaque constructors in Go or TypeScript. The generated types enforce domain invariants at compile time — you can't construct a value without proving its preconditions.
 
-## Available Commands
+## Commands
 
-- `/sb:scaffold` — Full setup: domain description → specs → guard types → orchestrator → all four gates verified
-- `/sb:setup` — Scaffold directory structure, orchestrator, and four-gate configuration
-- `/sb:init` — Generate Shen specs from natural language, build shengen, produce initial guard types
-- `/sb:loop` — Verify prerequisites, confirm configuration, launch the Ralph loop
+- `/sb:init` — Add Shen backpressure to any project. Specs, guard types, gates. No assumptions about workflow.
+- `/sb:loop` — Configure and launch a Ralph loop (autonomous LLM harness). Requires init first.
+- `/sb:scaffold` — All-in-one: init + Ralph loop in a single flow.
+- `/sb:create-shengen` — Build shengen for a new target language.
 
-## Architecture
+## How It Works
 
 ```
 specs/core.shen          Shen sequent-calculus type rules
-       │
-       ▼  (shengen)
-internal/shenguard/      Generated Go guard types with opaque constructors
-       │
-       ▼  (import)
+       |
+       v  (shengen)
+internal/shenguard/      Generated guard types (Go or TypeScript)
+       |
+       v  (import)
 Application code         Uses guard types at domain boundaries
-       │
-       ▼  (four gates)
-Ralph loop               shengen → go test → go build → shen tc+
+       |
+       v  (gates)
+Verification             shengen -> test -> build -> shen tc+
 ```
 
-The inner LLM harness (claude -p, cursor-agent, codex, etc.) does the coding work. Ralph orchestrates the loop. The four gates provide backpressure — if any gate fails, errors are fed back into the next iteration's prompt.
-
-## Guard Type Discipline
-
-See `AGENT_PROMPT.md` for the full reference on how the inner harness should use guard types: wrap at the boundary, trust internally, follow the proof chain, extract with `.Val()`.
+The gates can run in a Ralph loop, CI pipeline, or manually — the verification is the same regardless of what triggers it.

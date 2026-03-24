@@ -1,28 +1,42 @@
 ---
 name: init
-description: Generate Shen sequent-calculus type specs from natural language, run shengen to produce Go guard types, install shen-go. Presents specs and generated types for confirmation before writing.
+description: Add Shen backpressure to any project. Generates formal type specs from domain description, builds shengen, produces guard types in your target language, sets up verification gates. Works with any workflow — Ralph loops, CI pipelines, manual dev, or custom orchestrators.
 ---
 
-# Shen Init — Generate Specs and Guard Types
+# Shen Init — Add Formal Backpressure to Your Project
 
-You generate `specs/core.shen` (Shen sequent-calculus type rules) and then run shengen to produce `internal/shenguard/guards_gen.go` (Go guard types that enforce those rules at compile time).
+You add Shen sequent-calculus backpressure to the user's project. This means:
+1. Formal type specs (`specs/core.shen`) that prove domain invariants
+2. Generated guard types (Go, TypeScript, etc.) with opaque constructors that enforce those invariants at compile time
+3. Verification gates that can be run manually, in CI, in a Ralph loop, or however the user wants
 
-You do NOT implement domain code — Ralph and the harness do that.
+You do NOT assume any particular workflow or orchestrator. You set up the foundation — the user decides how to run it.
 
-## Step 1: Gather Domain Description
+## Step 1: Gather Requirements
 
 Ask the user:
-1. **Domain entities** — key types (accounts, items, states, resources, etc.)
-2. **Invariants** — what must ALWAYS be true, in plain English
-3. **Operations** — transitions or mutations and their preconditions
+
+1. **Domain description** — What are the key entities, invariants, and operations? Plain English is fine.
+
+2. **Target language** — What language are the guard types for?
+   - Go (default) — uses `cmd/shengen` → `internal/shenguard/guards_gen.go`
+   - TypeScript — uses `cmd/shengen-ts` → `internal/shenguard/guards.ts`
+   - Other — use `/sb:create-shengen` to build a codegen tool for their language
+
+3. **Project layout** — Where should files go? Defaults:
+   - `specs/core.shen` — Shen type specifications
+   - `bin/shen` — Shen-Go binary
+   - `bin/shen-check.sh` — Shen verification wrapper
+   - `bin/shengen` or `bin/shengen-codegen.sh` — codegen tooling
+   - `internal/shenguard/` — generated guard types
 
 ## Step 2: Draft specs/core.shen
 
-Translate invariants into Shen sequent-calculus datatypes. Use `\* comment *\` syntax.
+Translate the user's domain into Shen sequent-calculus datatypes.
 
-**Patterns:**
+**Patterns** (each maps to a specific guard type output):
 
-Wrapper (string/number → domain type, no validation):
+Wrapper (domain-specific string/number, no validation):
 ```shen
 (datatype account-id
   X : string;
@@ -39,7 +53,7 @@ Constrained (validated value):
   X : amount;)
 ```
 
-Composite (struct):
+Composite (structured type):
 ```shen
 (datatype transaction
   Amount : amount;
@@ -49,7 +63,7 @@ Composite (struct):
   [Amount From To] : transaction;)
 ```
 
-Guarded (invariant proof):
+Guarded (invariant proof — the key pattern):
 ```shen
 (datatype balance-invariant
   Bal : number;
@@ -68,19 +82,20 @@ Proof chain (requires prior proof):
   [Tx Check] : safe-transfer;)
 ```
 
-## Step 3: Present Specs for Confirmation
+Use `\* comment *\` to document sections.
+
+## Step 3: Present for Confirmation
 
 **Before writing anything**, show the complete `specs/core.shen` to the user. Explain:
 - Each datatype and what invariant it encodes
-- Each `verified` premise and what runtime check it becomes
-- The proof chain: which types require which proofs
+- Each `verified` premise and what runtime check it becomes in the generated code
+- The proof chain: which types require which proofs, and why
 
-**Wait for confirmation.** Revise if requested.
+**Wait for the user to confirm.** Revise if requested. Do not proceed until confirmed.
 
-## Step 4: Install Shen-Go
+## Step 4: Install Tooling
 
-Check if `bin/shen` exists. If not:
-
+**Shen-Go** — check if `bin/shen` exists. If not:
 ```bash
 mkdir -p bin
 git clone https://github.com/tiancaiamao/shen-go /tmp/shen-go
@@ -89,46 +104,51 @@ cp /tmp/shen-go/shen bin/shen
 rm -rf /tmp/shen-go
 ```
 
-Ensure `bin/shen-check.sh` exists and is executable.
+**shen-check.sh** — create `bin/shen-check.sh` if missing (wraps shen-go's EOF behavior). Make executable.
 
-## Step 5: Build shengen
+**shengen** — build or install based on target language:
+- Go: `cd cmd/shengen && go build -o ../../bin/shengen .`
+- TypeScript: ensure `cmd/shengen-ts/shengen.ts` is available and `npx tsx` works
 
-Check if `bin/shengen` exists. If not, build from source:
+**shengen-codegen.sh** — create `bin/shengen-codegen.sh` wrapper if missing. Make executable.
 
+## Step 5: Write Specs and Generate Guard Types
+
+Write `specs/core.shen` with the confirmed content.
+
+Generate guard types:
 ```bash
-# If cmd/shengen/main.go exists locally
-cd cmd/shengen && go build -o ../../bin/shengen .
-
-# Or if using the shared repo
-cd /path/to/Shen-Backpressure/cmd/shengen && go build -o bin/shengen .
-```
-
-Ensure `bin/shengen-codegen.sh` exists and is executable.
-
-## Step 6: Write Specs and Generate Guard Types
-
-Write `specs/core.shen` with the confirmed content. Then generate guard types:
-
-```bash
+# Go
 ./bin/shengen-codegen.sh specs/core.shen shenguard internal/shenguard/guards_gen.go
+
+# TypeScript
+npx tsx cmd/shengen-ts/shengen.ts specs/core.shen --out internal/shenguard/guards.ts
 ```
 
-Show the user the generated `guards_gen.go` — explain how each Shen type maps to a Go type with a guarded constructor.
+Show the user the generated types — explain how each Shen type maps to a guard type with a validated constructor.
 
-## Step 7: Verify
+## Step 6: Verify
 
 Run the Shen type check:
 ```bash
 ./bin/shen-check.sh
 ```
 
-Output should end with `RESULT: PASS`. If there's a type error, fix the spec and regenerate.
+Output should end with `RESULT: PASS`. Fix and regenerate if there's a type error.
 
-## Step 8: Report
+## Step 7: Report
 
 Tell the user:
-- What types and invariants were encoded in the spec
-- What Go guard types were generated
-- How constructors enforce the invariants (which ones return errors)
-- The proof chain: which types must be constructed before others
-- These are now gates in the Ralph loop — every iteration, the harness's changes must satisfy both the Shen proofs and the Go type system
+- What specs were created and what invariants they encode
+- What guard types were generated and how constructors enforce invariants
+- The proof chain and how to use it (wrap at boundary, trust internally)
+- The three verification gates they now have:
+  1. `shengen` — regenerate guard types (catches spec drift)
+  2. `shen-check` — verify spec consistency (`tc +`)
+  3. Build/test — compile and test against generated types
+
+Then suggest next steps based on their workflow:
+- **Ralph loop**: "Run `/sb:loop` to set up an autonomous coding loop with these gates"
+- **CI**: "Add these as CI steps: `make shengen && make test && make build && make shen-check`"
+- **Manual dev**: "Run `make all` after changing specs or domain code to verify everything holds"
+- **Custom orchestrator**: "Wire the three gates into your build system in order: shengen first, then test+build, then shen-check"

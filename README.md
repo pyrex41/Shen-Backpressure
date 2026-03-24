@@ -1,6 +1,6 @@
 # Shen-Backpressure
 
-AI coding skills for autonomous loops with **Shen sequent-calculus type backpressure** and a **Go codegen bridge**. Installable via [SKM](https://github.com/pyrex41/skill-manager) or manually as Claude Code skills.
+Formal backpressure for AI coding through **Shen sequent-calculus types** and a **codegen bridge** that generates guard types in Go or TypeScript. Works with any workflow — Ralph loops, CI pipelines, manual dev, or custom orchestrators. Installable via [SKM](https://github.com/pyrex41/skill-manager) or manually as Claude Code skills.
 
 ## The Idea
 
@@ -15,16 +15,16 @@ If the LLM breaks an invariant, either the type check fails (Shen) or the code w
 specs/core.shen          Shen sequent-calculus type rules
        |
        v  (shengen)
-internal/shenguard/      Generated Go guard types (opaque constructors)
+internal/shenguard/      Generated guard types (Go or TypeScript)
        |
        v  (import)
 Application code         Uses guard types at domain boundaries
        |
-       v  (four gates)
-Ralph loop               shengen -> go test -> go build -> shen tc+
+       v  (gates)
+Verification             shengen -> test -> build -> shen tc+
        |
        v  (fail?)
-Backpressure             Gate errors injected into next LLM prompt
+Backpressure             Gate errors fed back (to LLM, CI, or developer)
 ```
 
 ## Install
@@ -52,23 +52,26 @@ cp Shen-Backpressure/sb/skills/shen-backpressure/SKILL.md .claude/skills/shen-ba
 
 | Command | What it does |
 |---------|-------------|
-| `/sb:scaffold` | All-in-one: domain description -> specs -> guard types -> orchestrator -> four gates verified |
-| `/sb:setup` | Scaffold directories, four-gate orchestrator, shengen, prompt, plan |
-| `/sb:init` | Generate Shen specs from English, run shengen to produce Go guard types |
-| `/sb:loop` | Verify prerequisites, confirm config, launch the Ralph loop |
+| `/sb:init` | Add Shen backpressure to any project — specs, shengen, guard types, gates. Works with any workflow. |
+| `/sb:loop` | Configure and launch a Ralph loop (autonomous LLM harness with four-gate backpressure). Requires init. |
+| `/sb:scaffold` | All-in-one: init + loop setup in a single flow. For people who know they want Ralph. |
 | `/sb:create-shengen` | Build a shengen codegen tool for any target language (Go, Rust, TS, Python, Java, etc.) |
 
 ### Quick Start
 
 ```
-> /sb:scaffold
+> /sb:init       # add Shen backpressure (works with any workflow)
+```
+
+Want a Ralph loop?
+```
+> /sb:scaffold   # all-in-one: init + Ralph loop setup
 ```
 
 Or step by step:
 ```
-> /sb:setup    # scaffold the infrastructure
-> /sb:init     # generate specs and guard types
-> /sb:loop     # launch the loop
+> /sb:init       # specs, guard types, gates
+> /sb:loop       # configure Ralph, launch
 ```
 
 ## The Four Gates
