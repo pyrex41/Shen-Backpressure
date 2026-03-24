@@ -4,7 +4,7 @@
 // Constructors are the ONLY way to create these types — bypassing them
 // is a violation of the formal spec.
 
-package payment
+package shenguard
 
 import (
 	"fmt"
