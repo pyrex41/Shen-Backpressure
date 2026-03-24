@@ -6,7 +6,8 @@ A research assistant where **all application logic is written in Shen**, running
 
 ```
 Arrow.js Frontend (browser)
-       ↕ HTTP JSON API
+  ├── pi-ai (optional: client-side LLM streaming)
+  ↕ HTTP JSON API
 Common Lisp Backend (SBCL)
   ├── Shen runtime (loaded at boot)
   │   ├── specs/core.shen     ← formal type specs (sequent calculus)
@@ -14,15 +15,56 @@ Common Lisp Backend (SBCL)
   │   ├── src/ai-gen.shen     ← prompt construction + response processing
   │   ├── src/ui-resolve.shen ← UI layout resolution (Prolog-style)
   │   └── src/app.shen        ← pipeline orchestration
-  ├── CL bridge (bridge.lisp)
-  │   ├── web-search  → dexador HTTP client
-  │   ├── web-fetch   → dexador + HTML stripping
-  │   └── ai-generate → Anthropic API via dexador
+  ├── CL bridge (bridge.lisp) — pluggable providers:
+  │   ├── web-search  → DuckDuckGo (built-in, no API key) | rho-cli | Brave
+  │   ├── web-fetch   → dexador + HTML→text | rho-cli
+  │   └── ai-generate → Anthropic API | rho-cli
   └── HTTP server (server.lisp)
       └── hunchentoot serving JSON API + static files
 ```
 
 **Shen decides WHAT to do. CL does the I/O. Arrow renders the result.**
+
+## Providers
+
+The CL backend supports pluggable providers for each I/O operation:
+
+| Operation | Provider | Description | API Key? |
+|-----------|----------|-------------|----------|
+| Search | `:duckduckgo` | DuckDuckGo HTML scraping (same as rho-cli) | No |
+| Search | `:rho` | Shell out to rho-cli binary | No |
+| Search | `:live` | Brave Search API | `BRAVE_API_KEY` |
+| Search | `:mock` | Fake results for dev | No |
+| Fetch | `:duckduckgo` | Direct HTTP + HTML→text via dexador | No |
+| Fetch | `:rho` | Shell out to rho-cli binary | No |
+| Fetch | `:mock` | Fake content for dev | No |
+| AI | `:anthropic` | Anthropic Messages API (direct HTTP) | `ANTHROPIC_API_KEY` |
+| AI | `:rho` | Shell out to rho-cli (uses its configured model) | Via rho config |
+| AI | `:mock` | Fake summary for dev | No |
+
+**Default**: DuckDuckGo search + dexador fetch (no API keys needed). AI defaults to mock unless `ANTHROPIC_API_KEY` is set.
+
+### rho-cli integration
+
+[rho](https://github.com/pyrex41/rho) is a Rust AI coding agent with built-in web search (DuckDuckGo) and fetch tools. When installed, you can use it as a provider:
+
+```bash
+# Install rho-cli
+git clone https://github.com/pyrex41/rho.git && cd rho && cargo install --path .
+
+# Use rho for everything
+./backend/start.sh --search rho --fetch rho --ai rho
+```
+
+### pi-ai integration (frontend)
+
+[pi-ai](https://github.com/badlogic/pi-mono/tree/main/packages/ai) enables client-side LLM streaming directly in the browser. This is optional — by default, AI generation goes through the CL backend. To enable:
+
+```bash
+npm install @mariozechner/pi-ai
+```
+
+Then use `streamGenerate()` in the frontend for token-by-token streaming with 18+ LLM providers.
 
 ## Key Invariant
 
@@ -69,10 +111,16 @@ You cannot construct a `research-summary` without `grounded-source` values — a
    npm install
    ```
 
+5. **Optional — rho-cli** (for web tools via Rust):
+   ```bash
+   git clone https://github.com/pyrex41/rho.git
+   cd rho && cargo install --path .
+   ```
+
 ## Running
 
 ```bash
-# Build frontend + start CL backend (mock providers)
+# Build frontend + start CL backend (auto-detects providers)
 make serve
 
 # Or step by step:
@@ -81,6 +129,12 @@ make frontend          # compile Arrow.js TypeScript
 
 # With real AI:
 ANTHROPIC_API_KEY=sk-... ./backend/start.sh
+
+# DuckDuckGo search + Anthropic AI (no rho needed):
+ANTHROPIC_API_KEY=sk-... ./backend/start.sh --search duckduckgo
+
+# Use rho-cli for everything:
+./backend/start.sh --search rho --fetch rho --ai rho
 
 # Custom port:
 ./backend/start.sh --port 8080
@@ -107,14 +161,14 @@ src/ai-gen.shen          AI prompt logic
 src/ui-resolve.shen      Generative UI resolution
 src/app.shen             Main pipeline orchestration
 backend/
-  packages.lisp          CL package + Quicklisp deps
-  bridge.lisp            Web search/fetch/AI in CL (dexador)
+  packages.lisp          CL package + Quicklisp deps + provider config
+  bridge.lisp            Pluggable providers: DuckDuckGo, rho-cli, Brave, Anthropic
   server.lisp            Hunchentoot HTTP server + JSON API
   shen-interop.lisp      Load Shen, register bridge functions
-  load.lisp              Bootstrap (load all, start server)
+  load.lisp              Bootstrap (load all, auto-detect, start server)
   start.sh               Shell launcher for SBCL
 runtime/
-  bridge.ts              Frontend API client (fetch calls to CL)
+  bridge.ts              API client + optional pi-ai streaming
   ui.ts                  Arrow.js reactive UI renderer
   main.ts                Frontend bootstrap
 index.html               Entry point (loads Arrow.js via importmap)

@@ -35,8 +35,18 @@
 (defvar *shen-root* nil "Path to Shen source files")
 
 ;;; Provider configuration
-(defvar *search-provider* :mock "Search provider: :mock or :live")
-(defvar *fetch-provider* :mock "Fetch provider: :mock or :live")
-(defvar *ai-provider* :mock "AI provider: :mock or :anthropic")
+;;; Search/Fetch providers:
+;;;   :mock      — fake data for dev
+;;;   :duckduckgo — DuckDuckGo HTML scraping (no API key, like rho-cli)
+;;;   :rho       — shell out to rho-cli binary
+;;;   :live      — Brave Search API (needs key)
+;;; AI providers:
+;;;   :mock      — fake summary
+;;;   :anthropic — Anthropic Messages API (direct HTTP)
+;;;   :rho       — shell out to rho-cli for LLM calls
+(defvar *search-provider* :mock "Search provider: :mock, :duckduckgo, :rho, or :live")
+(defvar *fetch-provider* :mock "Fetch provider: :mock, :duckduckgo, :rho, or :live")
+(defvar *ai-provider* :mock "AI provider: :mock, :anthropic, or :rho")
 (defvar *anthropic-api-key* nil "Anthropic API key")
 (defvar *anthropic-model* "claude-sonnet-4-6" "Anthropic model ID")
+(defvar *rho-binary* "rho" "Path to rho-cli binary")
