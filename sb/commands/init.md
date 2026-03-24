@@ -1,42 +1,28 @@
 ---
 name: init
-description: Generate Shen sequent-calculus type specifications from natural language invariants. Presents specs for confirmation, installs shen-go, and verifies types pass.
+description: Generate Shen sequent-calculus type specs from natural language, run shengen to produce Go guard types, install shen-go. Presents specs and generated types for confirmation before writing.
 ---
 
-# Shen Init — Generate Type Specs
+# Shen Init — Generate Specs and Guard Types
 
-You are generating `specs/core.shen` — Shen sequent-calculus type rules that formally encode domain invariants. These specs become one of the three gates in the Ralph loop: every iteration, the harness's code changes must pass `(tc +)`.
+You generate `specs/core.shen` (Shen sequent-calculus type rules) and then run shengen to produce `internal/shenguard/guards_gen.go` (Go guard types that enforce those rules at compile time).
 
-You generate and verify specs. You do NOT implement domain code — the Ralph loop and its harness do that.
+You do NOT implement domain code — Ralph and the harness do that.
 
-## Workflow
+## Step 1: Gather Domain Description
 
-### Step 1: Gather Domain Description
+Ask the user:
+1. **Domain entities** — key types (accounts, items, states, resources, etc.)
+2. **Invariants** — what must ALWAYS be true, in plain English
+3. **Operations** — transitions or mutations and their preconditions
 
-Ask the user to describe:
-1. **Domain entities** — What are the key types? (accounts, items, states, resources, etc.)
-2. **Invariants** — What must ALWAYS be true? Plain English is fine.
-3. **Operations** — What transitions or mutations exist? What preconditions do they require?
+## Step 2: Draft specs/core.shen
 
-### Step 2: Draft specs/core.shen
+Translate invariants into Shen sequent-calculus datatypes. Use `\* comment *\` syntax.
 
-Translate invariants into Shen sequent-calculus datatypes.
+**Patterns:**
 
-**Shen datatype syntax:**
-
-```shen
-(datatype rule-name
-  premise1;
-  premise2;
-  ============
-  conclusion;)
-```
-
-Premises and conclusions are type judgments: `Expression : Type`. The `=` line separates premises from conclusion — if all premises hold, the conclusion follows.
-
-**Common patterns:**
-
-Wrapper type (string → domain type):
+Wrapper (string/number → domain type, no validation):
 ```shen
 (datatype account-id
   X : string;
@@ -44,16 +30,16 @@ Wrapper type (string → domain type):
   X : account-id;)
 ```
 
-Constrained value (number with bounds):
+Constrained (validated value):
 ```shen
-(datatype quantity
+(datatype amount
   X : number;
   (>= X 0) : verified;
   ====================
-  X : quantity;)
+  X : amount;)
 ```
 
-Composite type (struct/record):
+Composite (struct):
 ```shen
 (datatype transaction
   Amount : amount;
@@ -63,7 +49,7 @@ Composite type (struct/record):
   [Amount From To] : transaction;)
 ```
 
-Guarded operation (precondition check):
+Guarded (invariant proof):
 ```shen
 (datatype balance-invariant
   Bal : number;
@@ -73,27 +59,7 @@ Guarded operation (precondition check):
   [Bal Tx] : balance-checked;)
 ```
 
-Ownership/authorization:
-```shen
-(datatype safe-free
-  Alloc : allocated;
-  Requester : process-id;
-  (= (tail Alloc) Requester) : verified;
-  =========================================
-  [Alloc Requester] : safe-free;)
-```
-
-Non-empty constraint:
-```shen
-(datatype live-state
-  S : state;
-  Transitions : (list transition);
-  (not (= Transitions [])) : verified;
-  =====================================
-  [S Transitions] : live-state;)
-```
-
-Proof-carrying type (operation + its proof):
+Proof chain (requires prior proof):
 ```shen
 (datatype safe-transfer
   Tx : transaction;
@@ -102,20 +68,18 @@ Proof-carrying type (operation + its proof):
   [Tx Check] : safe-transfer;)
 ```
 
-Use Shen comment syntax `\* comment *\` to document sections.
+## Step 3: Present Specs for Confirmation
 
-### Step 3: Present Specs for Confirmation
+**Before writing anything**, show the complete `specs/core.shen` to the user. Explain:
+- Each datatype and what invariant it encodes
+- Each `verified` premise and what runtime check it becomes
+- The proof chain: which types require which proofs
 
-**Before writing any files**, present the complete `specs/core.shen` content to the user. Explain:
-- Each datatype rule and what invariant it encodes
-- How each `verified` premise maps to a runtime check the harness will need to implement
-- Any simplifications or assumptions
+**Wait for confirmation.** Revise if requested.
 
-**Wait for the user to confirm.** If they request changes, revise and present again. Do not proceed until confirmed.
+## Step 4: Install Shen-Go
 
-### Step 4: Install Shen-Go Binary
-
-After confirmation, check if `bin/shen` exists. If not, install it:
+Check if `bin/shen` exists. If not:
 
 ```bash
 mkdir -p bin
@@ -125,33 +89,46 @@ cp /tmp/shen-go/shen bin/shen
 rm -rf /tmp/shen-go
 ```
 
-Also ensure `bin/shen-check.sh` exists and is executable. If not, tell the user to run `/sb:setup` first to generate the check wrapper.
+Ensure `bin/shen-check.sh` exists and is executable.
 
-Add `bin/shen` to `.gitignore` if not already there.
+## Step 5: Build shengen
 
-### Step 5: Write and Verify
+Check if `bin/shengen` exists. If not, build from source:
 
-Write `specs/core.shen` with the confirmed content. Then run the type check:
+```bash
+# If cmd/shengen/main.go exists locally
+cd cmd/shengen && go build -o ../../bin/shengen .
 
+# Or if using the shared repo
+cd /path/to/Shen-Backpressure/cmd/shengen && go build -o bin/shengen .
+```
+
+Ensure `bin/shengen-codegen.sh` exists and is executable.
+
+## Step 6: Write Specs and Generate Guard Types
+
+Write `specs/core.shen` with the confirmed content. Then generate guard types:
+
+```bash
+./bin/shengen-codegen.sh specs/core.shen shenguard internal/shenguard/guards_gen.go
+```
+
+Show the user the generated `guards_gen.go` — explain how each Shen type maps to a Go type with a guarded constructor.
+
+## Step 7: Verify
+
+Run the Shen type check:
 ```bash
 ./bin/shen-check.sh
 ```
 
-Output should end with `RESULT: PASS`. If there's a type error, fix the rules and re-run until they pass.
+Output should end with `RESULT: PASS`. If there's a type error, fix the spec and regenerate.
 
-### Step 6: Report
+## Step 8: Report
 
 Tell the user:
-- What types and invariants were encoded
-- That the Shen type check passes
-- These specs are now a gate in the Ralph loop — every iteration, the harness's changes must satisfy these proofs
-
-## Guidelines
-
-- Start simple — basic types first, then invariants, then proof-carrying types
-- Every `verified` premise = a runtime check the harness must implement
-- Keep rules small and composable — multiple small datatypes over one giant rule
-- Shen comments: `\* ... *\`
-- List types: `(list element-type)`
-- Composite values: `[A B C]`
-- Access elements: `(head X)` and `(tail X)`
+- What types and invariants were encoded in the spec
+- What Go guard types were generated
+- How constructors enforce the invariants (which ones return errors)
+- The proof chain: which types must be constructed before others
+- These are now gates in the Ralph loop — every iteration, the harness's changes must satisfy both the Shen proofs and the Go type system
