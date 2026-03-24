@@ -1,0 +1,33 @@
+{{template "head" .}}
+
+<h1>{{.Campaign.Name}}</h1>
+
+<p>Welcome, <strong>{{.User.Email}}</strong>! To see personalized content, please tell us a bit about yourself.</p>
+
+<section x-data="{ ageDecade: '', state: '' }">
+    <form method="POST" action="/cta/{{.Campaign.ID}}/{{.User.ID}}">
+        <div>
+            <label for="age_decade">Age Decade</label>
+            <select id="age_decade" name="age_decade" x-model="ageDecade" required>
+                <option value="">Select...</option>
+                {{range .Decades}}
+                <option value="{{.}}">{{.}}s</option>
+                {{end}}
+            </select>
+        </div>
+
+        <div>
+            <label for="state">US State</label>
+            <select id="state" name="state" x-model="state" required>
+                <option value="">Select...</option>
+                {{range .States}}
+                <option value="{{.}}">{{.}}</option>
+                {{end}}
+            </select>
+        </div>
+
+        <button type="submit" :disabled="!ageDecade || !state">Show My Content</button>
+    </form>
+</section>
+
+{{template "foot" .}}

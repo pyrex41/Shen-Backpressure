@@ -1,0 +1,248 @@
+/* Email Campaign Manager — minimal stylesheet */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  color: #1a1a1a;
+  background: #f8f9fa;
+  margin: 0;
+  padding: 0;
+}
+
+/* --- Nav --- */
+
+nav {
+  background: #1a1a2e;
+  padding: 0.75rem 1.5rem;
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+nav a {
+  color: #e0e0e0;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+
+nav a:hover {
+  color: #fff;
+}
+
+/* --- Main content --- */
+
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+h1 {
+  font-size: 1.75rem;
+  margin: 0 0 1rem;
+  color: #1a1a2e;
+}
+
+h2 {
+  font-size: 1.25rem;
+  margin: 1.5rem 0 0.75rem;
+  color: #333;
+}
+
+/* --- Sections --- */
+
+section {
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+/* --- Tables --- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+thead th {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 2px solid #dee2e6;
+  color: #555;
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+tbody td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #eee;
+  vertical-align: middle;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr:hover {
+  background: #f8f9fa;
+}
+
+/* --- Forms --- */
+
+form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #555;
+}
+
+input[type="text"],
+input[type="email"],
+select,
+textarea {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  background: #fff;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: #4a6cf7;
+  box-shadow: 0 0 0 2px rgba(74, 108, 247, 0.15);
+}
+
+textarea {
+  resize: vertical;
+}
+
+/* --- Buttons --- */
+
+button,
+a.btn {
+  padding: 0.4rem 0.85rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  line-height: 1.5;
+}
+
+button[type="submit"],
+a.btn-primary {
+  background: #4a6cf7;
+  color: #fff;
+}
+
+button[type="submit"]:hover,
+a.btn-primary:hover {
+  background: #3a5bd9;
+}
+
+button[type="button"],
+button:not([type]) {
+  background: #e9ecef;
+  color: #333;
+}
+
+button[type="button"]:hover,
+button:not([type]):hover {
+  background: #dee2e6;
+}
+
+button[hx-delete] {
+  background: #fff;
+  color: #dc3545;
+  border-color: #dc3545;
+}
+
+button[hx-delete]:hover {
+  background: #dc3545;
+  color: #fff;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --- Links --- */
+
+a {
+  color: #4a6cf7;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* --- CTA pages --- */
+
+.cta-copy {
+  font-size: 1.1rem;
+  line-height: 1.7;
+  padding: 1rem 0;
+}
+
+.cta-meta {
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.send-confirmation {
+  background: #d4edda;
+  border: 1px solid #c3e6cb;
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+}
+
+.send-confirmation h3 {
+  margin: 0 0 0.5rem;
+  color: #155724;
+}
+
+.send-confirmation code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0.15rem 0.35rem;
+  border-radius: 3px;
+  font-size: 0.85rem;
+}
+
+/* --- Utility --- */
+
+[x-cloak] {
+  display: none !important;
+}
+
+p {
+  margin: 0.5rem 0;
+}

@@ -1,0 +1,30 @@
+{{template "head" .}}
+
+<h1>Send Email</h1>
+
+<section>
+    <h2>Compose</h2>
+    <form hx-post="/send" hx-target="#send-result" hx-swap="innerHTML">
+        <label>Campaign
+            <select name="campaign_id" required>
+                <option value="">-- Select Campaign --</option>
+                {{range .Campaigns}}
+                <option value="{{.ID}}">{{.Name}} — {{.Subject}}</option>
+                {{end}}
+            </select>
+        </label>
+        <label>Recipient
+            <select name="user_id" required>
+                <option value="">-- Select User --</option>
+                {{range .Users}}
+                <option value="{{.ID}}">{{.Email}} {{if .IsKnown}}(known){{else}}(unknown){{end}}</option>
+                {{end}}
+            </select>
+        </label>
+        <button type="submit">Send Email</button>
+    </form>
+</section>
+
+<section id="send-result"></section>
+
+{{template "foot" .}}

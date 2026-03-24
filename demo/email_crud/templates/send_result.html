@@ -1,0 +1,8 @@
+{{define "send_result"}}
+<div class="send-confirmation">
+    <h3>Email Sent!</h3>
+    <p>Campaign <strong>{{.Campaign.Name}}</strong> sent to <strong>{{.User.Email}}</strong>.</p>
+    <p>Send ID: <code>{{.SendID}}</code></p>
+    <p>CTA link: <a href="/cta/{{.Campaign.ID}}/{{.User.ID}}">/cta/{{.Campaign.ID}}/{{.User.ID}}</a></p>
+</div>
+{{end}}

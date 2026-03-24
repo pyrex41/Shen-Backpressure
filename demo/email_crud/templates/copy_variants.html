@@ -1,0 +1,58 @@
+{{template "head" .}}
+
+<h1>Copy Variants — {{.Campaign.Name}}</h1>
+<p><a href="/campaigns">&larr; Back to Campaigns</a></p>
+
+<section>
+    <h2>Add Variant</h2>
+    <form hx-post="/campaigns/{{.Campaign.ID}}/copy" hx-target="#variant-rows" hx-swap="innerHTML" hx-on::after-request="if(event.detail.successful) this.reset()">
+        <label>Age Decade
+            <select name="age_decade" required>
+                <option value="">--</option>
+                {{range .Decades}}<option value="{{.}}">{{.}}s</option>{{end}}
+            </select>
+        </label>
+        <label>State
+            <select name="state" required>
+                <option value="">--</option>
+                {{range .States}}<option value="{{.}}">{{.}}</option>{{end}}
+            </select>
+        </label>
+        <label>Body
+            <textarea name="body" required rows="3" cols="50"></textarea>
+        </label>
+        <button type="submit">Add Variant</button>
+    </form>
+</section>
+
+<section>
+    <h2>Variants ({{len .Variants}})</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Age Decade</th>
+                <th>State</th>
+                <th>Body</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="variant-rows">
+            {{template "variant_rows" .Variants}}
+        </tbody>
+    </table>
+</section>
+
+{{template "foot" .}}
+
+{{define "variant_rows"}}
+{{range .}}
+<tr id="variant-{{.ID}}">
+    <td>{{.AgeDecade}}s</td>
+    <td>{{.State}}</td>
+    <td>{{.Body}}</td>
+    <td>
+        <button hx-delete="/copy/{{.ID}}" hx-target="#variant-{{.ID}}" hx-swap="outerHTML" hx-confirm="Delete this variant?">Delete</button>
+    </td>
+</tr>
+{{end}}
+{{end}}

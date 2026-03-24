@@ -1,0 +1,44 @@
+{{template "head" .}}
+
+<h1>{{.Campaign.Name}}</h1>
+
+<section>
+    <div class="cta-copy">
+        <p>{{.Body}}</p>
+    </div>
+</section>
+
+<p class="cta-meta">
+    Viewing as <strong>{{.User.Email}}</strong>
+    ({{derefInt .User.AgeDecade}}s, {{derefStr .User.State}})
+</p>
+
+<section x-data="{ editing: false, ageDecade: '{{derefInt .User.AgeDecade}}', state: '{{derefStr .User.State}}' }">
+    <button @click="editing = !editing" x-text="editing ? 'Cancel' : 'Update Demographics'"></button>
+
+    <form x-show="editing" x-cloak method="POST" action="/cta/{{.Campaign.ID}}/{{.User.ID}}" style="margin-top: 1rem;">
+        <div>
+            <label for="age_decade">Age Decade</label>
+            <select id="age_decade" name="age_decade" x-model="ageDecade" required>
+                <option value="">Select...</option>
+                {{range .Decades}}
+                <option value="{{.}}">{{.}}s</option>
+                {{end}}
+            </select>
+        </div>
+
+        <div>
+            <label for="state">US State</label>
+            <select id="state" name="state" x-model="state" required>
+                <option value="">Select...</option>
+                {{range .States}}
+                <option value="{{.}}">{{.}}</option>
+                {{end}}
+            </select>
+        </div>
+
+        <button type="submit" :disabled="!ageDecade || !state">Save &amp; Refresh</button>
+    </form>
+</section>
+
+{{template "foot" .}}

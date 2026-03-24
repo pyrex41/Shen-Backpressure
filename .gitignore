@@ -4,9 +4,21 @@
 # Built binaries
 demo/*/ralph
 demo/*/bin/shen
+demo/*/server
+
+# Databases and WAL files
+*.db
+*.db-shm
+*.db-wal
+
+# Rodney / Chrome automation artifacts
+.rodney/
 
 # Backpressure logs (generated at runtime)
 demo/*/plans/backpressure.log
 
 # Thoughts directory (research notes)
 thoughts/
+
+# Repomix output
+repomix-output.xml

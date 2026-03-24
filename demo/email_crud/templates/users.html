@@ -1,0 +1,83 @@
+{{template "head" .}}
+
+<h1>Users</h1>
+
+<section>
+    <h2>Add User</h2>
+    <form hx-post="/users" hx-target="#user-rows" hx-swap="innerHTML" hx-on::after-request="if(event.detail.successful) this.reset()">
+        <label>Email <input type="email" name="email" required></label>
+        <label>Age Decade
+            <select name="age_decade">
+                <option value="">— Unknown —</option>
+                {{range .Decades}}<option value="{{.}}">{{.}}s</option>{{end}}
+            </select>
+        </label>
+        <label>State
+            <select name="state">
+                <option value="">— Unknown —</option>
+                {{range .States}}<option value="{{.}}">{{.}}</option>{{end}}
+            </select>
+        </label>
+        <button type="submit">Add User</button>
+    </form>
+</section>
+
+<section>
+    <h2>All Users ({{len .Users}})</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Email</th>
+                <th>Age Decade</th>
+                <th>State</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="user-rows">
+            {{template "user_rows" .}}
+        </tbody>
+    </table>
+</section>
+
+{{template "foot" .}}
+
+{{define "user_rows"}}
+{{range .Users}}
+<tr id="user-{{.ID}}" x-data="{ editing: false }">
+    <td x-show="!editing">{{.Email}}</td>
+    <td x-show="!editing">{{if .AgeDecade}}{{derefInt .AgeDecade}}s{{else}}&mdash;{{end}}</td>
+    <td x-show="!editing">{{if .State}}{{derefStr .State}}{{else}}&mdash;{{end}}</td>
+    <td x-show="!editing">{{if .IsKnown}}Known{{else}}Unknown{{end}}</td>
+    <td x-show="!editing">
+        <button @click="editing = true">Edit</button>
+        <button hx-delete="/users/{{.ID}}" hx-target="#user-{{.ID}}" hx-swap="outerHTML" hx-confirm="Delete this user?">Delete</button>
+    </td>
+    <td x-show="editing" colspan="5" x-cloak>
+        <form hx-put="/users/{{.ID}}" hx-target="#user-rows" hx-swap="innerHTML" style="display:inline-flex;gap:0.5rem;align-items:center">
+            <input type="email" name="email" value="{{.Email}}" required>
+            <select name="age_decade">
+                <option value="">— Unknown —</option>
+                <option value="10" {{if .AgeDecade}}{{if eq (derefInt .AgeDecade) 10}}selected{{end}}{{end}}>10s</option>
+                <option value="20" {{if .AgeDecade}}{{if eq (derefInt .AgeDecade) 20}}selected{{end}}{{end}}>20s</option>
+                <option value="30" {{if .AgeDecade}}{{if eq (derefInt .AgeDecade) 30}}selected{{end}}{{end}}>30s</option>
+                <option value="40" {{if .AgeDecade}}{{if eq (derefInt .AgeDecade) 40}}selected{{end}}{{end}}>40s</option>
+                <option value="50" {{if .AgeDecade}}{{if eq (derefInt .AgeDecade) 50}}selected{{end}}{{end}}>50s</option>
+                <option value="60" {{if .AgeDecade}}{{if eq (derefInt .AgeDecade) 60}}selected{{end}}{{end}}>60s</option>
+                <option value="70" {{if .AgeDecade}}{{if eq (derefInt .AgeDecade) 70}}selected{{end}}{{end}}>70s</option>
+                <option value="80" {{if .AgeDecade}}{{if eq (derefInt .AgeDecade) 80}}selected{{end}}{{end}}>80s</option>
+                <option value="90" {{if .AgeDecade}}{{if eq (derefInt .AgeDecade) 90}}selected{{end}}{{end}}>90s</option>
+                <option value="100" {{if .AgeDecade}}{{if eq (derefInt .AgeDecade) 100}}selected{{end}}{{end}}>100s</option>
+            </select>
+            <select name="state">
+                <option value="">— Unknown —</option>
+                {{$curState := ""}}{{if .State}}{{$curState = derefStr .State}}{{end}}
+                {{range $.States}}<option value="{{.}}" {{if eq . $curState}}selected{{end}}>{{.}}</option>{{end}}
+            </select>
+            <button type="submit">Save</button>
+            <button type="button" @click="editing = false">Cancel</button>
+        </form>
+    </td>
+</tr>
+{{end}}
+{{end}}

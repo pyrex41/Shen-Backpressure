@@ -61,7 +61,11 @@ func (s *Server) HandleUsersCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	db.CreateUser(s.DB, u)
 	users, _ := db.ListUsers(s.DB)
-	s.Tmpl.ExecuteTemplate(w, "user_rows", users)
+	s.Tmpl.ExecuteTemplate(w, "user_rows", map[string]any{
+		"Users":   users,
+		"States":  models.ValidStates,
+		"Decades": models.ValidAgeDecades,
+	})
 }
 
 func (s *Server) HandleUsersDelete(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +96,11 @@ func (s *Server) HandleUsersUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	db.UpdateUser(s.DB, u)
 	users, _ := db.ListUsers(s.DB)
-	s.Tmpl.ExecuteTemplate(w, "user_rows", users)
+	s.Tmpl.ExecuteTemplate(w, "user_rows", map[string]any{
+		"Users":   users,
+		"States":  models.ValidStates,
+		"Decades": models.ValidAgeDecades,
+	})
 }
 
 // --- Campaigns CRUD ---
@@ -113,6 +121,22 @@ func (s *Server) HandleCampaignsCreate(w http.ResponseWriter, r *http.Request) {
 		CtaURL:  r.FormValue("cta_url"),
 	}
 	db.CreateCampaign(s.DB, c)
+	campaigns, _ := db.ListCampaigns(s.DB)
+	s.Tmpl.ExecuteTemplate(w, "campaign_rows", campaigns)
+}
+
+func (s *Server) HandleCampaignsUpdate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	r.ParseForm()
+	c, err := db.GetCampaign(s.DB, id)
+	if err != nil {
+		http.Error(w, "campaign not found", http.StatusNotFound)
+		return
+	}
+	c.Name = r.FormValue("name")
+	c.Subject = r.FormValue("subject")
+	c.CtaURL = r.FormValue("cta_url")
+	db.UpdateCampaign(s.DB, c)
 	campaigns, _ := db.ListCampaigns(s.DB)
 	s.Tmpl.ExecuteTemplate(w, "campaign_rows", campaigns)
 }
@@ -164,6 +188,15 @@ func (s *Server) HandleCopyVariantsDelete(w http.ResponseWriter, r *http.Request
 }
 
 // --- Send Email (simulated) ---
+
+func (s *Server) HandleSendPage(w http.ResponseWriter, r *http.Request) {
+	campaigns, _ := db.ListCampaigns(s.DB)
+	users, _ := db.ListUsers(s.DB)
+	s.Tmpl.ExecuteTemplate(w, "send.html", map[string]any{
+		"Campaigns": campaigns,
+		"Users":     users,
+	})
+}
 
 func (s *Server) HandleSendEmail(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
@@ -232,6 +265,8 @@ func (s *Server) HandleCTALanding(w http.ResponseWriter, r *http.Request) {
 			"Campaign": campaign,
 			"User":     user,
 			"Body":     fmt.Sprintf("Welcome, %s! We don't have custom content for your demographic yet, but stay tuned.", user.Email),
+			"States":   models.ValidStates,
+			"Decades":  models.ValidAgeDecades,
 		})
 		return
 	}
@@ -241,6 +276,8 @@ func (s *Server) HandleCTALanding(w http.ResponseWriter, r *http.Request) {
 		"Campaign": campaign,
 		"User":     user,
 		"Body":     variant.Body,
+		"States":   models.ValidStates,
+		"Decades":  models.ValidAgeDecades,
 	})
 }
 
