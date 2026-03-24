@@ -27,6 +27,14 @@
       ?model=claude-sonnet-4-6 (model override)
   -->
 
+  <!-- Import map for Arrow.js (ESM from CDN, zero build step needed) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "@arrow-js/core": "https://esm.sh/@arrow-js/core@1.0.0-alpha.9"
+    }
+  }
+  </script>
   <script type="module" src="/runtime/main.js"></script>
 </body>
 </html>
