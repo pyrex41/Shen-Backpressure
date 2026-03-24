@@ -1,0 +1,18 @@
+{
+  "name": "shen-web-tools",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Research assistant with all logic in Shen, web tools via TypeScript bridge, Arrow.js generative UI",
+  "type": "module",
+  "scripts": {
+    "build": "npx tsc",
+    "serve": "npx tsx runtime/serve.ts",
+    "dev": "npm run build && npm run serve",
+    "shengen": "npx tsx ../../cmd/shengen-ts/shengen.ts specs/core.shen --out runtime/guards_gen.ts",
+    "check": "npm run shengen && npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "tsx": "^4.7.0"
+  }
+}

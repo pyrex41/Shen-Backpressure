@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shen Web Tools — Research Assistant</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="app"></div>
+
+  <!--
+    Architecture:
+      Shen (.shen files) → defines ALL application logic
+      TypeScript bridge   → executes I/O (web search, fetch, AI generate)
+      Arrow UI (ui.ts)    → reactive rendering of Shen's UI panel tree
+
+    The Shen engine loads src/*.shen at startup, evaluates the logic,
+    and dispatches to the TypeScript bridge via js.call. The bridge
+    pushes UI state back to Arrow for rendering.
+
+    URL params for provider configuration:
+      ?search=mock|websearch   (default: mock)
+      ?fetch=mock|webfetch     (default: mock)
+      ?ai=mock|anthropic       (default: mock)
+      ?key=YOUR_API_KEY        (for anthropic provider)
+      ?model=claude-sonnet-4-6 (model override)
+  -->
+
+  <script type="module" src="/runtime/main.js"></script>
+</body>
+</html>
