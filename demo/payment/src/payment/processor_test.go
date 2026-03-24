@@ -3,7 +3,24 @@ package payment
 import (
 	"errors"
 	"testing"
+
+	"ralph-shen-agent/internal/shenguard"
 )
+
+// helper builds a SafeTransfer from raw values, proving the balance invariant.
+func mustSafeTransfer(t *testing.T, amount float64, from, to string, balance float64) shenguard.SafeTransfer {
+	t.Helper()
+	amt, err := shenguard.NewAmount(amount)
+	if err != nil {
+		t.Fatalf("NewAmount(%v) failed: %v", amount, err)
+	}
+	tx := shenguard.NewTransaction(amt, shenguard.NewAccountId(from), shenguard.NewAccountId(to))
+	check, err := shenguard.NewBalanceChecked(balance, tx)
+	if err != nil {
+		t.Fatalf("NewBalanceChecked(%v, tx{%v}) failed: %v", balance, amount, err)
+	}
+	return shenguard.NewSafeTransfer(tx, check)
+}
 
 func TestCreateAccount(t *testing.T) {
 	p := NewProcessor()
@@ -24,9 +41,10 @@ func TestCreateAccount(t *testing.T) {
 func TestCreateAccountNegativeBalance(t *testing.T) {
 	p := NewProcessor()
 
+	// NewAmount rejects negative values — this is the guard type in action
 	err := p.CreateAccount("bob", -50)
-	if !errors.Is(err, ErrNegativeAmount) {
-		t.Fatalf("expected ErrNegativeAmount, got %v", err)
+	if err == nil {
+		t.Fatal("expected error for negative balance, got nil")
 	}
 }
 
@@ -35,7 +53,8 @@ func TestTransfer(t *testing.T) {
 	p.CreateAccount("alice", 100)
 	p.CreateAccount("bob", 50)
 
-	err := p.Transfer(Transaction{Amount: 30, From: "alice", To: "bob"})
+	safe := mustSafeTransfer(t, 30, "alice", "bob", 100)
+	err := p.Transfer(safe)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -51,39 +70,29 @@ func TestTransfer(t *testing.T) {
 	}
 }
 
-func TestTransferInsufficientBalance(t *testing.T) {
-	p := NewProcessor()
-	p.CreateAccount("alice", 20)
-	p.CreateAccount("bob", 0)
-
-	err := p.Transfer(Transaction{Amount: 50, From: "alice", To: "bob"})
-	if !errors.Is(err, ErrInsufficientBalance) {
-		t.Fatalf("expected ErrInsufficientBalance, got %v", err)
+func TestBalanceCheckRejectsInsufficientFunds(t *testing.T) {
+	// The balance check happens at SafeTransfer construction time,
+	// not at Transfer time. NewBalanceChecked will reject this.
+	amt, err := shenguard.NewAmount(50)
+	if err != nil {
+		t.Fatal(err)
 	}
+	tx := shenguard.NewTransaction(amt, shenguard.NewAccountId("alice"), shenguard.NewAccountId("bob"))
 
-	// Balance must be unchanged — backpressure in action
-	aliceBal, _ := p.GetBalance("alice")
-	if aliceBal != 20 {
-		t.Errorf("expected alice balance unchanged at 20, got %.2f", aliceBal)
+	// Alice only has 20 — BalanceChecked should reject
+	_, err = shenguard.NewBalanceChecked(20, tx)
+	if err == nil {
+		t.Fatal("NewBalanceChecked(20, tx{50}) must fail — insufficient funds")
 	}
-}
-
-func TestTransferNegativeAmount(t *testing.T) {
-	p := NewProcessor()
-	p.CreateAccount("alice", 100)
-	p.CreateAccount("bob", 100)
-
-	err := p.Transfer(Transaction{Amount: -10, From: "alice", To: "bob"})
-	if !errors.Is(err, ErrNegativeAmount) {
-		t.Fatalf("expected ErrNegativeAmount, got %v", err)
-	}
+	t.Logf("Correctly rejected at proof construction: %v", err)
 }
 
 func TestTransferSelfTransfer(t *testing.T) {
 	p := NewProcessor()
 	p.CreateAccount("alice", 100)
 
-	err := p.Transfer(Transaction{Amount: 10, From: "alice", To: "alice"})
+	safe := mustSafeTransfer(t, 10, "alice", "alice", 100)
+	err := p.Transfer(safe)
 	if !errors.Is(err, ErrSelfTransfer) {
 		t.Fatalf("expected ErrSelfTransfer, got %v", err)
 	}
@@ -93,7 +102,8 @@ func TestTransferAccountNotFound(t *testing.T) {
 	p := NewProcessor()
 	p.CreateAccount("alice", 100)
 
-	err := p.Transfer(Transaction{Amount: 10, From: "alice", To: "ghost"})
+	safe := mustSafeTransfer(t, 10, "alice", "ghost", 100)
+	err := p.Transfer(safe)
 	if !errors.Is(err, ErrAccountNotFound) {
 		t.Fatalf("expected ErrAccountNotFound, got %v", err)
 	}
@@ -104,15 +114,18 @@ func TestHistory(t *testing.T) {
 	p.CreateAccount("alice", 100)
 	p.CreateAccount("bob", 0)
 
-	p.Transfer(Transaction{Amount: 25, From: "alice", To: "bob"})
-	p.Transfer(Transaction{Amount: 10, From: "alice", To: "bob"})
+	safe1 := mustSafeTransfer(t, 25, "alice", "bob", 100)
+	p.Transfer(safe1)
+
+	safe2 := mustSafeTransfer(t, 10, "alice", "bob", 75)
+	p.Transfer(safe2)
 
 	h := p.History()
 	if len(h) != 2 {
 		t.Fatalf("expected 2 history entries, got %d", len(h))
 	}
-	if h[0].Amount != 25 {
-		t.Errorf("expected first tx amount 25, got %.2f", h[0].Amount)
+	if h[0].Tx().Amount().Val() != 25 {
+		t.Errorf("expected first tx amount 25, got %.2f", h[0].Tx().Amount().Val())
 	}
 }
 
@@ -123,21 +136,25 @@ func TestBalanceNeverNegative(t *testing.T) {
 	p.CreateAccount("a", 100)
 	p.CreateAccount("b", 0)
 
-	transfers := []Transaction{
-		{Amount: 50, From: "a", To: "b"},
-		{Amount: 50, From: "a", To: "b"},
-		{Amount: 10, From: "a", To: "b"}, // should fail: only 0 left
+	// First transfer: 50 from a to b (balance 100 covers it)
+	safe1 := mustSafeTransfer(t, 50, "a", "b", 100)
+	if err := p.Transfer(safe1); err != nil {
+		t.Fatalf("transfer 1: unexpected error: %v", err)
 	}
 
-	for i, tx := range transfers {
-		err := p.Transfer(tx)
-		if i == 2 {
-			if !errors.Is(err, ErrInsufficientBalance) {
-				t.Fatalf("transfer %d: expected insufficient balance error, got %v", i, err)
-			}
-		} else if err != nil {
-			t.Fatalf("transfer %d: unexpected error: %v", i, err)
-		}
+	// Second transfer: 50 from a to b (balance 50 covers it)
+	safe2 := mustSafeTransfer(t, 50, "a", "b", 50)
+	if err := p.Transfer(safe2); err != nil {
+		t.Fatalf("transfer 2: unexpected error: %v", err)
+	}
+
+	// Third transfer: 10 from a to b — should fail at BalanceChecked construction
+	// because a only has 0 left
+	amt, _ := shenguard.NewAmount(10)
+	tx := shenguard.NewTransaction(amt, shenguard.NewAccountId("a"), shenguard.NewAccountId("b"))
+	_, err := shenguard.NewBalanceChecked(0, tx)
+	if err == nil {
+		t.Fatal("BalanceChecked should reject: balance 0 < amount 10")
 	}
 
 	aBal, _ := p.GetBalance("a")

@@ -99,19 +99,22 @@ Becomes:
 
 ```go
 type BalanceChecked struct {
-    Bal float64
-    Tx  Transaction
+    bal float64
+    tx  Transaction
 }
 
 func NewBalanceChecked(bal float64, tx Transaction) (BalanceChecked, error) {
-    if !(bal >= tx.Amount.Val()) {
-        return BalanceChecked{}, fmt.Errorf("bal must be >= tx.Amount")
+    if !(bal >= tx.amount.Val()) {
+        return BalanceChecked{}, fmt.Errorf("bal must be >= tx.amount")
     }
-    return BalanceChecked{Bal: bal, Tx: tx}, nil
+    return BalanceChecked{bal: bal, tx: tx}, nil
 }
+
+func (t BalanceChecked) Bal() float64       { return t.bal }
+func (t BalanceChecked) Tx() Transaction    { return t.tx }
 ```
 
-The LLM cannot bypass this — `Amount{v: 50}` won't compile (unexported `v`), and `SafeTransfer` requires a `BalanceChecked` proof that can only come from `NewBalanceChecked`.
+The LLM cannot bypass this — `Amount{v: 50}` won't compile (unexported `v`), `BalanceChecked{bal: 0, tx: tx}` won't compile either (unexported fields), and `SafeTransfer` requires a `BalanceChecked` proof that can only come from `NewBalanceChecked`.
 
 ### Guard Type Patterns
 
@@ -119,9 +122,9 @@ The LLM cannot bypass this — `Amount{v: 50}` won't compile (unexported `v`), a
 |-------------|-----------|-------------|
 | Wrapper (`X : string; ==> X : account-id`) | `struct{ v string }` | `NewAccountId(string) AccountId` |
 | Constrained (`(>= X 0) : verified`) | `struct{ v float64 }` | `NewAmount(float64) (Amount, error)` |
-| Composite (`[A B C] : transaction`) | `struct{ A, B, C }` | `NewTransaction(A, B, C) Transaction` |
-| Guarded (`(>= Bal (head Tx)) : verified`) | `struct{ Bal, Tx }` | `NewBalanceChecked(...) (BalanceChecked, error)` |
-| Proof chain (`Check : balance-checked`) | `struct{ Tx, Check }` | `NewSafeTransfer(Transaction, BalanceChecked) SafeTransfer` |
+| Composite (`[A B C] : transaction`) | `struct{ a, b, c }` + accessors | `NewTransaction(A, B, C) Transaction` |
+| Guarded (`(>= Bal (head Tx)) : verified`) | `struct{ bal, tx }` + accessors | `NewBalanceChecked(...) (BalanceChecked, error)` |
+| Proof chain (`Check : balance-checked`) | `struct{ tx, check }` + accessors | `NewSafeTransfer(Transaction, BalanceChecked) SafeTransfer` |
 
 ## Demos
 
