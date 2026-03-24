@@ -97,4 +97,4 @@ The generated TypeScript guards ensure the Arrow sandbox can only render valid c
 - The full loop: natural language → Prolog resolution → type-safe codegen → reactive rendering
 - Backpressure works at TWO levels: Shen rejects invalid specs (gate 4), TypeScript rejects invalid UI code (gate 3 via shengen-ts)
 
-Use /sb:scaffold to set up the Ralph loop, then run the loop to build it out. The Shen Prolog integration is the novel part — start with the reasoning engine and work outward to the UI.
+Use /sb:ralph-scaffold to set up the Ralph loop, then run the loop to build it out. The Shen Prolog integration is the novel part — start with the reasoning engine and work outward to the UI.

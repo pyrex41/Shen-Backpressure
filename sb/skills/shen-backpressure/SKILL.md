@@ -12,7 +12,7 @@ Formal type specs (Shen sequent calculus) + codegen bridge (shengen) that genera
 
 - `/sb:init` — Add Shen backpressure to any project. Specs, guard types, gates. No assumptions about workflow.
 - `/sb:loop` — Configure and launch a Ralph loop (autonomous LLM harness). Requires init first.
-- `/sb:scaffold` — All-in-one: init + Ralph loop in a single flow.
+- `/sb:ralph-scaffold` — All-in-one: init + Ralph loop in a single flow.
 - `/sb:create-shengen` — Build shengen for a new target language.
 
 ## How It Works

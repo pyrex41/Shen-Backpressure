@@ -1,5 +1,5 @@
 ---
-name: scaffold
+name: ralph-scaffold
 description: All-in-one setup for a Shen-backpressure project with Ralph loop. Combines /sb:init (specs, shengen, guard types) + /sb:loop (orchestrator, prompt, plan) into a single flow. Goes from zero to running four-gate verification.
 ---
 

@@ -22,4 +22,4 @@ Operations:
 - POST /tenants/:id/resources → create resource, requires TenantAccess proof
 - Admin dashboard showing tenants, users, and access logs
 
-Use /sb:scaffold to set up the Ralph loop with four-gate backpressure, then run the loop to build it out.
+Use /sb:ralph-scaffold to set up the Ralph loop with four-gate backpressure, then run the loop to build it out.
