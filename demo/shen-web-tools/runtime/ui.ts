@@ -121,8 +121,8 @@ function searchBar(onSubmit: (q: string) => void) {
         type="text"
         placeholder="Search any topic — Shen resolves what to research..."
         value="${() => local.value}"
-        @input="${(e: Event) => { local.value = (e.target as HTMLInputElement).value; }}"
-        @keydown="${(e: KeyboardEvent) => { if (e.key === "Enter") doSubmit(); }}"
+        @input="${(e: any) => { local.value = e.target.value; }}"
+        @keydown="${(e: any) => { if (e.key === 'Enter') doSubmit(); }}"
       />
       <button class="search-btn" @click="${doSubmit}">Research</button>
     </div>
