@@ -21,7 +21,7 @@ func TestAmountMustBeNonNegative(t *testing.T) {
 
 func TestBalanceCheckedRequiresSufficientFunds(t *testing.T) {
 	// This is the KEY invariant: (>= Bal (head Tx))
-	// Resolved via symbol table to: bal >= tx.Amount.Val()
+	// Resolved via symbol table to: bal >= tx.amount.Val()
 
 	amt, _ := payment.NewAmount(50)
 	tx := payment.NewTransaction(

@@ -67,7 +67,7 @@ Transaction + BalanceChecked → NewSafeTransfer(Transaction, BalanceChecked) �
 
 You cannot skip a step. SafeTransfer requires a BalanceChecked, which requires proving the balance covers the transaction.
 
-### Rule 4: Extract with .Val()
+### Rule 4: Extract with .Val() and Accessor Methods
 
 To get raw values back (for SQL queries, JSON output, templates):
 
@@ -76,8 +76,9 @@ To get raw values back (for SQL queries, JSON output, templates):
 emailStr := email.Val()     // string
 amountF := amount.Val()     // float64
 
-// Composite types — access exported fields directly
-fromId := tx.From.Val()     // string from AccountId field
+// Composite types — use accessor methods (fields are unexported)
+fromId := tx.From().Val()   // string from AccountId accessor
+txAmount := tx.Amount()     // Amount from Transaction accessor
 ```
 
 ## Spec Patterns
