@@ -1,6 +1,6 @@
 \* src/ai-gen.shen - AI generation logic in Shen *\
 \* Defines how to construct prompts and process AI responses *\
-\* The actual LLM call is delegated to the bridge; Shen owns the logic *\
+\* The actual LLM call is delegated to CL; Shen owns the logic *\
 
 \* --- Prompt construction --- *\
 \* These are pure functions that build well-structured prompts *\
@@ -10,9 +10,11 @@
   { search-query --> (list grounded-source) --> ai-prompt }
   [QueryText _] Sources ->
     (let SystemMsg (cn "You are a research assistant. Summarize the following "
-                   (cn "web sources about: " (value->string QueryText)))
+                   (cn "web sources about: " (str QueryText)))
          SourceTexts (format-sources Sources)
-         UserMsg (cn "Based on these sources, provide a clear summary:\n\n"
+         UserMsg (cn "Based on these sources, provide a clear summary:
+
+"
                   SourceTexts)
       [SystemMsg UserMsg]))
 
@@ -22,7 +24,10 @@
   Topic Sources ->
     (let SystemMsg "You are an expert analyst. Provide structured analysis with key findings, implications, and open questions."
          SourceTexts (format-sources Sources)
-         UserMsg (cn "Analyze this topic: " (cn Topic (cn "\n\nSources:\n" SourceTexts)))
+         UserMsg (cn "Analyze this topic: " (cn Topic (cn "
+
+Sources:
+" SourceTexts)))
       [SystemMsg UserMsg]))
 
 (define make-comparison-prompt
@@ -31,7 +36,9 @@
   Sources ->
     (let SystemMsg "Compare and contrast the following sources. Identify agreements, disagreements, and unique insights from each."
          SourceTexts (format-sources Sources)
-         UserMsg (cn "Compare these sources:\n\n" SourceTexts)
+         UserMsg (cn "Compare these sources:
+
+" SourceTexts)
       [SystemMsg UserMsg]))
 
 \* --- Source formatting --- *\
@@ -49,9 +56,12 @@
     (let Title (head Hit)
          Url (head (tail Hit))
          Content (head (tail Page))
-         Header (cn "[" (cn (value->string N) (cn "] " (cn Title (cn " (" (cn (value->string Url) ")"))))))
+         Header (cn "[" (cn (str N) (cn "] " (cn Title (cn " (" (cn (str Url) ")"))))))
          Body (truncate Content 500)
-         Entry (cn Header (cn "\n" (cn Body "\n\n")))
+         Entry (cn Header (cn "
+" (cn Body "
+
+")))
       (cn Entry (format-sources-h Rest (+ N 1)))))
 
 \* --- Response processing --- *\
@@ -78,8 +88,8 @@
   { research-summary --> (list ui-text-block) }
   [Query Sources Response] ->
     (let SummaryBlock [(extract-summary-text Response) "summary"]
-         SourceCount [(cn "Based on " (cn (value->string (length Sources)) " sources")) "meta"]
-         QueryBlock [(cn "Research: " (value->string (head Query))) "query-echo"]
+         SourceCount [(cn "Based on " (cn (str (length Sources)) " sources")) "meta"]
+         QueryBlock [(cn "Research: " (str (head Query))) "query-echo"]
       [QueryBlock SourceCount SummaryBlock]))
 
 \* --- Utility --- *\
@@ -87,16 +97,17 @@
 (define truncate
   \* Truncate a string to at most N characters *\
   { string --> number --> string }
-  S N -> (if (<= (length S) N)
-             S
-             (cn (substr S 0 N) "...")))
+  S N -> S where (<= (string-length S) N)
+  S N -> (cn (pos-string S 0 N) "..."))
 
-(define value->string
-  \* Convert any value to its string representation *\
-  { A --> string }
-  X -> (js.call "bridge.toString" X))
-
-(define substr
-  \* Extract a substring *\
+(define pos-string
+  \* Extract substring from Start for Len characters *\
   { string --> number --> number --> string }
-  S Start End -> (js.call "bridge.substr" [S Start End]))
+  _ _ 0 -> ""
+  S Start Len -> (cn (str (pos S Start)) (pos-string S (+ Start 1) (- Len 1))))
+
+(define string-length
+  \* Length of a string *\
+  { string --> number }
+  "" -> 0
+  S -> (+ 1 (string-length (tlstr S))))

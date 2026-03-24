@@ -1,39 +1,32 @@
 # Shen Web Tools — Research Assistant
 
-A research assistant where **all application logic is written in Shen**. The app searches the web, fetches pages, generates AI summaries, and renders a generative UI — with Shen controlling every decision.
+A research assistant where **all application logic is written in Shen**, running natively on **Common Lisp (SBCL)**. Arrow.js handles the frontend rendering.
 
 ## Architecture
 
 ```
-User query (natural language)
-       |
-       v
-Shen Engine (src/*.shen)
-  - refine-query: expand/improve the search query
-  - search-and-collect: dispatch web search
-  - fetch-top-n: fetch relevant pages
-  - ground-sources: pair pages with search hits (KEY INVARIANT)
-  - summarize-with-sources: construct AI prompt, generate summary
-  - resolve-ui: decide what UI components to show
-  - assemble-research-view: build the final UI panel tree
-       |
-       v (js.call "bridge.X" ...)
-TypeScript Bridge (runtime/bridge.ts)
-  - webSearch → harness WebSearch tool or API
-  - webFetch → harness WebFetch tool or API
-  - aiGenerate → Anthropic API or harness tool
-  - render → push UI state to Arrow
-       |
-       v
-Arrow UI (runtime/ui.ts)
-  - Reactive signals driven by Shen's render calls
-  - Components: search bar, loading, search hits, sources, summary
-  - Pipeline indicator shows current Shen execution stage
+Arrow.js Frontend (browser)
+       ↕ HTTP JSON API
+Common Lisp Backend (SBCL)
+  ├── Shen runtime (loaded at boot)
+  │   ├── specs/core.shen     ← formal type specs (sequent calculus)
+  │   ├── src/web-tools.shen  ← web tool definitions + combinators
+  │   ├── src/ai-gen.shen     ← prompt construction + response processing
+  │   ├── src/ui-resolve.shen ← UI layout resolution (Prolog-style)
+  │   └── src/app.shen        ← pipeline orchestration
+  ├── CL bridge (bridge.lisp)
+  │   ├── web-search  → dexador HTTP client
+  │   ├── web-fetch   → dexador + HTML stripping
+  │   └── ai-generate → Anthropic API via dexador
+  └── HTTP server (server.lisp)
+      └── hunchentoot serving JSON API + static files
 ```
+
+**Shen decides WHAT to do. CL does the I/O. Arrow renders the result.**
 
 ## Key Invariant
 
-The Shen spec enforces that **AI-generated summaries must be grounded in real sources**:
+The Shen spec enforces that AI summaries must be grounded in real sources:
 
 ```shen
 (datatype grounded-source
@@ -44,40 +37,99 @@ The Shen spec enforces that **AI-generated summaries must be grounded in real so
   [Page Hit] : grounded-source;)
 ```
 
-You cannot construct a `research-summary` without `grounded-source` values — and those require matching URLs between fetched pages and search hits. This is backpressure: the type system prevents ungrounded AI generation.
+You cannot construct a `research-summary` without `grounded-source` values — and those require matching URLs between fetched pages and search hits.
+
+## Prerequisites
+
+1. **SBCL** (Steel Bank Common Lisp):
+   ```bash
+   # macOS
+   brew install sbcl
+   # Ubuntu
+   sudo apt install sbcl
+   ```
+
+2. **Quicklisp** (CL package manager):
+   ```bash
+   curl -O https://beta.quicklisp.org/quicklisp.lisp
+   sbcl --load quicklisp.lisp \
+        --eval '(quicklisp-quickstart:install)' \
+        --eval '(ql:add-to-init-file)' \
+        --quit
+   ```
+
+3. **Shen on SBCL**:
+   ```bash
+   git clone https://github.com/Shen-Language/shen-sbcl.git
+   cd shen-sbcl && make && sudo make install
+   ```
+
+4. **Node.js** (for frontend build only):
+   ```bash
+   npm install
+   ```
 
 ## Running
 
 ```bash
-# Install and serve (mock providers)
-make dev
+# Build frontend + start CL backend (mock providers)
+make serve
 
-# With real web search and AI
-# (requires API keys as URL params)
-make dev
-# then visit: http://localhost:3000?search=websearch&ai=anthropic&key=YOUR_KEY
+# Or step by step:
+make frontend          # compile Arrow.js TypeScript
+./backend/start.sh     # boot SBCL + Shen + hunchentoot
+
+# With real AI:
+ANTHROPIC_API_KEY=sk-... ./backend/start.sh
+
+# Custom port:
+./backend/start.sh --port 8080
 ```
 
-## Files
+Then visit `http://localhost:3000`.
 
-| File | Role |
-|------|------|
-| `specs/core.shen` | Formal type specs (sequent calculus) |
-| `src/web-tools.shen` | Web tool definitions + combinators |
-| `src/ai-gen.shen` | AI prompt construction + response processing |
-| `src/ui-resolve.shen` | UI layout resolution (Prolog-style) |
-| `src/app.shen` | Main pipeline orchestration |
-| `runtime/bridge.ts` | I/O bridge (the only TypeScript with logic) |
-| `runtime/shen-engine.ts` | Minimal Shen evaluator for the browser |
-| `runtime/ui.ts` | Arrow.js reactive UI renderer |
-| `runtime/main.ts` | Bootstrap: wire Shen + bridge + UI |
+## API Endpoints
 
-## Pipeline States
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/research` | Full pipeline (Shen orchestrates all steps) |
+| POST | `/api/search` | Web search only |
+| POST | `/api/fetch` | Fetch URL only |
+| POST | `/api/generate` | AI generation only |
+| GET | `/api/state` | Current pipeline state (for polling) |
+
+## File Layout
+
+```
+specs/core.shen          Shen sequent-calculus type specs
+src/web-tools.shen       Web tool definitions (calls CL bridge)
+src/ai-gen.shen          AI prompt logic
+src/ui-resolve.shen      Generative UI resolution
+src/app.shen             Main pipeline orchestration
+backend/
+  packages.lisp          CL package + Quicklisp deps
+  bridge.lisp            Web search/fetch/AI in CL (dexador)
+  server.lisp            Hunchentoot HTTP server + JSON API
+  shen-interop.lisp      Load Shen, register bridge functions
+  load.lisp              Bootstrap (load all, start server)
+  start.sh               Shell launcher for SBCL
+runtime/
+  bridge.ts              Frontend API client (fetch calls to CL)
+  ui.ts                  Arrow.js reactive UI renderer
+  main.ts                Frontend bootstrap
+index.html               Entry point (loads Arrow.js via importmap)
+static/style.css         Styles
+```
+
+## Pipeline
 
 Shen enforces a strict pipeline order via types:
 
-1. **idle** → `pipeline-idle` — waiting for user input
-2. **searching** → `pipeline-searching` — web search in progress
-3. **fetching** → `pipeline-fetching` — fetching top pages
-4. **generating** → `pipeline-generating` — AI summary from grounded sources
-5. **complete** → `pipeline-complete` — rendering safe results
+1. **query** → validate and refine (`refine-query`)
+2. **search** → web search via CL bridge (`search-and-collect`)
+3. **fetch** → retrieve top pages via CL bridge (`fetch-top-n`)
+4. **ground** → pair pages with hits, enforce URL match (`ground-sources`)
+5. **generate** → AI summary from grounded sources (`summarize-with-sources`)
+6. **render** → assemble UI panel tree (`assemble-research-view`)
+
+The type system prevents skipping steps — you can't build a `research-summary` without `grounded-source` values.

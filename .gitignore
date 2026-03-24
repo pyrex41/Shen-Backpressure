@@ -24,3 +24,7 @@ thoughts/
 
 # Repomix output
 repomix-output.xml
+
+# Node.js
+node_modules/
+dist/
