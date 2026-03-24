@@ -54,7 +54,7 @@ cp Shen-Backpressure/sb/skills/shen-backpressure/SKILL.md .claude/skills/shen-ba
 |---------|-------------|
 | `/sb:init` | Add Shen backpressure to any project — specs, shengen, guard types, gates. Works with any workflow. |
 | `/sb:loop` | Configure and launch a Ralph loop (autonomous LLM harness with four-gate backpressure). Requires init. |
-| `/sb:scaffold` | All-in-one: init + loop setup in a single flow. For people who know they want Ralph. |
+| `/sb:ralph-scaffold` | All-in-one: init + loop setup in a single flow. For people who know they want Ralph. |
 | `/sb:create-shengen` | Build a shengen codegen tool for any target language (Go, Rust, TS, Python, Java, etc.) |
 
 ### Quick Start
@@ -65,7 +65,7 @@ cp Shen-Backpressure/sb/skills/shen-backpressure/SKILL.md .claude/skills/shen-ba
 
 Want a Ralph loop?
 ```
-> /sb:scaffold   # all-in-one: init + Ralph loop setup
+> /sb:ralph-scaffold   # all-in-one: init + Ralph loop setup
 ```
 
 Or step by step:
@@ -141,7 +141,7 @@ Reference guard type output in [`examples/`](examples/).
 ```
 cmd/shengen/             Codegen tool source (stdlib only)
 sb/                      SKM bundle
-  commands/              /sb:scaffold, /sb:setup, /sb:init, /sb:loop
+  commands/              /sb:ralph-scaffold, /sb:setup, /sb:init, /sb:loop
   skills/                Auto-activated skill description
   AGENT_PROMPT.md        Reference manual for inner LLM harness
 examples/                Reference shengen output for each domain

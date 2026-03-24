@@ -25,4 +25,4 @@ Operations:
 - GET /patients/:id/history → administration history with proofs
 - Dashboard showing patients, drugs, and a dosage calculator form
 
-Use /sb:scaffold to set up the Ralph loop with four-gate backpressure, then run the loop to build it out.
+Use /sb:ralph-scaffold to set up the Ralph loop with four-gate backpressure, then run the loop to build it out.
