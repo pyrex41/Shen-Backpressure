@@ -70,7 +70,7 @@ func TestTransfer(t *testing.T) {
 	}
 }
 
-func TestTransferInsufficientBalance(t *testing.T) {
+func TestBalanceCheckRejectsInsufficientFunds(t *testing.T) {
 	// The balance check happens at SafeTransfer construction time,
 	// not at Transfer time. NewBalanceChecked will reject this.
 	amt, err := shenguard.NewAmount(50)
