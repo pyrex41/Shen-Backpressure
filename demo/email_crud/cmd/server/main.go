@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"html/template"
 	"log"
@@ -12,6 +13,9 @@ import (
 )
 
 func main() {
+	seed := flag.Bool("seed", false, "Seed the database with sample data")
+	flag.Parse()
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -27,7 +31,28 @@ func main() {
 	}
 	defer database.Close()
 
-	tmpl := template.Must(template.ParseGlob("templates/*.html"))
+	if *seed {
+		if err := db.Seed(database); err != nil {
+			log.Fatalf("failed to seed database: %v", err)
+		}
+		log.Println("Database seeded with sample data")
+	}
+
+	funcMap := template.FuncMap{
+		"derefInt": func(p *int) int {
+			if p == nil {
+				return 0
+			}
+			return *p
+		},
+		"derefStr": func(p *string) string {
+			if p == nil {
+				return ""
+			}
+			return *p
+		},
+	}
+	tmpl := template.Must(template.New("").Funcs(funcMap).ParseGlob("templates/*.html"))
 
 	srv := &handlers.Server{
 		DB:   database,
@@ -51,6 +76,7 @@ func main() {
 	// Campaigns CRUD
 	mux.HandleFunc("GET /campaigns", srv.HandleCampaignsList)
 	mux.HandleFunc("POST /campaigns", srv.HandleCampaignsCreate)
+	mux.HandleFunc("PUT /campaigns/{id}", srv.HandleCampaignsUpdate)
 	mux.HandleFunc("DELETE /campaigns/{id}", srv.HandleCampaignsDelete)
 
 	// Copy Variants
@@ -59,6 +85,7 @@ func main() {
 	mux.HandleFunc("DELETE /copy/{id}", srv.HandleCopyVariantsDelete)
 
 	// Send Email
+	mux.HandleFunc("GET /send", srv.HandleSendPage)
 	mux.HandleFunc("POST /send", srv.HandleSendEmail)
 
 	// CTA Landing (the core backpressure-enforced flow)

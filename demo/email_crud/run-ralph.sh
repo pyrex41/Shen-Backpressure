@@ -20,6 +20,10 @@ append_backpressure() {
     printf '\n### FAIL [%s]\n```\n%s\n```\n' "$gate_name" "$output" >> "$PROMPT_FILE"
 }
 
+plan_complete() {
+    ! grep -q '^\- \[ \]' plans/fix_plan.md 2>/dev/null
+}
+
 run_gates() {
     local failed=0
 
@@ -55,11 +59,13 @@ while true; do
     echo "  [ralph] Running gates..."
     if run_gates; then
         echo "  [ralph] All gates PASSED on iteration $iter"
+        if plan_complete; then
+            echo ""
+            echo "  [ralph] All plan items checked off. Done!"
+            exit 0
+        fi
     else
         echo "  [ralph] Gates FAILED — backpressure written to PROMPT.md"
     fi
 
-    echo ""
-    echo "  Press Enter to continue, or Ctrl+C to stop..."
-    read -r
 done

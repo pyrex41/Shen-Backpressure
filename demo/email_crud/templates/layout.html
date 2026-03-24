@@ -1,0 +1,26 @@
+{{define "head"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Campaign Manager</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js"></script>
+</head>
+<body>
+    <nav>
+        <a href="/">Dashboard</a>
+        <a href="/users">Users</a>
+        <a href="/campaigns">Campaigns</a>
+        <a href="/send">Send</a>
+    </nav>
+    <main>
+{{end}}
+
+{{define "foot"}}
+    </main>
+</body>
+</html>
+{{end}}

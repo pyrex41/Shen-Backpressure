@@ -1,0 +1,53 @@
+{{template "head" .}}
+
+<h1>Dashboard</h1>
+
+<section>
+    <h2>Campaigns ({{len .Campaigns}})</h2>
+    {{if .Campaigns}}
+    <table>
+        <thead>
+            <tr><th>Name</th><th>Subject</th><th>CTA URL</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+            {{range .Campaigns}}
+            <tr>
+                <td>{{.Name}}</td>
+                <td>{{.Subject}}</td>
+                <td>{{.CtaURL}}</td>
+                <td><a href="/campaigns/{{.ID}}/copy">Copy Variants</a></td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+    {{else}}
+    <p>No campaigns yet. <a href="/campaigns">Create one</a>.</p>
+    {{end}}
+    <p><a href="/campaigns">Manage Campaigns</a></p>
+</section>
+
+<section>
+    <h2>Users ({{len .Users}})</h2>
+    {{if .Users}}
+    <table>
+        <thead>
+            <tr><th>Email</th><th>Age Decade</th><th>State</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+            {{range .Users}}
+            <tr>
+                <td>{{.Email}}</td>
+                <td>{{if .AgeDecade}}{{.AgeDecade}}s{{else}}&mdash;{{end}}</td>
+                <td>{{if .State}}{{.State}}{{else}}&mdash;{{end}}</td>
+                <td>{{if .IsKnown}}Known{{else}}Unknown{{end}}</td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+    {{else}}
+    <p>No users yet. <a href="/users">Add one</a>.</p>
+    {{end}}
+    <p><a href="/users">Manage Users</a></p>
+</section>
+
+{{template "foot" .}}

@@ -1,0 +1,56 @@
+{{template "head" .}}
+
+<h1>Campaigns</h1>
+
+<section>
+    <h2>Create Campaign</h2>
+    <form hx-post="/campaigns" hx-target="#campaign-rows" hx-swap="innerHTML" hx-on::after-request="if(event.detail.successful) this.reset()">
+        <label>Name <input type="text" name="name" required></label>
+        <label>Subject <input type="text" name="subject" required></label>
+        <label>CTA URL <input type="text" name="cta_url" required></label>
+        <button type="submit">Create Campaign</button>
+    </form>
+</section>
+
+<section>
+    <h2>All Campaigns ({{len .Campaigns}})</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Subject</th>
+                <th>CTA URL</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="campaign-rows">
+            {{template "campaign_rows" .Campaigns}}
+        </tbody>
+    </table>
+</section>
+
+{{template "foot" .}}
+
+{{define "campaign_rows"}}
+{{range .}}
+<tr id="campaign-{{.ID}}" x-data="{ editing: false }">
+    <td x-show="!editing">{{.Name}}</td>
+    <td x-show="!editing">{{.Subject}}</td>
+    <td x-show="!editing">{{.CtaURL}}</td>
+    <td x-show="!editing">
+        <button @click="editing = true">Edit</button>
+        <a href="/campaigns/{{.ID}}/copy">Copy Variants</a>
+        <button hx-delete="/campaigns/{{.ID}}" hx-target="#campaign-{{.ID}}" hx-swap="outerHTML" hx-confirm="Delete this campaign?">Delete</button>
+    </td>
+    <td x-show="editing" colspan="4" x-cloak>
+        <form hx-put="/campaigns/{{.ID}}" hx-target="#campaign-rows" hx-swap="innerHTML" style="display:inline-flex;gap:0.5rem;align-items:center">
+            <input type="text" name="name" value="{{.Name}}" required>
+            <input type="text" name="subject" value="{{.Subject}}" required>
+            <input type="text" name="cta_url" value="{{.CtaURL}}" required>
+            <button type="submit">Save</button>
+            <button type="button" @click="editing = false">Cancel</button>
+        </form>
+    </td>
+</tr>
+{{end}}
+{{end}}
