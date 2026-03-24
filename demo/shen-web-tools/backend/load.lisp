@@ -32,7 +32,8 @@
 
 (defun configure (&key (port nil port-p) (search nil search-p)
                        (fetch nil fetch-p) (ai nil ai-p)
-                       (api-key nil key-p) (model nil model-p))
+                       (api-key nil key-p) (model nil model-p)
+                       (rho-bin nil rho-p))
   "Configure providers and server options."
   (when port-p (setf *port* port))
   (when search-p (setf *search-provider* search))
@@ -40,6 +41,7 @@
   (when ai-p (setf *ai-provider* ai))
   (when key-p (setf *anthropic-api-key* api-key))
   (when model-p (setf *anthropic-model* model))
+  (when rho-p (setf *rho-binary* rho-bin))
   (format t "Configuration updated.~%"))
 
 (defun boot ()
@@ -50,6 +52,17 @@
       (setf *anthropic-api-key* key)
       (setf *ai-provider* :anthropic)
       (format t "Using Anthropic API (key from environment)~%")))
+
+  ;; Auto-detect rho-cli on PATH
+  (when (uiop:run-program (list "which" *rho-binary*) :ignore-error-status t :output nil)
+    (format t "rho-cli detected on PATH~%")
+    ;; Use rho for search/fetch if no explicit provider set
+    (when (eq *search-provider* :mock)
+      (setf *search-provider* :duckduckgo)
+      (format t "  Auto-selected :duckduckgo for search (same engine as rho)~%"))
+    (when (eq *fetch-provider* :mock)
+      (setf *fetch-provider* :duckduckgo)
+      (format t "  Auto-selected :duckduckgo for fetch~%")))
 
   ;; Load Shen runtime
   (load-shen-runtime)
