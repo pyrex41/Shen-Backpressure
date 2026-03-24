@@ -56,6 +56,7 @@ cp Shen-Backpressure/sb/skills/shen-backpressure/SKILL.md .claude/skills/shen-ba
 | `/sb:setup` | Scaffold directories, four-gate orchestrator, shengen, prompt, plan |
 | `/sb:init` | Generate Shen specs from English, run shengen to produce Go guard types |
 | `/sb:loop` | Verify prerequisites, confirm config, launch the Ralph loop |
+| `/sb:create-shengen` | Build a shengen codegen tool for any target language (Go, Rust, TS, Python, Java, etc.) |
 
 ### Quick Start
 
