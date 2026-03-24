@@ -15,7 +15,8 @@
     "@arrow-js/core": "^1.0.0-alpha.9"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
-    "tsx": "^4.7.0"
+    "@types/node": "^25.5.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
   }
 }
