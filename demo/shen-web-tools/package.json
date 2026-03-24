@@ -11,6 +11,9 @@
     "shengen": "npx tsx ../../cmd/shengen-ts/shengen.ts specs/core.shen --out runtime/guards_gen.ts",
     "check": "npm run shengen && npm run build"
   },
+  "dependencies": {
+    "@arrow-js/core": "^1.0.0-alpha.9"
+  },
   "devDependencies": {
     "typescript": "^5.4.0",
     "tsx": "^4.7.0"
