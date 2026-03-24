@@ -1,6 +1,7 @@
 \* src/ui-resolve.shen - UI layout resolution in Shen *\
 \* Shen's Prolog engine resolves WHAT to render based on pipeline state *\
-\* Arrow.js handles the HOW of rendering *\
+\* Arrow.js on the frontend handles the HOW of rendering *\
+\* The CL backend serializes Shen's UI decisions as JSON for the frontend *\
 
 \* --- UI resolution rules (Prolog-style in Shen) --- *\
 \* Given the current pipeline state, resolve which UI components to show *\
@@ -70,13 +71,13 @@
   \* Generate component IDs for N search hits *\
   { number --> (list string) }
   0 -> []
-  N -> [(cn "hit-" (value->string N)) | (make-hit-ids (- N 1))])
+  N -> [(cn "hit-" (str N)) | (make-hit-ids (- N 1))])
 
 (define make-source-ids
   \* Generate component IDs for N source cards *\
   { number --> (list string) }
   0 -> []
-  N -> [(cn "source-" (value->string N)) | (make-source-ids (- N 1))])
+  N -> [(cn "source-" (str N)) | (make-source-ids (- N 1))])
 
 \* --- Generative UI decisions --- *\
 \* Shen decides which UI components to create based on content analysis *\
@@ -99,12 +100,12 @@
   [Query Sources Response] ->
     (if (> (length Sources) 5)
         "expanded"
-        (if (> (length (extract-summary-text Response)) 1000)
+        (if (> (string-length (extract-summary-text Response)) 1000)
             "expanded"
             "compact")))
 
 \* --- Panel assembly --- *\
-\* Shen assembles the final UI description that Arrow will render *\
+\* Shen assembles the final UI description that the frontend will render *\
 
 (define assemble-research-view
   \* Build the complete UI description for a finished research task *\

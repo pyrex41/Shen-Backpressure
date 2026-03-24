@@ -1,29 +1,29 @@
 \* src/web-tools.shen - Web tool definitions in Shen *\
 \* These functions define the LOGIC of web operations. *\
-\* Actual I/O is delegated to the TypeScript bridge via foreign calls. *\
+\* Actual I/O is delegated to Common Lisp via (lisp.pkg::fn ...) *\
 
 \* --- Foreign function declarations --- *\
-\* These bind to the TypeScript bridge at runtime *\
+\* These call into CL bridge functions registered in shen-interop.lisp *\
 
 (define web-search
   \* Execute a web search query, return list of search hits *\
   { search-query --> (list search-hit) }
-  Query -> (js.call "bridge.webSearch" Query))
+  [Text MaxResults] -> (cl-web-search Text MaxResults))
 
 (define web-fetch
   \* Fetch a URL and return the page content *\
   { fetch-request --> fetched-page }
-  Req -> (js.call "bridge.webFetch" Req))
+  Url -> (cl-web-fetch Url))
 
 (define ai-generate
   \* Send a prompt to the AI model and return the response *\
   { ai-prompt --> ai-response }
-  Prompt -> (js.call "bridge.aiGenerate" Prompt))
+  [System User] -> (cl-ai-generate System User))
 
 (define current-timestamp
   \* Get the current timestamp *\
   { --> timestamp }
-  -> (js.call "bridge.now"))
+  -> (cl-current-timestamp))
 
 \* --- Web tool combinators --- *\
 \* Pure Shen functions that compose web tools into pipelines *\
@@ -75,7 +75,7 @@
 (define extract-key-terms
   \* Pull key terms from a query for follow-up searches *\
   { string --> (list string) }
-  Q -> (js.call "bridge.extractTerms" Q))
+  Q -> (cl-extract-terms Q))
 
 (define build-followup-queries
   \* Given initial results, build follow-up queries for deeper research *\
