@@ -519,6 +519,184 @@
   text-decoration: underline;
 }
 
+/* --- Chat interface --- */
+
+.chat-input-panel {
+  margin-bottom: 1.5rem;
+}
+
+.chat-history {
+  max-height: 300px;
+  overflow-y: auto;
+  margin-bottom: 0.75rem;
+  padding: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.chat-turn {
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-turn:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.chat-role {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.chat-user .chat-role {
+  color: var(--accent);
+}
+
+.chat-assistant .chat-role {
+  color: var(--accent2);
+}
+
+.chat-content {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.chat-input-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.chat-text-input {
+  flex: 1;
+}
+
+.chat-send-btn {
+  padding: 0.65rem 1.25rem;
+  white-space: nowrap;
+}
+
+/* --- Follow-up suggestions --- */
+
+.followup-panel {
+  margin-bottom: 1.5rem;
+}
+
+.followup-panel h4 {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-bottom: 0.5rem;
+}
+
+.followup-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.followup-chip {
+  padding: 0.4rem 0.85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--accent);
+  font-family: var(--font);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.followup-chip:hover {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
+/* --- Filter pills --- */
+
+.filter-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.pill {
+  padding: 0.25rem 0.65rem;
+  border-radius: 20px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.pill-plan {
+  background: rgba(88, 166, 255, 0.1);
+  color: var(--accent);
+  border: 1px solid rgba(88, 166, 255, 0.2);
+}
+
+.pill-zip {
+  background: rgba(63, 185, 80, 0.1);
+  color: var(--accent2);
+  border: 1px solid rgba(63, 185, 80, 0.2);
+}
+
+.pill-filter {
+  background: rgba(210, 153, 34, 0.1);
+  color: var(--accent3);
+  border: 1px solid rgba(210, 153, 34, 0.2);
+}
+
+.pill-cached {
+  background: rgba(63, 185, 80, 0.1);
+  color: var(--accent2);
+  border: 1px solid rgba(63, 185, 80, 0.2);
+}
+
+/* --- Dynamic panels --- */
+
+.dynamic-panels {
+  margin-bottom: 2rem;
+}
+
+.panel {
+  margin-bottom: 1rem;
+}
+
+.cost-table-panel,
+.plan-cards-panel,
+.detail-panel,
+.chart-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+
+.cost-table-panel h3,
+.plan-cards-panel h3,
+.detail-panel h3,
+.chart-panel h3 {
+  font-size: 1rem;
+  color: var(--accent3);
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.chart-note {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-bottom: 0.75rem;
+}
+
 /* --- Responsive --- */
 
 @media (max-width: 600px) {
