@@ -6,17 +6,13 @@
  *   2. Conversational: user types natural language → LLM interprets → generative UI
  *   3. Follow-up: user asks follow-up → LLM generates new layout on the fly
  *
- * The key insight: the LLM is in the loop TWICE:
- *   a) Interpreting the user's intent
- *   b) Deciding what UI panels to show
- * Shen validates the layout against grounded data (backpressure).
- * Arrow.js renders whatever panels Shen approves.
+ * Pipeline state updates arrive via SSE (server-sent events), not polling.
+ * The LLM generates follow-up suggestions as part of the layout intent.
  */
 
 import {
   medicareChat,
-  medicareLookup,
-  medicareCompare,
+  connectSSE,
 } from "./medicare-bridge.js";
 import type { ChatResponse } from "./medicare-bridge.js";
 import {
@@ -34,36 +30,45 @@ import {
 // ---------------------------------------------------------------------------
 
 let sessionId = `s-${Date.now()}`;
-let pollTimer: ReturnType<typeof setInterval> | null = null;
+let closeSSE: (() => void) | null = null;
 
 // ---------------------------------------------------------------------------
-// Pipeline state polling
+// SSE streaming — replaces polling
 // ---------------------------------------------------------------------------
+// Open an SSE connection before firing the chat request.
+// The backend pushes phase transitions as they happen:
+//   searching → fetching → generating → complete
+// This gives the user instant feedback with zero polling overhead.
 
-function startPolling(): void {
-  if (pollTimer) return;
-  pollTimer = setInterval(async () => {
-    try {
-      const resp = await fetch("/api/state");
-      if (!resp.ok) return;
-      const data = await resp.json();
-      const phase = data.phase || "idle";
+function startStreaming(): void {
+  // Close any existing connection
+  stopStreaming();
+
+  closeSSE = connectSSE({
+    onPhase(phase: string) {
+      // Update UI immediately on each phase transition
       if (["searching", "fetching", "generating"].includes(phase)) {
         setPhase(phase);
       }
-      if (phase === "complete" || phase === "idle") {
-        stopPolling();
-      }
-    } catch {
-      // ignore
-    }
-  }, 600);
+    },
+    onResult(_data: any) {
+      // Result arrives via the chat response, not SSE.
+      // SSE result is a bonus — we could use it for cache-hit fast path.
+    },
+    onError(msg: string) {
+      // SSE errors are non-fatal — the chat response is the source of truth
+      console.warn("SSE error:", msg);
+    },
+    onDone() {
+      closeSSE = null;
+    },
+  });
 }
 
-function stopPolling(): void {
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
+function stopStreaming(): void {
+  if (closeSSE) {
+    closeSSE();
+    closeSSE = null;
   }
 }
 
@@ -72,25 +77,31 @@ function stopPolling(): void {
 // ---------------------------------------------------------------------------
 
 function handleChatResponse(response: ChatResponse): void {
-  stopPolling();
+  stopStreaming();
 
   if (response.session) {
     sessionId = response.session;
   }
 
+  // Default layout with empty followups
+  const defaultLayout = {
+    panels: ["summary", "source-list", "disclaimer"],
+    emphasis: "",
+    reasoning: "",
+    followups: [],
+  };
+
   switch (response.type) {
     case "result":
       if (response.data?.comparisons) {
-        // Comparison result
         setComparisons(
           response.data.comparisons,
-          response.layout || { panels: ["comparison", "disclaimer"], emphasis: "", reasoning: "" },
+          response.layout || { ...defaultLayout, panels: ["comparison", "disclaimer"] },
         );
       } else if (response.data) {
-        // Single result with layout
         setResult(
           response.data,
-          response.layout || { panels: ["summary", "source-list", "disclaimer"], emphasis: "", reasoning: "" },
+          response.layout || defaultLayout,
           sessionId,
         );
       }
@@ -116,13 +127,12 @@ function handleChatResponse(response: ChatResponse): void {
 async function onChat(message: string): Promise<void> {
   addConversationTurn("user", message);
   setPhase("searching");
-  startPolling();
+  startStreaming(); // SSE for real-time phase updates
 
   try {
     const response = await medicareChat(message, sessionId);
     handleChatResponse(response);
 
-    // Add assistant response to conversation
     if (response.data?.summary) {
       addConversationTurn(
         "assistant",
@@ -131,21 +141,20 @@ async function onChat(message: string): Promise<void> {
       );
     }
   } catch (e) {
-    stopPolling();
+    stopStreaming();
     setError(e instanceof Error ? e.message : String(e));
   }
 }
 
 // ---------------------------------------------------------------------------
-// Structured lookup handler — form-based
+// Structured lookup handler — form-based, but uses chat for layout intent
 // ---------------------------------------------------------------------------
 
 async function onLookup(planType: string, zip: string, filter: string): Promise<void> {
   setPhase("searching");
-  startPolling();
+  startStreaming();
 
   try {
-    // Use chat endpoint so we get layout intent
     const message = filter
       ? `Show me ${planType} plans covering ${filter} in ${zip}`
       : `Show me ${planType} plans in ${zip}`;
@@ -162,7 +171,7 @@ async function onLookup(planType: string, zip: string, filter: string): Promise<
       );
     }
   } catch (e) {
-    stopPolling();
+    stopStreaming();
     setError(e instanceof Error ? e.message : String(e));
   }
 }
@@ -173,7 +182,7 @@ async function onLookup(planType: string, zip: string, filter: string): Promise<
 
 async function onCompare(zip: string): Promise<void> {
   setPhase("searching");
-  startPolling();
+  startStreaming();
 
   try {
     addConversationTurn("user", `Compare all plan types for zip ${zip}`);
@@ -185,7 +194,7 @@ async function onCompare(zip: string): Promise<void> {
     );
     handleChatResponse(response);
   } catch (e) {
-    stopPolling();
+    stopStreaming();
     setError(e instanceof Error ? e.message : String(e));
   }
 }

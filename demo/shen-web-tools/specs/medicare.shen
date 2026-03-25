@@ -178,9 +178,22 @@
 
 \\ LLM layout intent — what the LLM wants to show
 \\ Must be validated by Shen before rendering
+\\ Now includes LLM-generated follow-up suggestions (replacing hardcoded rules)
 (datatype layout-intent
   Panels : (list string);       \\ panel kind names
   Emphasis : string;            \\ what to highlight
   Reasoning : string;           \\ why this layout
+  Followups : (list string);    \\ LLM-generated follow-up questions
   ___________________________
-  [layout-intent Panels Emphasis Reasoning] : layout-intent;)
+  [layout-intent Panels Emphasis Reasoning Followups] : layout-intent;)
+
+\\ Panel constraint — describes what a panel needs to render
+\\ Used by the lazy loading system: only panels whose constraints
+\\ are met get shown to the LLM as options
+(datatype panel-constraint
+  Kind : panel-kind;
+  Requires : (list string);     \\ data fields required
+  Description : string;         \\ what this panel does
+  BestFor : string;             \\ when to use it
+  ___________________________
+  [panel-constraint Kind Requires Description BestFor] : panel-constraint;)

@@ -128,8 +128,74 @@
                      (:timestamp . ,(third result))))))
 
 (hunchentoot:define-easy-handler (api-state :uri "/api/state") ()
-  "Return current pipeline state (for polling)."
+  "Return current pipeline state (for polling fallback)."
   (json-response (get-pipeline-state)))
+
+;; -------------------------------------------------------------------------
+;; SSE streaming endpoint — replaces polling
+;; -------------------------------------------------------------------------
+;; Client opens EventSource("/api/stream"). We hold the connection open,
+;; sending state transitions as they happen. When the pipeline reaches
+;; "complete" or "idle", we send the final event and close.
+
+(hunchentoot:define-easy-handler (api-stream :uri "/api/stream") ()
+  "Server-Sent Events stream for pipeline state changes.
+   Sends events: phase, layout, result, done, error."
+  (setf (hunchentoot:content-type*) "text/event-stream; charset=utf-8")
+  (setf (hunchentoot:header-out :cache-control) "no-cache")
+  (setf (hunchentoot:header-out :connection) "keep-alive")
+  ;; Disable chunked encoding — SSE needs raw flushing
+  (setf (hunchentoot:reply-external-format*) :utf-8)
+  (let ((stream (hunchentoot:send-headers))
+        (last-phase "")
+        (ticks 0)
+        (max-ticks 600)) ; 5 min timeout at 500ms sleep
+    (handler-case
+        (loop
+          (let* ((state (get-pipeline-state))
+                 (phase (cdr (assoc :phase state)))
+                 (data (cdr (assoc :data state))))
+            ;; Send phase change
+            (when (not (string= phase last-phase))
+              (sse-write stream "phase"
+                         (cl-json:encode-json-to-string
+                          `((:phase . ,phase)
+                            (:timestamp . ,(get-universal-time)))))
+              (setf last-phase phase))
+            ;; On complete/idle → send final data and close
+            (when (string= phase "complete")
+              (sse-write stream "result"
+                         (cl-json:encode-json-to-string data))
+              (sse-write stream "done" "{}")
+              (force-output stream)
+              (return))
+            (when (and (string= phase "idle") (> ticks 2))
+              (sse-write stream "done" "{}")
+              (force-output stream)
+              (return))
+            ;; Heartbeat every ~5s to keep connection alive
+            (when (zerop (mod ticks 10))
+              (sse-write stream "heartbeat"
+                         (format nil "{\"tick\":~D}" ticks)))
+            ;; Timeout
+            (incf ticks)
+            (when (>= ticks max-ticks)
+              (sse-write stream "error" "{\"message\":\"timeout\"}")
+              (force-output stream)
+              (return))
+            (sleep 0.5)))
+      (error (e)
+        (handler-case
+            (progn
+              (sse-write stream "error"
+                         (format nil "{\"message\":\"~A\"}" e))
+              (force-output stream))
+          (error () nil))))))
+
+(defun sse-write (stream event data)
+  "Write a single SSE event to the stream."
+  (format stream "event: ~A~%data: ~A~%~%" event data)
+  (force-output stream))
 
 ;; -------------------------------------------------------------------------
 ;; Source grounding (CL implementation of the Shen logic)
@@ -259,7 +325,8 @@
   (format t "  POST /api/search           — search only~%")
   (format t "  POST /api/fetch            — fetch only~%")
   (format t "  POST /api/generate         — AI generation only~%")
-  (format t "  GET  /api/state            — pipeline state~%")
+  (format t "  GET  /api/state            — pipeline state (polling fallback)~%")
+  (format t "  GET  /api/stream           — SSE pipeline stream~%")
   *server*)
 
 (defun stop-server ()

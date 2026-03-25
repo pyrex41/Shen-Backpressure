@@ -22,6 +22,7 @@ export interface LayoutIntent {
   panels: string[];
   emphasis: string;
   reasoning: string;
+  followups: string[];   // LLM-generated follow-up suggestions
 }
 
 export interface PanelSpec {
@@ -399,23 +400,22 @@ function renderChart(): ReturnType<typeof html> {
 }
 
 function renderFollowup(): ReturnType<typeof html> {
-  // Generate follow-up suggestions based on current data
+  // Follow-up suggestions come from the LLM layout intent — it knows
+  // what the user asked and what would be useful next. Falls back to
+  // generic suggestions only if the LLM didn't generate any.
   const suggestions = () => {
+    // Prefer LLM-generated follow-ups from layout intent
+    if (state.layout?.followups?.length) {
+      return state.layout.followups;
+    }
+    // Fallback — should rarely hit this path
     if (!state.data) return [];
-    const pt = state.data.planType || "";
-    const base = [
-      `What's the out-of-pocket maximum?`,
-      `Compare with other plan types`,
-      `What's covered under this plan?`,
-      `Show me the cheapest options`,
+    return [
+      "What are the monthly premiums?",
+      "Compare with other plan types",
+      "What's covered under this plan?",
+      "Show me the cheapest options",
     ];
-    if (pt === "part-d") {
-      return [`What drugs are covered?`, `What's the donut hole?`, ...base.slice(2)];
-    }
-    if (pt === "advantage") {
-      return [`Does this include dental?`, ...base];
-    }
-    return base;
   };
 
   return html`

@@ -198,58 +198,214 @@ If the user's message is a follow-up to a previous conversation, use context to 
         "{}")))
 
 ;; =========================================================================
-;; LLM-in-the-loop #2: Layout generation
+;; LLM-in-the-loop #2: Layout generation with lazy panel constraints
 ;; =========================================================================
 ;; Given result data + conversation context, decide what UI panels to show.
+;; Inspired by Anthropic's read_me pattern: instead of dumping all panel
+;; docs into context, we load only the constraints relevant to the data.
+;;
+;; The LLM also generates follow-up suggestions — it knows what the user
+;; asked and what would be useful next, so it does better than hardcoded rules.
+
+;; ---- Panel constraint specs (lazy-loaded per data shape) ----
+
+(defvar *panel-constraints*
+  '(("summary"
+     :requires (:summary)
+     :description "Main AI-generated summary in markdown"
+     :best-for "Any query — always include as the primary content panel"
+     :pairs-with ("filter-pills" "source-list"))
+
+    ("cost-table"
+     :requires (:summary)
+     :description "Tabular cost breakdown with premiums, deductibles, OOP max"
+     :best-for "Pricing questions, 'how much does X cost', premium comparisons"
+     :needs "Summary should contain numeric pricing data (dollar amounts)"
+     :pairs-with ("filter-pills" "chart"))
+
+    ("plan-cards"
+     :requires (:summary)
+     :description "Grid of individual plan cards for browsing"
+     :best-for "Broad searches where user wants to browse multiple options"
+     :needs "Summary should describe 3+ distinct plans"
+     :pairs-with ("filter-pills" "summary"))
+
+    ("comparison"
+     :requires (:comparisons)
+     :description "Side-by-side comparison of multiple plan types"
+     :best-for "When user asks to compare plan types or says 'vs', 'difference'"
+     :needs "Multiple plan type results (requires /compare pipeline)"
+     :pairs-with ("source-list" "disclaimer"))
+
+    ("detail"
+     :requires (:summary)
+     :description "Deep-dive panel focused on a specific aspect"
+     :best-for "Follow-up questions about specific coverage, formulary, network"
+     :needs "User asked about a specific topic within a plan type"
+     :pairs-with ("source-list" "followup"))
+
+    ("chart"
+     :requires (:summary)
+     :description "Cost range visualization bar chart"
+     :best-for "When showing price ranges across plans or tiers"
+     :needs "Summary contains numeric ranges or multiple price points"
+     :pairs-with ("cost-table" "summary"))
+
+    ("source-list"
+     :requires (:sources)
+     :description "Attributed source links with medicare.gov badges"
+     :best-for "Always include — grounds the response in real data"
+     :pairs-with ("summary" "disclaimer"))
+
+    ("followup"
+     :requires ()
+     :description "Suggested follow-up question chips"
+     :best-for "After any result — helps user explore further"
+     :note "LLM generates the actual suggestions in the followups field"
+     :pairs-with ("summary" "disclaimer"))
+
+    ("filter-pills"
+     :requires ()
+     :description "Active filter tags showing plan type, zip, filter"
+     :best-for "When filters are active — helps user see what's applied"
+     :pairs-with ("summary" "cost-table"))
+
+    ("disclaimer"
+     :requires ()
+     :description "Legal/accuracy disclaimer with medicare.gov link"
+     :best-for "Always include as the last panel"
+     :pairs-with ("source-list")))
+  "Panel constraint specifications. Each panel has:
+   - Data requirements (:requires)
+   - Description and best-use guidance
+   - Pairing suggestions
+   Loaded lazily into the LLM prompt based on available data.")
+
+(defun available-panels-for-data (result)
+  "Return panel constraints for panels whose data requirements are met.
+   This is the lazy loading: only show the LLM panels it can actually use."
+  (loop for spec in *panel-constraints*
+        for name = (first spec)
+        for requires = (getf (rest spec) :requires)
+        when (every (lambda (key)
+                      (let ((val (cdr (assoc key result))))
+                        (and val (if (stringp val)
+                                     (> (length val) 0)
+                                     t))))
+                    requires)
+          collect spec))
+
+(defun format-panel-constraints (available-panels)
+  "Format available panel constraints as text for the LLM prompt."
+  (with-output-to-string (s)
+    (format s "## Available Panels~%~%")
+    (format s "These panels are AVAILABLE based on the data we have. ")
+    (format s "Only panels listed here can be used — Shen will reject others.~%~%")
+    (loop for spec in available-panels
+          for name = (first spec)
+          for plist = (rest spec)
+          do (format s "### ~A~%" name)
+             (format s "~A~%" (getf plist :description))
+             (format s "Best for: ~A~%" (getf plist :best-for))
+             (when (getf plist :needs)
+               (format s "Needs: ~A~%" (getf plist :needs)))
+             (when (getf plist :note)
+               (format s "Note: ~A~%" (getf plist :note)))
+             (format s "Pairs well with: ~{~A~^, ~}~%~%"
+                     (getf plist :pairs-with)))))
 
 (defun generate-layout-intent (result conversation-history user-query)
-  "Use LLM to decide which UI panels to render and what to emphasize.
-   Returns a layout-intent alist."
-  (let* ((system "You are a UI layout planner for a Medicare insurance information tool. Given the data we have about Medicare plans, decide which UI panels to show and what to emphasize.
+  "Use LLM to decide which UI panels to render, what to emphasize,
+   and what follow-up questions to suggest.
 
-Available panel types:
-- \"summary\": Main AI-generated summary (always good to include)
-- \"cost-table\": Tabular cost breakdown (good for pricing questions)
-- \"plan-cards\": Grid of individual plan cards (good for comparison)
-- \"comparison\": Side-by-side comparison (when comparing plan types)
-- \"detail\": Deep-dive panel (when user asks about specific aspect)
-- \"chart\": Cost visualization (when showing price ranges)
-- \"source-list\": Attributed sources (always include)
-- \"followup\": Suggested follow-up questions
-- \"filter-pills\": Active filter display
-- \"disclaimer\": Legal disclaimer (always include)
+   The LLM sees only panels whose data requirements are met (lazy loading).
+   It also generates follow-up suggestions — replacing hardcoded Shen rules."
+  (let* ((available (available-panels-for-data result))
+         (panel-docs (format-panel-constraints available))
+         (system (format nil "You are a UI layout planner for a Medicare insurance tool.
+Given the data available and the user's question, decide:
+1. Which panels to show (from the available list only)
+2. What to emphasize (short phrase for the header subtitle)
+3. 3-4 follow-up questions the user might want to ask next
+
+~A
+## Rules
+- Always include \"source-list\" and \"disclaimer\"
+- Include \"filter-pills\" when filters are active
+- Use \"cost-table\" for pricing questions, \"detail\" for specific coverage questions
+- Use \"comparison\" ONLY when comparison data is available
+- Follow-up questions should be specific to what was asked and what data shows
+- Follow-ups should help the user dig deeper or compare alternatives
 
 Respond with ONLY a JSON object:
 {
   \"panels\": [\"panel-kind\", ...],
-  \"emphasis\": \"Short phrase describing what to highlight for the user\",
-  \"reasoning\": \"Brief explanation of why this layout\"
-}")
-         (user-msg (format nil "User asked: ~A~%~%Data available:~%- Plan type: ~A~%- Zip: ~A~%- Filter: ~A~%- Summary length: ~D chars~%- Number of sources: ~D~%~A"
+  \"emphasis\": \"Short phrase for header subtitle\",
+  \"reasoning\": \"Why this layout\",
+  \"followups\": [\"Question 1?\", \"Question 2?\", \"Question 3?\", \"Question 4?\"]
+}" panel-docs))
+         (user-msg (format nil "User asked: ~A~%~%Data:~%- Plan type: ~A (~A)~%- Zip: ~A~%- Filter: ~A~%- Summary: ~D chars~%- Sources: ~D~%- Has comparisons: ~A~%~A"
                            user-query
                            (cdr (assoc :plan-type result))
+                           (or (cdr (assoc :plan-label result)) "")
                            (cdr (assoc :zip result))
                            (cdr (assoc :filter result))
                            (length (or (cdr (assoc :summary result)) ""))
                            (length (cdr (assoc :sources result)))
+                           (if (cdr (assoc :comparisons result)) "yes" "no")
                            (if conversation-history
-                               (format nil "~%This is a follow-up question (turn ~D in conversation)."
-                                       (length conversation-history))
+                               (format nil "~%Conversation turn ~D. Previous topics: ~{~A~^, ~}"
+                                       (length conversation-history)
+                                       (loop for (role . msg) in (last conversation-history 4)
+                                             when (string= role "user")
+                                               collect (subseq msg 0 (min 60 (length msg)))))
                                "")))
          (ai-result (ai-generate system user-msg))
          (response-text (second ai-result))
          (parsed (handler-case
                      (cl-json:decode-json-from-string
                       (extract-json-from-response response-text))
-                   (error () nil))))
+                   (error () nil)))
+         ;; Validate panels against available set
+         (available-names (mapcar #'first available))
+         (validated-panels (when (cdr (assoc :panels parsed))
+                             (remove-if-not (lambda (p) (member p available-names :test #'string=))
+                                            (cdr (assoc :panels parsed))))))
     (if parsed
-        `((:panels . ,(or (cdr (assoc :panels parsed)) '("summary" "source-list" "disclaimer")))
+        `((:panels . ,(or validated-panels '("summary" "source-list" "disclaimer")))
           (:emphasis . ,(or (cdr (assoc :emphasis parsed)) (cdr (assoc :plan-label result))))
-          (:reasoning . ,(or (cdr (assoc :reasoning parsed)) "default layout")))
+          (:reasoning . ,(or (cdr (assoc :reasoning parsed)) "default layout"))
+          (:followups . ,(or (cdr (assoc :followups parsed))
+                             (default-followups result))))
         ;; Fallback layout
         `((:panels . ("summary" "source-list" "followup" "disclaimer"))
           (:emphasis . ,(or (cdr (assoc :plan-label result)) "Medicare Plans"))
-          (:reasoning . "default layout (LLM response parse failed)")))))
+          (:reasoning . "default layout (LLM parse failed)")
+          (:followups . ,(default-followups result))))))
+
+(defun default-followups (result)
+  "Fallback follow-up suggestions when LLM doesn't generate them."
+  (let ((plan-type (or (cdr (assoc :plan-type result)) "")))
+    (cond
+      ((string-equal plan-type "part-d")
+       '("What drugs are in the formulary?"
+         "What's the coverage gap (donut hole)?"
+         "Compare Part D plans by premium"
+         "Does this cover insulin?"))
+      ((string-equal plan-type "advantage")
+       '("What's the out-of-pocket maximum?"
+         "Do these plans include dental and vision?"
+         "Compare with Original Medicare"
+         "Which plan has the lowest premium?"))
+      ((string-equal plan-type "supplement")
+       '("What's the difference between Plan F and Plan G?"
+         "Which Medigap plan has the lowest premium?"
+         "What does Medigap NOT cover?"
+         "Compare with Medicare Advantage"))
+      (t '("What are the 2025 premiums?"
+           "Compare plan types"
+           "What's covered under this plan?"
+           "Show me the cheapest options")))))
 
 ;; =========================================================================
 ;; Medicare search queries
