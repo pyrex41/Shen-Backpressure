@@ -87,6 +87,22 @@
         { string --> (list string) }
         Query -> (lisp.shen-web-tools::extract-terms Query))")
 
+    ;; Medicare-specific bridge functions
+    (shen-eval-string
+     "(define cl-set-pipeline-state
+        { string --> A --> string }
+        Phase Data -> (do (lisp.shen-web-tools::set-pipeline-state Phase Data) \"ok\"))")
+
+    (shen-eval-string
+     "(define cl-substring-search
+        { string --> string --> string }
+        Needle Haystack -> (lisp.shen-web-tools::cl-substring-search Needle Haystack))")
+
+    (shen-eval-string
+     "(define cl-substring
+        { string --> number --> number --> string }
+        S Start End -> (lisp.shen-web-tools::cl-substring S Start End))")
+
     (format t "Bridge functions registered in Shen~%")))
 
 (defun shen-eval-string (shen-code)
@@ -106,13 +122,32 @@
 ;; Load application .shen files
 ;; -------------------------------------------------------------------------
 
+;; -------------------------------------------------------------------------
+;; Extra CL helpers for Shen bridge
+;; -------------------------------------------------------------------------
+
+(defun cl-substring-search (needle haystack)
+  "Return position of NEEDLE in HAYSTACK, or empty string if not found."
+  (let ((pos (search needle haystack)))
+    (if pos (write-to-string pos) "")))
+
+(defun cl-substring (s start end)
+  "Extract substring. Safe: clamps indices."
+  (let ((len (length s)))
+    (subseq s (min start len) (min end len))))
+
+;; -------------------------------------------------------------------------
+;; Load application .shen files
+;; -------------------------------------------------------------------------
+
 (defun load-shen-sources ()
   "Load the application Shen source files."
   (when *shen-loaded*
     (let ((files '("web-tools.shen"
                    "ai-gen.shen"
                    "ui-resolve.shen"
-                   "app.shen")))
+                   "app.shen"
+                   "medicare.shen")))
       (dolist (f files)
         (let ((path (merge-pathnames f *shen-root*)))
           (if (probe-file path)
@@ -128,17 +163,15 @@
 (defun verify-shen-specs ()
   "Run Shen type checker on the specs (tc+). This is Gate 4."
   (when *shen-loaded*
-    (let ((spec-path (merge-pathnames "../specs/core.shen" *shen-root*)))
-      (if (probe-file spec-path)
-          (progn
-            (format t "Verifying Shen specs: ~A~%" spec-path)
-            (shen-eval-string "(tc +)")
-            (shen-eval-string (format nil "(load ~S)" (namestring spec-path)))
-            (format t "Shen specs verified (tc+) ✓~%")
-            t)
-          (progn
-            (format t "WARNING: Spec file not found: ~A~%" spec-path)
-            nil)))))
+    (dolist (spec-file '("core.shen" "medicare.shen"))
+      (let ((spec-path (merge-pathnames (format nil "../specs/~A" spec-file) *shen-root*)))
+        (if (probe-file spec-path)
+            (progn
+              (format t "Verifying Shen specs: ~A~%" spec-file)
+              (shen-eval-string "(tc +)")
+              (shen-eval-string (format nil "(load ~S)" (namestring spec-path)))
+              (format t "Shen specs verified (tc+) ✓: ~A~%" spec-file))
+            (format t "WARNING: Spec file not found: ~A~%" spec-path))))))
 
 ;; -------------------------------------------------------------------------
 ;; Call Shen functions from CL (for the API handlers)

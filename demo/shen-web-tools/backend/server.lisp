@@ -183,8 +183,13 @@
     (let* ((uri (hunchentoot:request-uri request))
            (path (hunchentoot:url-decode (subseq uri 1))))
       (cond
-        ;; Index
-        ((or (string= uri "/") (string= uri "/index.html"))
+        ;; Medicare (default landing page)
+        ((or (string= uri "/") (string= uri "/medicare") (string= uri "/medicare.html"))
+         (lambda ()
+           (hunchentoot:handle-static-file
+            (merge-pathnames "medicare.html" *static-root*))))
+        ;; Research tool
+        ((or (string= uri "/research") (string= uri "/index.html"))
          (lambda ()
            (hunchentoot:handle-static-file
             (merge-pathnames "index.html" *static-root*))))
@@ -241,12 +246,19 @@
   (format t "  Search: ~A~%" *search-provider*)
   (format t "  Fetch:  ~A~%" *fetch-provider*)
   (format t "  AI:     ~A~%" *ai-provider*)
+  (format t "~%Pages:~%")
+  (format t "  /              — Medicare Plan Finder~%")
+  (format t "  /research      — General Research Assistant~%")
   (format t "~%API endpoints:~%")
-  (format t "  POST /api/research  — full pipeline (Shen orchestrates)~%")
-  (format t "  POST /api/search    — search only~%")
-  (format t "  POST /api/fetch     — fetch only~%")
-  (format t "  POST /api/generate  — AI generation only~%")
-  (format t "  GET  /api/state     — pipeline state (for polling)~%")
+  (format t "  POST /api/medicare         — Medicare plan lookup~%")
+  (format t "  POST /api/medicare/compare — Compare plan types~%")
+  (format t "  GET  /api/medicare/plans   — Available plan types~%")
+  (format t "  GET  /api/medicare/cache   — Cache stats~%")
+  (format t "  POST /api/research         — full research pipeline~%")
+  (format t "  POST /api/search           — search only~%")
+  (format t "  POST /api/fetch            — fetch only~%")
+  (format t "  POST /api/generate         — AI generation only~%")
+  (format t "  GET  /api/state            — pipeline state~%")
   *server*)
 
 (defun stop-server ()
