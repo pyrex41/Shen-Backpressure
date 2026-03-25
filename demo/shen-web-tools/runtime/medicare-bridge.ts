@@ -1,11 +1,13 @@
 /**
  * runtime/medicare-bridge.ts — API client for Medicare plan lookup
  *
- * Two modes:
- *   1. Structured: medicareLookup(planType, zip, filter) — form-based
- *   2. Conversational: medicareChat(message, sessionId) — natural language
+ * Three transport modes:
+ *   1. SSE streaming: EventSource("/api/stream") — real-time phase updates
+ *   2. Conversational: POST /api/medicare/chat — natural language + generative UI
+ *   3. Structured: POST /api/medicare — form-based fallback
  *
- * The chat endpoint returns both data AND layout intent (generative UI).
+ * The chat endpoint returns data AND layout intent (including LLM-generated
+ * follow-up suggestions).
  */
 
 const BASE = "";
@@ -38,6 +40,7 @@ export interface LayoutIntent {
   panels: string[];
   emphasis: string;
   reasoning: string;
+  followups: string[];   // LLM-generated follow-up suggestions
 }
 
 export interface QueryIntent {
@@ -69,6 +72,61 @@ export interface MedicareComparison {
 export interface PlanTypeInfo {
   id: string;
   label: string;
+}
+
+// ---------------------------------------------------------------------------
+// SSE streaming — replaces polling
+// ---------------------------------------------------------------------------
+
+export interface SSECallbacks {
+  onPhase: (phase: string) => void;
+  onResult: (data: any) => void;
+  onError: (msg: string) => void;
+  onDone: () => void;
+}
+
+/**
+ * Open an SSE connection to the pipeline stream.
+ * Returns a close function to tear down the connection.
+ * The backend pushes phase transitions in real-time — no polling needed.
+ */
+export function connectSSE(callbacks: SSECallbacks): () => void {
+  const es = new EventSource(`${BASE}/api/stream`);
+
+  es.addEventListener("phase", (e: MessageEvent) => {
+    try {
+      const data = JSON.parse(e.data);
+      callbacks.onPhase(data.phase || "idle");
+    } catch { /* ignore parse errors */ }
+  });
+
+  es.addEventListener("result", (e: MessageEvent) => {
+    try {
+      const data = JSON.parse(e.data);
+      callbacks.onResult(data);
+    } catch { /* ignore */ }
+  });
+
+  es.addEventListener("error", (e: MessageEvent) => {
+    try {
+      const data = JSON.parse(e.data);
+      callbacks.onError(data.message || "Stream error");
+    } catch {
+      callbacks.onError("SSE connection error");
+    }
+  });
+
+  es.addEventListener("done", () => {
+    es.close();
+    callbacks.onDone();
+  });
+
+  // EventSource auto-reconnects on error; we want to close on error
+  es.onerror = () => {
+    es.close();
+  };
+
+  return () => es.close();
 }
 
 // ---------------------------------------------------------------------------
