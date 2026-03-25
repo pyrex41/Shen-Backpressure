@@ -103,6 +103,12 @@
         { string --> number --> number --> string }
         S Start End -> (lisp.shen-web-tools::cl-substring S Start End))")
 
+    ;; Generative UI helper — read properties from result data
+    (shen-eval-string
+     "(define cl-get-prop
+        { string --> A --> string }
+        Key Data -> (lisp.shen-web-tools::cl-get-prop Key Data))")
+
     (format t "Bridge functions registered in Shen~%")))
 
 (defun shen-eval-string (shen-code)
@@ -147,7 +153,8 @@
                    "ai-gen.shen"
                    "ui-resolve.shen"
                    "app.shen"
-                   "medicare.shen")))
+                   "medicare.shen"
+                   "medicare-ui-resolve.shen")))
       (dolist (f files)
         (let ((path (merge-pathnames f *shen-root*)))
           (if (probe-file path)
