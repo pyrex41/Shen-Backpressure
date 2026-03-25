@@ -25,6 +25,7 @@
   (load "packages.lisp")
   (load "bridge.lisp")
   (load "server.lisp")
+  (load "medicare.lisp")
   (load "shen-interop.lisp"))
 
 ;;; Configure and start
