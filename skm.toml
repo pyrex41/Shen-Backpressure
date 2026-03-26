@@ -1,5 +1,5 @@
 [[bundles]]
 name = "sh"
-path = ".claude"
+path = "."
 description = "Shen Backpressure — skills, agents, and commands for the Shen Web Tools demo"
 tags = ["shen", "web-tools", "medicare", "frontend"]
