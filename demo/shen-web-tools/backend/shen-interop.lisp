@@ -34,10 +34,11 @@
         (format t "Shen runtime loaded via Quicklisp~%"))
     (error ()
       ;; Try local installation
-      (let ((paths (list
-                    (merge-pathnames "shen/shen-sbcl.lisp" (user-homedir-pathname))
-                    (merge-pathnames "lib/shen/shen.lisp" *static-root*)
-                    #P"/usr/local/lib/shen/shen.lisp")))
+      (let ((paths (append
+                    (list (merge-pathnames "shen/shen-sbcl.lisp" (user-homedir-pathname)))
+                    (when *static-root*
+                      (list (merge-pathnames "lib/shen/shen.lisp" *static-root*)))
+                    (list #P"/usr/local/lib/shen/shen.lisp"))))
         (dolist (p paths)
           (when (probe-file p)
             (load p)
@@ -113,6 +114,10 @@
 
 (defun shen-eval-string (shen-code)
   "Evaluate a string of Shen code. Wraps the port-specific eval mechanism."
+  (unless (find-package :shen)
+    (warn "Shen package not loaded, cannot eval: ~A"
+          (subseq shen-code 0 (min 60 (length shen-code))))
+    (return-from shen-eval-string nil))
   (handler-case
       ;; Try different Shen port interfaces
       (cond
@@ -123,10 +128,6 @@
         (t (warn "Cannot find Shen eval function")))
     (error (e)
       (warn "Shen eval failed: ~A~%Code: ~A" e shen-code))))
-
-;; -------------------------------------------------------------------------
-;; Load application .shen files
-;; -------------------------------------------------------------------------
 
 ;; -------------------------------------------------------------------------
 ;; Extra CL helpers for Shen bridge
@@ -149,7 +150,8 @@
 (defun load-shen-sources ()
   "Load the application Shen source files."
   (when *shen-loaded*
-    (let ((files '("web-tools.shen"
+    (let ((files '("utils.shen"
+                   "web-tools.shen"
                    "ai-gen.shen"
                    "ui-resolve.shen"
                    "app.shen"

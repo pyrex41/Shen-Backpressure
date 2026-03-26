@@ -24,12 +24,13 @@ import {
   setError,
   addConversationTurn,
 } from "./medicare-ui.js";
+import { mountLogPanel } from "./log-panel.js";
 
 // ---------------------------------------------------------------------------
 // Session state
 // ---------------------------------------------------------------------------
 
-let sessionId = `s-${Date.now()}`;
+let sessionId: string = crypto.randomUUID();
 let closeSSE: (() => void) | null = null;
 
 // ---------------------------------------------------------------------------
@@ -204,12 +205,16 @@ async function onCompare(zip: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 function init(): void {
-  const root = document.getElementById("app");
-  if (!root) {
+  const appRoot = document.getElementById("app");
+  const logRoot = document.getElementById("log-panel");
+  if (!appRoot) {
     console.error("No #app element found");
     return;
   }
-  mountMedicare(root, onLookup, onCompare, onChat);
+  mountMedicare(appRoot, onLookup, onCompare, onChat);
+  if (logRoot) {
+    mountLogPanel(logRoot);
+  }
 }
 
 if (document.readyState === "loading") {

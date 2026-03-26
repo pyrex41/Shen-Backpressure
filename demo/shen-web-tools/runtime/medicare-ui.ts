@@ -217,13 +217,11 @@ function renderSearchForm_internal(): ReturnType<typeof html> {
         </div>
       </div>
       <div class="form-actions">
-        <button class="btn btn-primary" @click="${doLookup}"
-          disabled="${() => state.isLoading ? 'disabled' : undefined}">
+        <button class="btn btn-primary" @click="${doLookup}">
           ${() => state.isLoading ? "Searching..." : "Find Plans"}
         </button>
         <button class="btn btn-secondary"
-          @click="${() => { const z = state.zip.trim(); if (z.length === 5) _onCompare?.(z); }}"
-          disabled="${() => state.isLoading ? 'disabled' : undefined}">
+          @click="${() => { const z = state.zip.trim(); if (z.length === 5) _onCompare?.(z); }}">
           Compare All Types
         </button>
       </div>
@@ -261,10 +259,8 @@ function renderChatInput_internal(): ReturnType<typeof html> {
             : 'Ask a follow-up question...'}"
           value="${() => local.value}"
           @input="${(e: any) => { local.value = e.target.value; }}"
-          @keydown="${(e: any) => { if (e.key === 'Enter') doSend(); }}"
-          disabled="${() => state.isLoading ? 'disabled' : undefined}" />
-        <button class="btn btn-primary chat-send-btn" @click="${doSend}"
-          disabled="${() => state.isLoading ? 'disabled' : undefined}">
+          @keydown="${(e: any) => { if (e.key === 'Enter') doSend(); }}" />
+        <button class="btn btn-primary chat-send-btn" @click="${doSend}">
           ${() => state.isLoading ? '...' : 'Ask'}
         </button>
       </div>
@@ -298,27 +294,31 @@ function renderProgress(): ReturnType<typeof html> {
 
 function renderSummary(): ReturnType<typeof html> {
   return html`
-    <div class="result-summary" style="${() => state.data?.summary ? '' : 'display:none'}">
-      ${() => renderMarkdown(state.data?.summary || '')}
+    <div class="result-summary" style="${() => state.data?.summary ? '' : 'display:none'}"
+      data-md="summary">
     </div>
   `;
 }
 
 function renderCostTable(): ReturnType<typeof html> {
-  // Same content as summary but styled as a table-focused view
+  // v1 placeholder: renders summary markdown. Future: parse pricing data from
+  // summary and display as an actual HTML <table> with columns for premium,
+  // deductible, and OOP max per plan.
   return html`
     <div class="cost-table-panel" style="${() => state.data?.summary ? '' : 'display:none'}">
       <h3>Cost Breakdown</h3>
-      ${() => renderMarkdown(state.data?.summary || '')}
+      <div data-md="summary"></div>
     </div>
   `;
 }
 
 function renderPlanCards(): ReturnType<typeof html> {
+  // v1 placeholder: renders summary markdown. Future: extract individual plans
+  // and render as a grid of cards with name, carrier, premium, and rating.
   return html`
     <div class="plan-cards-panel" style="${() => state.data?.summary ? '' : 'display:none'}">
       <h3>Plan Options</h3>
-      ${() => renderMarkdown(state.data?.summary || '')}
+      <div data-md="summary"></div>
     </div>
   `;
 }
@@ -380,21 +380,24 @@ function renderDisclaimer(): ReturnType<typeof html> {
 }
 
 function renderDetail(): ReturnType<typeof html> {
+  // v1 placeholder: renders summary markdown. Future: collapsible detail
+  // sections with structured coverage data.
   return html`
     <div class="detail-panel" style="${() => state.data?.summary ? '' : 'display:none'}">
       <h3>${() => state.layout?.emphasis || 'Details'}</h3>
-      ${() => renderMarkdown(state.data?.summary || '')}
+      <div data-md="summary"></div>
     </div>
   `;
 }
 
 function renderChart(): ReturnType<typeof html> {
-  // Simple text-based cost range visualization
+  // v1 placeholder: renders summary markdown. Future: SVG/Canvas bar chart
+  // of cost ranges across plans.
   return html`
     <div class="chart-panel" style="${() => state.data?.summary ? '' : 'display:none'}">
       <h3>Cost Overview</h3>
       <p class="chart-note">Based on available data for zip ${() => state.data?.zip}</p>
-      ${() => renderMarkdown(state.data?.summary || '')}
+      <div data-md="summary"></div>
     </div>
   `;
 }
@@ -498,6 +501,36 @@ function renderWelcome(): ReturnType<typeof html> {
 // Markdown renderer (simple)
 // ---------------------------------------------------------------------------
 
+/**
+ * Render markdown HTML into a container. Arrow.js escapes string interpolations,
+ * so we set .innerHTML directly on the DOM element via a reactive callback.
+ * Usage in templates: @mounted="${mdBind(() => state.data?.summary || '')}"
+ */
+function mdBind(getText: () => string): (el: HTMLElement) => void {
+  return (el: HTMLElement) => {
+    // Initial render
+    el.innerHTML = renderMarkdown(getText());
+    // Reactive updates: Arrow.js doesn't re-call @mounted, so we poll.
+    // This is a pragmatic workaround for a demo.
+  };
+}
+
+/** Update all [data-md] elements with rendered markdown from state.
+ *  Called after each state change. */
+function flushMarkdown(): void {
+  document.querySelectorAll<HTMLElement>("[data-md]").forEach(el => {
+    const key = el.dataset.md!;
+    let text = "";
+    if (key === "summary") text = state.data?.summary || "";
+    else if (key === "emphasis") text = state.layout?.emphasis || "Details";
+    const rendered = renderMarkdown(text);
+    if (el.innerHTML !== rendered) el.innerHTML = rendered;
+  });
+}
+
+// Poll for markdown updates (Arrow.js doesn't support innerHTML binding)
+setInterval(flushMarkdown, 300);
+
 function renderMarkdown(text: string): string {
   if (!text) return "";
   return text
@@ -505,23 +538,58 @@ function renderMarkdown(text: string): string {
     .map((block) => {
       const trimmed = block.trim();
       if (!trimmed) return "";
-      if (trimmed.startsWith("### ")) return `<h4>${esc(trimmed.slice(4))}</h4>`;
-      if (trimmed.startsWith("## ")) return `<h3>${esc(trimmed.slice(3))}</h3>`;
-      if (trimmed.startsWith("# ")) return `<h2>${esc(trimmed.slice(2))}</h2>`;
-      if (trimmed.startsWith("**") && trimmed.endsWith("**"))
+      if (trimmed.startsWith("### ")) return `<h4>${inlineMarkdown(trimmed.slice(4))}</h4>`;
+      if (trimmed.startsWith("## ")) return `<h3>${inlineMarkdown(trimmed.slice(3))}</h3>`;
+      if (trimmed.startsWith("# ")) return `<h2>${inlineMarkdown(trimmed.slice(2))}</h2>`;
+      if (trimmed.startsWith("**") && trimmed.endsWith("**") && !trimmed.slice(2, -2).includes("\n"))
         return `<h4>${esc(trimmed.slice(2, -2))}</h4>`;
+      // Markdown table: lines starting with |
+      if (/^\|/.test(trimmed)) {
+        return renderTable(trimmed);
+      }
       if (/^[-*]\s/.test(trimmed) || /^\d+\.\s/.test(trimmed)) {
         const items = trimmed
           .split("\n")
-          .map((l) => l.replace(/^[-*\d.]\s*/, "").trim())
+          .map((l) => l.replace(/^[-*\d.]+\s*/, "").trim())
           .filter(Boolean)
           .map((l) => `<li>${inlineMarkdown(l)}</li>`)
           .join("");
         return `<ul>${items}</ul>`;
       }
+      // Multi-line block that isn't a list or table — render line by line
+      if (trimmed.includes("\n")) {
+        return trimmed.split("\n").map(line => {
+          const l = line.trim();
+          if (!l) return "";
+          if (l.startsWith("### ")) return `<h4>${inlineMarkdown(l.slice(4))}</h4>`;
+          if (l.startsWith("## ")) return `<h3>${inlineMarkdown(l.slice(3))}</h3>`;
+          if (l.startsWith("# ")) return `<h2>${inlineMarkdown(l.slice(2))}</h2>`;
+          if (l.startsWith("---")) return `<hr>`;
+          return `<p>${inlineMarkdown(l)}</p>`;
+        }).join("");
+      }
       return `<p>${inlineMarkdown(trimmed)}</p>`;
     })
     .join("");
+}
+
+function renderTable(block: string): string {
+  const rows = block.split("\n").filter(r => r.trim());
+  if (rows.length === 0) return "";
+  let html = '<table class="md-table">';
+  rows.forEach((row, i) => {
+    // Skip separator rows like |---|---|
+    if (/^\|[\s\-:]+\|/.test(row) && !row.match(/[a-zA-Z0-9]/)) return;
+    const cells = row.split("|").filter((_, idx, arr) => idx > 0 && idx < arr.length - 1);
+    const tag = i === 0 ? "th" : "td";
+    html += "<tr>";
+    cells.forEach(cell => {
+      html += `<${tag}>${inlineMarkdown(cell.trim())}</${tag}>`;
+    });
+    html += "</tr>";
+  });
+  html += "</table>";
+  return html;
 }
 
 function inlineMarkdown(text: string): string {

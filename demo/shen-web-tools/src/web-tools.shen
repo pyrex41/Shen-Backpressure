@@ -43,13 +43,6 @@
   [Query Hits Ts] N ->
     (map (/. Hit (web-fetch (head (tail Hit)))) (take N Hits)))
 
-(define take
-  \* Take the first N elements from a list *\
-  { number --> (list A) --> (list A) }
-  0 _ -> []
-  _ [] -> []
-  N [X | Xs] -> [X | (take (- N 1) Xs)])
-
 \* --- Source grounding --- *\
 \* Pairs fetched pages with their original search hits *\
 \* This is the key safety operation: ensures AI has real sources *\

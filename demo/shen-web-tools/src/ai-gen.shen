@@ -57,7 +57,7 @@ Sources:
          Url (head (tail Hit))
          Content (head (tail Page))
          Header (cn "[" (cn (str N) (cn "] " (cn Title (cn " (" (cn (str Url) ")"))))))
-         Body (truncate Content 500)
+         Body (truncate-text Content 500)
          Entry (cn Header (cn "
 " (cn Body "
 
@@ -93,21 +93,4 @@ Sources:
       [QueryBlock SourceCount SummaryBlock]))
 
 \* --- Utility --- *\
-
-(define truncate
-  \* Truncate a string to at most N characters *\
-  { string --> number --> string }
-  S N -> S where (<= (string-length S) N)
-  S N -> (cn (pos-string S 0 N) "..."))
-
-(define pos-string
-  \* Extract substring from Start for Len characters *\
-  { string --> number --> number --> string }
-  _ _ 0 -> ""
-  S Start Len -> (cn (str (pos S Start)) (pos-string S (+ Start 1) (- Len 1))))
-
-(define string-length
-  \* Length of a string *\
-  { string --> number }
-  "" -> 0
-  S -> (+ 1 (string-length (tlstr S))))
+\* Shared utilities (take, filter, string-length, truncate-text) are in utils.shen *\
