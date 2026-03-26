@@ -41,7 +41,9 @@
   (when fetch-p (setf *fetch-provider* fetch))
   (when ai-p (setf *ai-provider* ai))
   (when key-p (setf *anthropic-api-key* api-key))
-  (when model-p (setf *anthropic-model* model))
+  (when model-p
+    (setf *anthropic-model* model)
+    (setf *rho-model* model))
   (when rho-p (setf *rho-binary* rho-bin))
   (format t "Configuration updated.~%"))
 
@@ -78,16 +80,23 @@
   (verify-shen-specs)
 
   ;; Start HTTP server
-  (start-server :port *port* :root *project-root*)
+  (start-server :port *port* :root cl-user::*project-root*)
 
   ;; Keep SBCL alive
   (format t "~%Server ready. Press Ctrl+C to stop.~%")
-  (handler-case
-      (bt:join-thread
-       (find-if (lambda (th) (search "hunchentoot" (bt:thread-name th)))
-                (bt:all-threads)))
-    (interrupt-condition ()
-      (stop-server))))
+  (let ((server-thread
+          (find-if (lambda (th) (search "hunchentoot" (bt:thread-name th)))
+                   (bt:all-threads))))
+    (handler-case
+        (if server-thread
+            (bt:join-thread server-thread)
+            (progn
+              (format t "WARNING: No hunchentoot thread found. Keeping alive via sleep loop.~%")
+              (loop (sleep 60))))
+      (interrupt-condition ()
+        (stop-server)))))
 
-;;; Auto-boot
-(boot)
+;;; Auto-boot unless SHEN_WEB_TOOLS_NO_AUTOBOOT is set
+;;; (start.sh sets this so configure runs before boot)
+(unless (uiop:getenv "SHEN_WEB_TOOLS_NO_AUTOBOOT")
+  (boot))

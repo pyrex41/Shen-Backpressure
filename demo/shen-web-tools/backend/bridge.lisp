@@ -23,11 +23,15 @@
 
 (defun web-search (query max-results)
   "Search the web. Returns list of (title url snippet) triples."
-  (ecase *search-provider*
-    (:mock       (web-search-mock query max-results))
-    (:duckduckgo (web-search-ddg query max-results))
-    (:rho        (rho-web-search query max-results))
-    (:live       (web-search-brave query max-results))))
+  (demo-log "search" (format nil "~A [provider: ~A, max: ~D]" query *search-provider* max-results))
+  (let ((results (ecase *search-provider*
+                   (:mock       (web-search-mock query max-results))
+                   (:duckduckgo (web-search-ddg query max-results))
+                   (:rho        (rho-web-search query max-results))
+                   (:live       (web-search-brave query max-results)))))
+    (demo-log "search" (format nil "Got ~D results" (length results))
+              (format nil "~{~A~^~%~}" (mapcar #'first (subseq results 0 (min 3 (length results))))))
+    results))
 
 ;; --- Mock ---
 
@@ -146,11 +150,14 @@
 
 (defun web-fetch (url)
   "Fetch a URL and return (url content timestamp)."
-  (ecase *fetch-provider*
-    (:mock       (web-fetch-mock url))
-    (:duckduckgo (web-fetch-dex url))
-    (:rho        (rho-web-fetch url))
-    (:live       (web-fetch-dex url))))
+  (demo-log "fetch" (format nil "~A [~A]" url *fetch-provider*))
+  (let ((result (ecase *fetch-provider*
+                  (:mock       (web-fetch-mock url))
+                  (:duckduckgo (web-fetch-dex url))
+                  (:rho        (rho-web-fetch url))
+                  (:live       (web-fetch-dex url)))))
+    (demo-log "fetch" (format nil "Got ~D chars from ~A" (length (second result)) url))
+    result))
 
 (defun web-fetch-mock (url)
   "Mock fetch: return simulated page content."
@@ -184,11 +191,20 @@
 (defun ai-generate (system-msg user-msg)
   "Send a prompt to the AI and return (prompt text timestamp).
    Prompt is stored as (system-msg user-msg)."
-  (let ((prompt (list system-msg user-msg)))
-    (ecase *ai-provider*
-      (:mock      (ai-generate-mock prompt))
-      (:anthropic (ai-generate-anthropic prompt system-msg user-msg))
-      (:rho       (rho-ai-generate prompt system-msg user-msg)))))
+  (demo-log "ai" (format nil "Generating [~A~A]"
+                         *ai-provider*
+                         (if *rho-model* (format nil ", model: ~A" *rho-model*) ""))
+            (format nil "System: ~A~%~%User: ~A"
+                    (subseq system-msg 0 (min 200 (length system-msg)))
+                    (subseq user-msg 0 (min 300 (length user-msg)))))
+  (let* ((prompt (list system-msg user-msg))
+         (result (ecase *ai-provider*
+                   (:mock      (ai-generate-mock prompt))
+                   (:anthropic (ai-generate-anthropic prompt system-msg user-msg))
+                   (:rho       (rho-ai-generate prompt system-msg user-msg)))))
+    (demo-log "ai" (format nil "Response: ~D chars" (length (second result)))
+              (subseq (second result) 0 (min 500 (length (second result)))))
+    result))
 
 (defun ai-generate-mock (prompt)
   "Mock AI generation."
@@ -306,8 +322,9 @@
         (web-fetch-mock url))))
 
 (defun rho-ai-generate (prompt system-msg user-msg)
-  "Use rho-cli for AI generation (uses whatever model rho is configured with)."
-  (let ((output (rho-run (format nil "~A~%~%~A" system-msg user-msg))))
+  "Use rho-cli for AI generation. Uses *rho-model* if set."
+  (let ((output (rho-run (format nil "~A~%~%~A" system-msg user-msg)
+                         :model *rho-model*)))
     (if output
         (list prompt output (get-universal-time))
         (ai-generate-mock prompt))))
@@ -316,15 +333,37 @@
 ;; URL encoding/decoding utilities
 ;; =========================================================================
 
+(defun char-to-utf8-bytes (c)
+  "Convert a character to its UTF-8 byte sequence as a list of integers."
+  #+sbcl (coerce (sb-ext:string-to-octets (string c) :external-format :utf-8) 'list)
+  #-sbcl (let ((code (char-code c)))
+           (cond
+             ((<= code #x7F) (list code))
+             ((<= code #x7FF)
+              (list (logior #xC0 (ash code -6))
+                    (logior #x80 (logand code #x3F))))
+             ((<= code #xFFFF)
+              (list (logior #xE0 (ash code -12))
+                    (logior #x80 (logand (ash code -6) #x3F))
+                    (logior #x80 (logand code #x3F))))
+             (t
+              (list (logior #xF0 (ash code -18))
+                    (logior #x80 (logand (ash code -12) #x3F))
+                    (logior #x80 (logand (ash code -6) #x3F))
+                    (logior #x80 (logand code #x3F)))))))
+
 (defun url-encode-form (string)
-  "Percent-encode a string for use in URL form data. Spaces become +."
+  "Percent-encode a string for use in URL form data. Spaces become +.
+   Non-ASCII characters are encoded as UTF-8 bytes."
   (with-output-to-string (out)
     (loop for c across string
           do (cond
                ((char= c #\Space) (write-char #\+ out))
-               ((or (alphanumericp c) (find c "-_.~"))
+               ((or (and (alphanumericp c) (<= (char-code c) 127))
+                    (find c "-_.~"))
                 (write-char c out))
-               (t (format out "%~2,'0X" (char-code c)))))))
+               (t (dolist (byte (char-to-utf8-bytes c))
+                    (format out "%~2,'0X" byte)))))))
 
 (defun url-decode (string)
   "Decode a percent-encoded string."

@@ -37,38 +37,42 @@ fi
 echo "Starting Shen Web Tools on CL/SBCL..."
 
 # Check for rho-cli
-if command -v rho &>/dev/null; then
-  echo "  rho-cli: found ($(which rho))"
+if command -v rho-cli &>/dev/null; then
+  echo "  rho-cli: found ($(which rho-cli))"
 else
   echo "  rho-cli: not found (DuckDuckGo search built-in, rho provider unavailable)"
 fi
 
-# Parse args for SBCL eval expressions
-EXTRA_EVAL=""
+# Parse args into an array (avoids eval + shell injection)
+SBCL_ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --port)
-      EXTRA_EVAL="$EXTRA_EVAL --eval (shen-web-tools::configure :port $2)"
+      SBCL_ARGS+=(--eval "(shen-web-tools::configure :port $2)")
       shift 2
       ;;
     --search)
-      EXTRA_EVAL="$EXTRA_EVAL --eval (shen-web-tools::configure :search :$2)"
+      SBCL_ARGS+=(--eval "(shen-web-tools::configure :search :$2)")
       shift 2
       ;;
     --fetch)
-      EXTRA_EVAL="$EXTRA_EVAL --eval (shen-web-tools::configure :fetch :$2)"
+      SBCL_ARGS+=(--eval "(shen-web-tools::configure :fetch :$2)")
       shift 2
       ;;
     --ai)
-      EXTRA_EVAL="$EXTRA_EVAL --eval (shen-web-tools::configure :ai :$2)"
+      SBCL_ARGS+=(--eval "(shen-web-tools::configure :ai :$2)")
       shift 2
       ;;
     --api-key)
-      EXTRA_EVAL="$EXTRA_EVAL --eval '(shen-web-tools::configure :api-key \"$2\")'"
+      SBCL_ARGS+=(--eval "(shen-web-tools::configure :api-key \"$2\")")
+      shift 2
+      ;;
+    --model)
+      SBCL_ARGS+=(--eval "(shen-web-tools::configure :model \"$2\")")
       shift 2
       ;;
     --rho-bin)
-      EXTRA_EVAL="$EXTRA_EVAL --eval '(shen-web-tools::configure :rho-bin \"$2\")'"
+      SBCL_ARGS+=(--eval "(shen-web-tools::configure :rho-bin \"$2\")")
       shift 2
       ;;
     *)
@@ -86,7 +90,10 @@ if command -v npx &>/dev/null; then
   npx tsc 2>/dev/null || echo "  (TypeScript build skipped)"
 fi
 
-# Launch SBCL with the load script
-eval sbcl --dynamic-space-size 2048 \
+# Launch SBCL: load system, apply config, then boot
+# SHEN_WEB_TOOLS_NO_AUTOBOOT prevents boot during --load so configure runs first
+export SHEN_WEB_TOOLS_NO_AUTOBOOT=1
+exec sbcl --dynamic-space-size 2048 \
      --load backend/load.lisp \
-     $EXTRA_EVAL
+     "${SBCL_ARGS[@]}" \
+     --eval "(shen-web-tools::boot)"

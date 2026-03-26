@@ -49,4 +49,5 @@
 (defvar *ai-provider* :mock "AI provider: :mock, :anthropic, or :rho")
 (defvar *anthropic-api-key* nil "Anthropic API key")
 (defvar *anthropic-model* "claude-sonnet-4-6" "Anthropic model ID")
-(defvar *rho-binary* "rho" "Path to rho-cli binary")
+(defvar *rho-binary* "rho-cli" "Path to rho-cli binary")
+(defvar *rho-model* nil "Model ID for rho-cli (nil = use rho default)")

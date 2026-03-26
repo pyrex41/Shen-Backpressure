@@ -35,6 +35,37 @@
     *pipeline-state*))
 
 ;; -------------------------------------------------------------------------
+;; Demo log stream — captures pipeline activity for the split-pane UI
+;; -------------------------------------------------------------------------
+
+(defvar *demo-log* nil "Ring buffer of log entries (newest first)")
+(defvar *demo-log-lock* (bt:make-lock "demo-log"))
+(defvar *demo-log-max* 200 "Max log entries to keep")
+(defvar *demo-log-seq* 0 "Monotonic sequence number for log entries")
+
+(defun demo-log (category message &optional detail)
+  "Add a log entry. Category: search, fetch, ai, cache, pipeline, layout."
+  (bt:with-lock-held (*demo-log-lock*)
+    (incf *demo-log-seq*)
+    (push `((:seq . ,*demo-log-seq*)
+            (:ts . ,(get-universal-time))
+            (:cat . ,category)
+            (:msg . ,message)
+            ,@(when detail `((:detail . ,detail))))
+          *demo-log*)
+    (when (> (length *demo-log*) *demo-log-max*)
+      (setf *demo-log* (subseq *demo-log* 0 *demo-log-max*)))))
+
+(defun demo-log-since (seq)
+  "Return log entries with seq > SEQ, oldest first."
+  (bt:with-lock-held (*demo-log-lock*)
+    (nreverse (remove-if (lambda (e) (<= (cdr (assoc :seq e)) seq))
+                         (copy-list *demo-log*)))))
+
+(defun demo-log-current-seq ()
+  (bt:with-lock-held (*demo-log-lock*) *demo-log-seq*))
+
+;; -------------------------------------------------------------------------
 ;; JSON helpers
 ;; -------------------------------------------------------------------------
 
@@ -198,6 +229,18 @@
   (force-output stream))
 
 ;; -------------------------------------------------------------------------
+;; Demo log SSE — streams backend activity to the split-pane UI
+;; -------------------------------------------------------------------------
+
+(hunchentoot:define-easy-handler (api-logs :uri "/api/logs") (since)
+  "Poll-based log endpoint. Returns new log entries since ?since=N.
+   Response: { seq: N, entries: [...] }"
+  (let* ((since-seq (or (when since (parse-integer since :junk-allowed t)) 0))
+         (entries (demo-log-since since-seq))
+         (current-seq (demo-log-current-seq)))
+    (json-response `((:seq . ,current-seq) (:entries . ,entries)))))
+
+;; -------------------------------------------------------------------------
 ;; Source grounding (CL implementation of the Shen logic)
 ;; -------------------------------------------------------------------------
 
@@ -243,12 +286,29 @@
 ;; Static file serving
 ;; -------------------------------------------------------------------------
 
+(defun safe-static-path (relative-path root)
+  "Resolve RELATIVE-PATH under ROOT. Returns NIL if the resolved path
+   escapes ROOT (path traversal attack)."
+  (let* ((merged (merge-pathnames relative-path root))
+         (resolved (handler-case (truename merged) (error () nil))))
+    (when resolved
+      (let ((resolved-str (namestring resolved))
+            (root-str (namestring root)))
+        (when (and (>= (length resolved-str) (length root-str))
+                   (string= root-str (subseq resolved-str 0 (length root-str))))
+          resolved)))))
+
 (defun create-static-dispatcher ()
   "Create a dispatcher that serves static files from the project root."
   (lambda (request)
     (let* ((uri (hunchentoot:request-uri request))
            (path (hunchentoot:url-decode (subseq uri 1))))
       (cond
+        ;; Path traversal guard
+        ((search ".." path)
+         (lambda ()
+           (setf (hunchentoot:return-code*) 403)
+           "Forbidden"))
         ;; Medicare (default landing page)
         ((or (string= uri "/") (string= uri "/medicare") (string= uri "/medicare.html"))
          (lambda ()
@@ -261,26 +321,26 @@
             (merge-pathnames "index.html" *static-root*))))
         ;; Static assets
         ((and (>= (length path) 7) (string= (subseq path 0 7) "static/"))
-         (lambda ()
-           (hunchentoot:handle-static-file
-            (merge-pathnames path *static-root*))))
+         (let ((safe (safe-static-path path *static-root*)))
+           (if safe
+               (lambda () (hunchentoot:handle-static-file safe))
+               (lambda () (setf (hunchentoot:return-code*) 403) "Forbidden"))))
         ;; Compiled JS
         ((and (>= (length path) 8) (string= (subseq path 0 8) "runtime/")
               (search ".js" path))
-         (lambda ()
-           (let ((dist-path (merge-pathnames (format nil "dist/~A" path) *static-root*)))
-             (if (probe-file dist-path)
-                 (hunchentoot:handle-static-file dist-path)
-                 (progn
-                   (setf (hunchentoot:return-code*) 404)
-                   "Not found")))))
+         (let ((safe (safe-static-path (format nil "dist/~A" path) *static-root*)))
+           (if safe
+               (lambda () (hunchentoot:handle-static-file safe))
+               (lambda () (setf (hunchentoot:return-code*) 404) "Not found"))))
         ;; Shen source files (for inspection)
         ((and (>= (length path) 4) (string= (subseq path 0 4) "src/")
               (search ".shen" path))
-         (lambda ()
-           (setf (hunchentoot:content-type*) "text/plain; charset=utf-8")
-           (hunchentoot:handle-static-file
-            (merge-pathnames path *static-root*))))))))
+         (let ((safe (safe-static-path path *static-root*)))
+           (if safe
+               (lambda ()
+                 (setf (hunchentoot:content-type*) "text/plain; charset=utf-8")
+                 (hunchentoot:handle-static-file safe))
+               (lambda () (setf (hunchentoot:return-code*) 403) "Forbidden"))))))))
 
 ;; -------------------------------------------------------------------------
 ;; Server lifecycle

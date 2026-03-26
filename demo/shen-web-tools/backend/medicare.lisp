@@ -48,9 +48,11 @@
           (if (< (- (get-universal-time) cached-at) *medicare-cache-ttl*)
               (progn
                 (format t "Cache HIT: ~A~%" key)
+                (demo-log "cache" (format nil "HIT ~A" key))
                 result)
               (progn
                 (format t "Cache EXPIRED: ~A~%" key)
+                (demo-log "cache" (format nil "EXPIRED ~A" key))
                 (remhash key *medicare-cache*)
                 nil)))))))
 
@@ -190,12 +192,29 @@ If the user's message is a follow-up to a previous conversation, use context to 
               (:raw-query . ,user-message)))))))
 
 (defun extract-json-from-response (text)
-  "Extract the first JSON object from an LLM response (strip markdown fences etc)."
-  (let* ((start (position #\{ text))
-         (end (when start (position #\} text :from-end t))))
-    (if (and start end (> end start))
-        (subseq text start (1+ end))
-        "{}")))
+  "Extract the first balanced JSON object from an LLM response.
+   Handles nested braces and string literals correctly."
+  (let ((start (position #\{ text)))
+    (if (null start)
+        "{}"
+        (let ((depth 0)
+              (in-string nil)
+              (escape nil))
+          (loop for i from start below (length text)
+                for c = (char text i)
+                do (cond
+                     (escape (setf escape nil))
+                     ((char= c #\\) (when in-string (setf escape t)))
+                     ((char= c #\") (setf in-string (not in-string)))
+                     ((not in-string)
+                      (cond
+                        ((char= c #\{) (incf depth))
+                        ((char= c #\})
+                         (decf depth)
+                         (when (zerop depth)
+                           (return-from extract-json-from-response
+                             (subseq text start (1+ i))))))))
+                finally (return "{}"))))))
 
 ;; =========================================================================
 ;; LLM-in-the-loop #2: Layout generation with lazy panel constraints
@@ -320,6 +339,8 @@ If the user's message is a follow-up to a previous conversation, use context to 
 
    The LLM sees only panels whose data requirements are met (lazy loading).
    It also generates follow-up suggestions — replacing hardcoded Shen rules."
+  (demo-log "layout" "LLM generating layout intent..."
+            (format nil "Available panels for this data shape"))
   (let* ((available (available-panels-for-data result))
          (panel-docs (format-panel-constraints available))
          (system (format nil "You are a UI layout planner for a Medicare insurance tool.
@@ -371,17 +392,22 @@ Respond with ONLY a JSON object:
          (validated-panels (when (cdr (assoc :panels parsed))
                              (remove-if-not (lambda (p) (member p available-names :test #'string=))
                                             (cdr (assoc :panels parsed))))))
-    (if parsed
-        `((:panels . ,(or validated-panels '("summary" "source-list" "disclaimer")))
-          (:emphasis . ,(or (cdr (assoc :emphasis parsed)) (cdr (assoc :plan-label result))))
-          (:reasoning . ,(or (cdr (assoc :reasoning parsed)) "default layout"))
-          (:followups . ,(or (cdr (assoc :followups parsed))
-                             (default-followups result))))
-        ;; Fallback layout
-        `((:panels . ("summary" "source-list" "followup" "disclaimer"))
-          (:emphasis . ,(or (cdr (assoc :plan-label result)) "Medicare Plans"))
-          (:reasoning . "default layout (LLM parse failed)")
-          (:followups . ,(default-followups result))))))
+    (let ((layout-result
+            (if parsed
+                `((:panels . ,(or validated-panels '("summary" "source-list" "disclaimer")))
+                  (:emphasis . ,(or (cdr (assoc :emphasis parsed)) (cdr (assoc :plan-label result))))
+                  (:reasoning . ,(or (cdr (assoc :reasoning parsed)) "default layout"))
+                  (:followups . ,(or (cdr (assoc :followups parsed))
+                                     (default-followups result))))
+                ;; Fallback layout
+                `((:panels . ("summary" "source-list" "followup" "disclaimer"))
+                  (:emphasis . ,(or (cdr (assoc :plan-label result)) "Medicare Plans"))
+                  (:reasoning . "default layout (LLM parse failed)")
+                  (:followups . ,(default-followups result))))))
+      (demo-log "layout"
+                (format nil "Panels: ~{~A~^, ~}" (cdr (assoc :panels layout-result)))
+                (cdr (assoc :reasoning layout-result)))
+      layout-result)))
 
 (defun default-followups (result)
   "Fallback follow-up suggestions when LLM doesn't generate them."
@@ -555,6 +581,9 @@ IMPORTANT GUIDELINES:
    3. LLM generates UI layout intent
    4. Return data + layout for Shen validation + Arrow.js rendering"
 
+  (demo-log "pipeline" (format nil "User: ~A" user-message)
+            (format nil "session=~A zip=~A planType=~A" session-id (or zip "") (or plan-type "")))
+
   ;; Record user message in conversation
   (conversation-push session-id "user" user-message)
 
@@ -577,7 +606,7 @@ IMPORTANT GUIDELINES:
          (history (conversation-get session-id)))
 
     ;; If we need a zip code and don't have one, ask
-    (when (and needs-zip (or (null i-zip) (= (length i-zip) 0)))
+    (when (and needs-zip (or (null i-zip) (zerop (length i-zip))))
       (let ((response `((:type . "needs-input")
                         (:field . "zip")
                         (:message . "I'd be happy to help! What's your zip code so I can find plans in your area?")

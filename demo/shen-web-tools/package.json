@@ -7,6 +7,7 @@
   "scripts": {
     "build": "npx tsc",
     "shengen": "npx tsx ../../cmd/shengen-ts/shengen.ts specs/core.shen --out runtime/guards_gen.ts",
+    "test": "node --import tsx --test runtime/*.test.ts",
     "check": "npm run shengen && npm run build"
   },
   "dependencies": {
