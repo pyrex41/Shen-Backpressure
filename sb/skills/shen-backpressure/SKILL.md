@@ -6,7 +6,7 @@ user-invocable: false
 
 # Shen-Backpressure
 
-Formal type specs (Shen sequent calculus) + codegen bridge (shengen) that generates guard types with opaque constructors in Go or TypeScript. The generated types enforce domain invariants at compile time — you can't construct a value without proving its preconditions.
+Formal type specs (Shen sequent calculus) + codegen bridge (shengen) that generates guard types with opaque constructors in any language with module-level visibility (Go, TypeScript, Rust, etc.). The generated types enforce domain invariants at compile time — you can't construct a value without proving its preconditions.
 
 ## Why This Works — Compiler Enforcement, Not LLM Policing
 
@@ -32,7 +32,7 @@ When a function requires a guard type as input, the caller must have produced it
 specs/core.shen          Shen sequent-calculus type rules
        |
        v  (shengen)
-internal/shenguard/      Generated guard types (Go or TypeScript)
+Generated guard types    Private fields — compiler enforces constructors
        |
        v  (import)
 Application code         Uses guard types at domain boundaries

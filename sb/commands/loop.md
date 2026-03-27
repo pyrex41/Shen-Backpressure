@@ -14,7 +14,7 @@ Ralph (outer loop)
   └─> Gate 1: shengen (regenerate guard types from spec)
   └─> call harness (claude -p, cursor-agent, codex, etc.)
        └─> harness makes code changes
-  └─> Gate 2: go test / npm test / etc.
+  └─> Gate 2: test (go test, npm test, cargo test, etc.)
   └─> Gate 3: build (compile against regenerated types)
   └─> Gate 4: shen tc+ (verify spec consistency)
        ├─> ALL PASS → next iteration (or done)
@@ -25,7 +25,7 @@ Ralph (outer loop)
 
 Verify `/sb:init` was already run:
 - `specs/core.shen` exists
-- Guard types exist (`internal/shenguard/`)
+- Guard types exist (generated file from shengen)
 - `bin/shen-check.sh` exists and is executable
 - shengen tooling exists
 
@@ -50,7 +50,7 @@ Ask the user:
 
 Create these files:
 
-**`cmd/ralph/main.go`** (or equivalent) — The orchestrator. Runs four gates in order:
+**Ralph orchestrator** (e.g., `cmd/ralph/main.go` for Go, `ralph.ts` for TS, or a shell script) — runs four gates in order:
 1. shengen (regenerate guard types)
 2. test
 3. build
