@@ -96,13 +96,17 @@ Use `\* comment *\` to document sections.
 
 ### Shen Runtime (for Gate 4: type checking)
 
-Gate 4 needs a Shen implementation to run `tc+` on the spec. **Any port works** — the spec is pure Shen, independent of the target language for guard types. Detect what's available in this priority order:
+Gate 4 runs Shen's type checker (`tc+`) on the spec. **Any Shen port works** — the spec is pure Shen, independent of what language the guard types target. Use **shen-sbcl** (Shen on SBCL/Common Lisp):
 
-1. **shen-sbcl** — check: `command -v shen-sbcl` or `brew list shen-sbcl`. If SBCL is installed (`command -v sbcl`), this is the best option. Install: `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`
-2. **shen-scheme** — check: `command -v shen-scheme`. Needs Chez Scheme.
-3. **shen-go** — **avoid unless the user specifically asks**. Known to crash on macOS due to memory allocation bugs during cold bootstrap. If the user insists, clone from `github.com/tiancaiamao/shen-go` and build, but warn about the stability issue.
+```bash
+# Check if shen-sbcl is available
+command -v shen-sbcl || command -v sbcl
+```
 
-If nothing is installed, recommend shen-sbcl (SBCL is widely available via `brew install sbcl`).
+- **If SBCL is installed**: install shen-sbcl via `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`
+- **If neither**: `brew install sbcl` then install shen-sbcl as above
+
+Do NOT use shen-go — it has known memory allocation crash bugs and hangs during cold bootstrap.
 
 ### shengen (codegen tool)
 
@@ -115,7 +119,7 @@ If neither exists and the project is based on the Shen-Backpressure repo, check 
 
 ### shen-check.sh
 
-Create `bin/shen-check.sh` based on whichever Shen runtime was found. The script must:
+Create `bin/shen-check.sh` using shen-sbcl. The script must:
 - Accept a spec path argument (default: `specs/core.shen`)
 - Enable type checking (`(tc +)`)
 - Load the spec file
@@ -160,7 +164,7 @@ Run the Shen type check:
 
 Output should end with `RESULT: PASS`. Fix and regenerate if there's a type error.
 
-If shen-check.sh times out or crashes, check which Shen runtime is being used — if it's shen-go, switch to shen-sbcl.
+If shen-check.sh times out or crashes, verify shen-sbcl is installed and working: `shen-sbcl -q -e "(+ 1 1)"`
 
 ## Step 7: Report
 

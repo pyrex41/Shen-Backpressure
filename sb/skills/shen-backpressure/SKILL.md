@@ -35,10 +35,10 @@ The gates can run in a Ralph loop, CI pipeline, or manually — the verification
 
 ## Shen Runtime for Gate 4
 
-Gate 4 (shen tc+) needs a working Shen implementation. **Any Shen port works** — the spec is pure Shen, independent of what language the guard types target. Priority order:
+Gate 4 (shen tc+) needs a Shen implementation. Use **shen-sbcl** (Shen on SBCL/Common Lisp) — most reliable, fastest startup.
 
-1. **shen-sbcl** (Shen on SBCL/Common Lisp) — most reliable, fastest startup. Install: `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`, or check if `sbcl` is already installed and get shen-cl via Quicklisp.
-2. **shen-scheme** — if Chez Scheme is available.
-3. **shen-go** — known to crash on some platforms due to memory allocation bugs. Avoid unless specifically requested.
+Install: `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`
+
+Do NOT use shen-go — it has known memory allocation crash bugs.
 
 **Important:** shengen (the codegen tool) is a separate Go/TS program that reads `.shen` files as text and emits guard types. It does NOT run Shen code. Only Gate 4 needs an actual Shen runtime.

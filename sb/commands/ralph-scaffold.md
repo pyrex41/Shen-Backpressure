@@ -43,7 +43,7 @@ Draft `specs/core.shen` from the domain description. Use the standard pattern hi
 
 ## Step 4: Install Tooling
 
-Detect and install the Shen runtime and shengen. Follow the same priority order as `/sb:init`: shen-sbcl (preferred) > shen-scheme > shen-go (avoid unless requested, known crash issues). Install shen-check.sh with a 30-second timeout.
+Install shen-sbcl (Shen on SBCL) for Gate 4, shen-check.sh with 30-second timeout, shengen, and shengen-codegen.sh. See `/sb:init` Step 4 for details.
 
 ## Step 5: Generate Guard Types
 
@@ -87,7 +87,7 @@ make all
 
 All gates must pass. Fix any failures before declaring setup complete.
 
-If Gate 4 (shen-check) fails with a timeout or crash, check which Shen runtime `bin/shen-check.sh` is using. Switch to shen-sbcl if needed.
+If Gate 4 (shen-check) fails with a timeout or crash, verify shen-sbcl is installed: `shen-sbcl -q -e "(+ 1 1)"`
 
 ## Step 9: Report
 
