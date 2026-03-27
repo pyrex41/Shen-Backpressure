@@ -25,7 +25,6 @@ Ask the user:
 
 3. **Project layout** — Where should files go? Defaults:
    - `specs/core.shen` — Shen type specifications
-   - `bin/shen` — Shen-Go binary
    - `bin/shen-check.sh` — Shen verification wrapper
    - `bin/shengen` or `bin/shengen-codegen.sh` — codegen tooling
    - `internal/shenguard/` — generated guard types
@@ -95,22 +94,47 @@ Use `\* comment *\` to document sections.
 
 ## Step 4: Install Tooling
 
-**Shen-Go** — check if `bin/shen` exists. If not:
+### Shen Runtime (for Gate 4: type checking)
+
+Gate 4 needs a Shen implementation to run `tc+` on the spec. **Any port works** — the spec is pure Shen, independent of the target language for guard types. Detect what's available in this priority order:
+
+1. **shen-sbcl** — check: `command -v shen-sbcl` or `brew list shen-sbcl`. If SBCL is installed (`command -v sbcl`), this is the best option. Install: `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`
+2. **shen-scheme** — check: `command -v shen-scheme`. Needs Chez Scheme.
+3. **shen-go** — **avoid unless the user specifically asks**. Known to crash on macOS due to memory allocation bugs during cold bootstrap. If the user insists, clone from `github.com/tiancaiamao/shen-go` and build, but warn about the stability issue.
+
+If nothing is installed, recommend shen-sbcl (SBCL is widely available via `brew install sbcl`).
+
+### shengen (codegen tool)
+
+**shengen is NOT a Shen interpreter.** It's a standalone parser/codegen that reads `.shen` files as text and emits guard types. Check if it exists:
+
+- Go: `bin/shengen` or `cmd/shengen/main.go` — build with `cd cmd/shengen && go build -o ../../bin/shengen .`
+- TypeScript: `cmd/shengen-ts/shengen.ts` — runs via `npx tsx`
+
+If neither exists and the project is based on the Shen-Backpressure repo, check `../../cmd/shengen/` (the shared shengen in the repo root).
+
+### shen-check.sh
+
+Create `bin/shen-check.sh` based on whichever Shen runtime was found. The script must:
+- Accept a spec path argument (default: `specs/core.shen`)
+- Enable type checking (`(tc +)`)
+- Load the spec file
+- Exit 0 with `RESULT: PASS` on success
+- Exit 1 with `RESULT: FAIL` on type error
+- Include a timeout (30 seconds) to prevent hangs
+
+**For shen-sbcl:**
 ```bash
-mkdir -p bin
-git clone https://github.com/tiancaiamao/shen-go /tmp/shen-go
-cd /tmp/shen-go && GOTOOLCHAIN=local make shen
-cp /tmp/shen-go/shen bin/shen
-rm -rf /tmp/shen-go
+#!/bin/bash
+set -euo pipefail
+SPEC="${1:-specs/core.shen}"
+timeout 30 shen-sbcl -q -e "(tc +)" -l "$SPEC" 2>&1 || { echo "RESULT: FAIL"; exit 1; }
+echo "RESULT: PASS"
 ```
 
-**shen-check.sh** — create `bin/shen-check.sh` if missing (wraps shen-go's EOF behavior). Make executable.
+### shengen-codegen.sh
 
-**shengen** — build or install based on target language:
-- Go: `cd cmd/shengen && go build -o ../../bin/shengen .`
-- TypeScript: ensure `cmd/shengen-ts/shengen.ts` is available and `npx tsx` works
-
-**shengen-codegen.sh** — create `bin/shengen-codegen.sh` wrapper if missing. Make executable.
+Create `bin/shengen-codegen.sh` wrapper. Make executable.
 
 ## Step 5: Write Specs and Generate Guard Types
 
@@ -135,6 +159,8 @@ Run the Shen type check:
 ```
 
 Output should end with `RESULT: PASS`. Fix and regenerate if there's a type error.
+
+If shen-check.sh times out or crashes, check which Shen runtime is being used — if it's shen-go, switch to shen-sbcl.
 
 ## Step 7: Report
 
