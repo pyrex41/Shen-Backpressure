@@ -85,9 +85,9 @@ If SBCL is already installed: shen-sbcl can be added on top. Do NOT use shen-go 
 
 **Shen specs** — Sequent-calculus type definitions in `specs/core.shen`. These are the source of truth. Shen's type checker (`tc+`) proves they're internally consistent.
 
-**Guard types** — Generated code with opaque constructors. The ONLY way to create a value is through the constructor, which validates the spec's preconditions. Wrap at system boundaries, trust internally.
+**Guard types** — Generated code with **module-private fields** (Go: unexported, TS: private, Rust: non-pub). The ONLY way to create a value is through the constructor, which validates the spec's preconditions. There is no syntax to bypass this — the **compiler** enforces it, not the LLM. Wrap at system boundaries, trust internally.
 
-**Backpressure** — When generated types change (because specs changed), code that uses them breaks at compile time. This forces the developer (or LLM) to update usage to match the new invariants.
+**Backpressure** — When generated types change (because specs changed), code that uses them breaks at compile time. This forces the developer (or LLM) to update usage to match the new invariants. The LLM writes code; the compiler checks invariants; gate failures feed back as errors.
 
 **Ralph loop** — An autonomous outer loop: call LLM harness → run four gates → inject failures into next prompt → repeat until all gates pass.
 

@@ -8,6 +8,16 @@ user-invocable: false
 
 Formal type specs (Shen sequent calculus) + codegen bridge (shengen) that generates guard types with opaque constructors in Go or TypeScript. The generated types enforce domain invariants at compile time — you can't construct a value without proving its preconditions.
 
+## Why This Works — Compiler Enforcement, Not LLM Policing
+
+Guard types use the target language's **module-private fields** to make the compiler itself enforce invariants:
+
+- **Go**: struct fields are lowercase (unexported) — code outside the package literally cannot construct the struct
+- **TypeScript**: class fields are `private` with static factory — no way to instantiate without validation
+- **Rust/Swift/Kotlin**: private fields with public factory methods — same pattern
+
+When a function requires a guard type as input, the caller must have produced it through the constructor chain. If code tries to skip a step, **the build fails** — not because an LLM checked it, but because the compiler rejected it. The LLM writes code; the compiler enforces the proof chain. Gate 3 (build) catches violations automatically.
+
 ## Commands
 
 - `/sb:help` — Show available commands and what they do.

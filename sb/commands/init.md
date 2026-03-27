@@ -12,6 +12,12 @@ You add Shen sequent-calculus backpressure to the user's project. This means:
 
 You do NOT assume any particular workflow or orchestrator. You set up the foundation — the user decides how to run it.
 
+### How enforcement works
+
+Guard types use the target language's **module-private fields** so the **compiler itself** enforces invariants — not the LLM, not a linter, not a runtime assertion. In Go, struct fields are unexported (lowercase); in TypeScript, fields are `private`; in Rust, fields are non-pub. There is no syntax for constructing a guard type except through its generated constructor, which validates the Shen spec's preconditions.
+
+When a function requires a guard type as input (e.g., `ResourceAccess`), the caller must have produced it through the constructor chain. If an LLM writes code that skips a step, `go build` or `tsc` fails in Gate 3. The error feeds back as backpressure. The compiler checks invariants; the LLM just writes code that has to satisfy the compiler.
+
 ## Step 1: Gather Requirements
 
 Ask the user:
