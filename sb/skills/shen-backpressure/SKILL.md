@@ -10,6 +10,7 @@ Formal type specs (Shen sequent calculus) + codegen bridge (shengen) that genera
 
 ## Commands
 
+- `/sb:help` — Show available commands and what they do.
 - `/sb:init` — Add Shen backpressure to any project. Specs, guard types, gates. No assumptions about workflow.
 - `/sb:loop` — Configure and launch a Ralph loop (autonomous LLM harness). Requires init first.
 - `/sb:ralph-scaffold` — All-in-one: init + Ralph loop in a single flow.
@@ -31,3 +32,13 @@ Verification             shengen -> test -> build -> shen tc+
 ```
 
 The gates can run in a Ralph loop, CI pipeline, or manually — the verification is the same regardless of what triggers it.
+
+## Shen Runtime for Gate 4
+
+Gate 4 (shen tc+) needs a working Shen implementation. **Any Shen port works** — the spec is pure Shen, independent of what language the guard types target. Priority order:
+
+1. **shen-sbcl** (Shen on SBCL/Common Lisp) — most reliable, fastest startup. Install: `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`, or check if `sbcl` is already installed and get shen-cl via Quicklisp.
+2. **shen-scheme** — if Chez Scheme is available.
+3. **shen-go** — known to crash on some platforms due to memory allocation bugs. Avoid unless specifically requested.
+
+**Important:** shengen (the codegen tool) is a separate Go/TS program that reads `.shen` files as text and emits guard types. It does NOT run Shen code. Only Gate 4 needs an actual Shen runtime.

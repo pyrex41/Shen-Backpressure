@@ -31,6 +31,8 @@ Verify `/sb:init` was already run:
 
 If any are missing, tell the user to run `/sb:init` first.
 
+Also verify Gate 4 works by running `bin/shen-check.sh` once. If it crashes or times out, the Shen runtime needs fixing before the loop can run — check which runtime shen-check.sh uses and switch to shen-sbcl if needed.
+
 ## Step 2: Gather Loop Configuration
 
 Ask the user:
@@ -55,6 +57,10 @@ Create these files:
 4. shen-check
 
 Set the harness command from Step 2.
+- `RALPH_MAX_ITER` env var (default 10)
+- `RALPH_HARNESS` env var for harness override
+- `RALPH_HARNESS_TIMEOUT` env var for per-call timeout (default 10 minutes)
+- Backpressure error injection: on gate failure, append the error output to the harness prompt
 
 **`prompts/main_prompt.md`** — What the harness receives each iteration. Include:
 - Domain context and file locations
@@ -85,5 +91,6 @@ Options:
 - `make run-relaxed` — test and build in parallel
 - `RALPH_HARNESS="<cmd>" make run` — override harness
 - `RALPH_MAX_ITER=20 make run` — max iterations (default 10)
+- `RALPH_HARNESS_TIMEOUT=15m make run` — increase harness timeout
 
 The loop runs autonomously. Ctrl+C to stop.

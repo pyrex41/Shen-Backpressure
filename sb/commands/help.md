@@ -25,11 +25,11 @@ You have four commands and one skill for adding formal verification to AI coding
 1. Asks about your domain (entities, invariants, operations)
 2. Drafts `specs/core.shen` — Shen sequent-calculus type specifications
 3. Shows you the specs for confirmation before writing anything
-4. Installs tooling (shen-go, shengen, shen-check)
+4. Detects and installs Shen runtime (prefers shen-sbcl, avoids shen-go)
 5. Generates guard types (Go or TypeScript) with opaque constructors
 6. Verifies all gates pass
 
-**Output:** `specs/core.shen`, generated guard types, three verification gates you wire into any workflow.
+**Output:** `specs/core.shen`, generated guard types, verification gates you wire into any workflow.
 **Does NOT:** Assume Ralph, CI, or any specific workflow. You decide how to run the gates.
 
 ---
@@ -38,7 +38,7 @@ You have four commands and one skill for adding formal verification to AI coding
 **When:** You already ran `/sb:init` and want autonomous coding with backpressure.
 **Prerequisite:** `/sb:init` must be done first (specs and guard types exist).
 **What it does:**
-1. Verifies prerequisites (specs, guard types, shen-check)
+1. Verifies prerequisites (specs, guard types, shen-check works)
 2. Asks which LLM harness to use (claude, cursor-agent, codex, rho-cli, custom)
 3. Generates the orchestrator (`cmd/ralph/main.go`), prompt, plan, and Makefile
 4. Verifies all four gates pass clean
@@ -50,11 +50,14 @@ You have four commands and one skill for adding formal verification to AI coding
 3. `build` — compile against regenerated types (catches type mismatches)
 4. `shen-check` — Shen `tc+` on specs (catches spec inconsistency)
 
+**Environment variables:** `RALPH_HARNESS`, `RALPH_MAX_ITER`, `RALPH_HARNESS_TIMEOUT`
+
 ---
 
 ### `/sb:ralph-scaffold` — Full Setup in One Shot
 **When:** Starting from scratch and want Ralph + backpressure together.
 **What it does:** Combines `/sb:init` + `/sb:loop` into a single flow.
+**Smart detection:** If `/sb:init` was already run, skips to the Ralph loop setup automatically.
 **Goes from:** "I have a project" → "four-gate verification is running autonomously"
 **Does NOT:** Run the loop or implement domain code. It scaffolds and verifies.
 
@@ -69,6 +72,16 @@ You have four commands and one skill for adding formal verification to AI coding
 4. Guides you through building a working shengen for your target language
 
 **Supported targets:** Go, Rust, Python, TypeScript, Java, C#, Swift, Kotlin, or any language with module-level visibility.
+
+## Shen Runtime
+
+Gate 4 needs a Shen implementation. **Any port works** — the spec is pure Shen, independent of what language the guard types target. shengen is a separate text-processing tool.
+
+| Runtime | Status | Install |
+|---------|--------|---------|
+| shen-sbcl | Recommended | `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl` |
+| shen-scheme | Works | Needs Chez Scheme |
+| shen-go | Avoid | Known crash bugs on macOS (memory allocation overflow) |
 
 ## Concepts
 

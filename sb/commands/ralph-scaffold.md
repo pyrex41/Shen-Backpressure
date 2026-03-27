@@ -9,6 +9,15 @@ Combines `/sb:init` + `/sb:loop` into one flow. Goes from "I have a project" to 
 
 You scaffold and verify everything. You do NOT run the loop or implement domain code.
 
+## Step 0: Detect Prior Work
+
+Before asking questions, check if `/sb:init` was already run:
+- Does `specs/core.shen` exist?
+- Does `internal/shenguard/` exist with generated guard types?
+- Does `bin/shen-check.sh` exist?
+
+If init was already done, tell the user: "It looks like `/sb:init` was already run — I can see specs and guard types. I'll skip to the Ralph loop setup." Then jump to Step 6 (generate Ralph infrastructure). Don't re-ask domain questions or regenerate specs.
+
 ## Step 1: Gather Everything
 
 Ask the user:
@@ -34,7 +43,7 @@ Draft `specs/core.shen` from the domain description. Use the standard pattern hi
 
 ## Step 4: Install Tooling
 
-Install shen-go, shen-check.sh, shengen, and shengen-codegen.sh. Build shengen from source.
+Detect and install the Shen runtime and shengen. Follow the same priority order as `/sb:init`: shen-sbcl (preferred) > shen-scheme > shen-go (avoid unless requested, known crash issues). Install shen-check.sh with a 30-second timeout.
 
 ## Step 5: Generate Guard Types
 
@@ -47,6 +56,9 @@ Show the user what was generated.
 ## Step 6: Generate Ralph Infrastructure
 
 **`cmd/ralph/main.go`** — Orchestrator with four gates: shengen → test → build → shen-check. Harness set from Step 1.
+- `RALPH_MAX_ITER` env var (default 10)
+- `RALPH_HARNESS` env var for harness override
+- `RALPH_HARNESS_TIMEOUT` env var for per-call timeout (default 10 minutes)
 
 **`prompts/main_prompt.md`** — Inner harness prompt with guard type discipline, domain context, and backpressure errors section.
 
@@ -56,7 +68,7 @@ Show the user what was generated.
 
 **`go.mod`** (if needed):
 ```bash
-go mod init <module> && go get golang.org/x/sync && go mod tidy
+go mod init <module> && go mod tidy
 ```
 
 ## Step 7: Update .gitignore
@@ -75,6 +87,8 @@ make all
 
 All gates must pass. Fix any failures before declaring setup complete.
 
+If Gate 4 (shen-check) fails with a timeout or crash, check which Shen runtime `bin/shen-check.sh` is using. Switch to shen-sbcl if needed.
+
 ## Step 9: Report
 
 Tell the user:
@@ -83,4 +97,4 @@ Tell the user:
 - The proof chain and how to use guard types
 - How to run: `make run` or `make run-relaxed`
 - How to modify: specs for types, prompt for instructions, plan for tasks
-- Environment variables: `RALPH_HARNESS`, `RALPH_MAX_ITER`
+- Environment variables: `RALPH_HARNESS`, `RALPH_MAX_ITER`, `RALPH_HARNESS_TIMEOUT`
