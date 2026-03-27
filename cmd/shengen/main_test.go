@@ -561,34 +561,28 @@ func TestGenerateGoWrapperOnlyNoFmt(t *testing.T) {
 // parseFile_string is a test helper that parses a spec from a string
 // rather than a file path.
 func parseFile_string(spec string) ([]Datatype, error) {
-	content := spec
 	var types []Datatype
-	for {
-		idx := strings.Index(content, "(datatype ")
-		if idx == -1 {
-			break
-		}
-		content = content[idx:]
-		depth, end := 0, -1
-		for i, ch := range content {
-			if ch == '(' {
-				depth++
-			} else if ch == ')' {
-				depth--
-				if depth == 0 {
-					end = i + 1
-					break
-				}
-			}
-		}
-		if end == -1 {
-			break
-		}
-		block := content[:end]
-		content = content[end:]
+	for _, block := range extractBlocks(spec, "(datatype ") {
 		if dt := parseDatatype(block); dt != nil {
 			types = append(types, *dt)
 		}
 	}
 	return types, nil
+}
+
+// parseSpec_string parses both datatypes and defines from a string.
+func parseSpec_string(spec string) ([]Datatype, []Define, error) {
+	var types []Datatype
+	for _, block := range extractBlocks(spec, "(datatype ") {
+		if dt := parseDatatype(block); dt != nil {
+			types = append(types, *dt)
+		}
+	}
+	var defines []Define
+	for _, block := range extractBlocks(spec, "(define ") {
+		if def := parseDefine(block); def != nil {
+			defines = append(defines, *def)
+		}
+	}
+	return types, defines, nil
 }

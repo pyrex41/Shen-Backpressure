@@ -53,6 +53,36 @@ type Datatype struct {
 }
 
 // ============================================================================
+// Shen Define AST (for helper function definitions)
+// ============================================================================
+
+type DefineClause struct {
+	Patterns []string // raw pattern per parameter: "_", "[]", "[X | Rest]", "[[X Y] | Rest]", "Drug"
+	Result   string   // "true", "false", or "(func-call args...)"
+	Guard    string   // raw s-expr after 'where', or ""
+}
+
+type Define struct {
+	Name    string
+	Clauses []DefineClause
+}
+
+// DefineParam holds resolved Go type info for a define parameter.
+type DefineParam struct {
+	GoName       string // camelCase name
+	GoType       string // Go type string
+	ShenType     string // original Shen type
+	IsList       bool
+	ElemShenType string // for list params, the element's Shen type
+}
+
+// DefineResolved holds type-resolved info for generating Go code.
+type DefineResolved struct {
+	GoName     string
+	ParamTypes []DefineParam
+}
+
+// ============================================================================
 // Symbol Table
 // ============================================================================
 
@@ -72,12 +102,19 @@ type TypeInfo struct {
 }
 
 type SymbolTable struct {
-	Types     map[string]*TypeInfo
-	ConcCount map[string]int // how many blocks produce each conclusion type
+	Types          map[string]*TypeInfo
+	ConcCount      map[string]int // how many blocks produce each conclusion type
+	Defines        map[string]*Define
+	DefineResolved map[string]*DefineResolved
 }
 
 func newSymbolTable() *SymbolTable {
-	return &SymbolTable{Types: make(map[string]*TypeInfo), ConcCount: make(map[string]int)}
+	return &SymbolTable{
+		Types:          make(map[string]*TypeInfo),
+		ConcCount:      make(map[string]int),
+		Defines:        make(map[string]*Define),
+		DefineResolved: make(map[string]*DefineResolved),
+	}
 }
 
 func (st *SymbolTable) Build(types []Datatype) {
@@ -398,6 +435,11 @@ func (st *SymbolTable) verifiedToGo(v VerifiedPremise, varMap map[string]string)
 		return st.translateElementPremise(expr, varMap)
 	}
 
+	// Check if op matches a defined function (from (define ...) blocks)
+	if _, ok := st.Defines[expr.Op()]; ok {
+		return st.translateDefineCall(expr, varMap)
+	}
+
 	return "/* TODO: " + v.Raw + " */ true", "unhandled op: " + expr.Op()
 }
 
@@ -609,24 +651,463 @@ func (st *SymbolTable) translateElementPremise(expr *SExpr, varMap map[string]st
 }
 
 // ============================================================================
+// Define Call Translation
+// ============================================================================
+
+// defineGoName converts a Shen function name like "pair-in-list?" to Go "pairInList".
+func defineGoName(shenName string) string {
+	name := strings.TrimSuffix(shenName, "?")
+	return toCamelCase(name)
+}
+
+func (st *SymbolTable) translateDefineCall(expr *SExpr, varMap map[string]string) (string, string) {
+	goName := defineGoName(expr.Op())
+	var args []string
+	for i := 1; i < len(expr.Children); i++ {
+		resolved, ok := st.resolveExpr(expr.Children[i], varMap)
+		if !ok {
+			return fmt.Sprintf("/* TODO: %s */ true", expr.String()), "could not resolve define call args"
+		}
+		args = append(args, resolved.GoCode)
+	}
+
+	// Resolve parameter types on first encounter for code generation
+	if _, ok := st.DefineResolved[expr.Op()]; !ok {
+		st.resolveDefineTypes(expr, varMap)
+	}
+
+	return fmt.Sprintf("%s(%s)", goName, strings.Join(args, ", ")),
+		fmt.Sprintf("%s check failed", goName)
+}
+
+func (st *SymbolTable) resolveDefineTypes(expr *SExpr, varMap map[string]string) {
+	defName := expr.Op()
+	def := st.Defines[defName]
+	resolved := &DefineResolved{GoName: defineGoName(defName)}
+	for i := 1; i < len(expr.Children); i++ {
+		r, ok := st.resolveExpr(expr.Children[i], varMap)
+
+		// Prefer pattern variable names from the define's clauses over call-site names.
+		// This ensures generated function params match the guard variable references.
+		paramName := "arg" + strconv.Itoa(i-1)
+		if def != nil {
+			for _, clause := range def.Clauses {
+				idx := i - 1
+				if idx < len(clause.Patterns) {
+					pat := clause.Patterns[idx]
+					if pat != "_" && pat != "[]" && !strings.HasPrefix(pat, "[") {
+						paramName = toCamelCase(pat)
+						break
+					}
+				}
+			}
+		}
+		// Fallback to call-site atom name
+		if paramName == "arg"+strconv.Itoa(i-1) {
+			if expr.Children[i].IsAtom() && expr.Children[i].Atom != "" {
+				paramName = toCamelCase(expr.Children[i].Atom)
+			}
+		}
+
+		if !ok {
+			resolved.ParamTypes = append(resolved.ParamTypes, DefineParam{GoName: paramName, GoType: "any", ShenType: "unknown"})
+			continue
+		}
+		param := DefineParam{
+			GoName:   paramName,
+			GoType:   r.GoType,
+			ShenType: r.ShenType,
+		}
+		if elem := listElemType(r.ShenType); elem != "" {
+			param.IsList = true
+			param.ElemShenType = elem
+			param.GoType = "[]" + shenTypeToGo(elem)
+		}
+		resolved.ParamTypes = append(resolved.ParamTypes, param)
+	}
+	st.DefineResolved[defName] = resolved
+}
+
+// ============================================================================
+// Define → Go Code Generation
+// ============================================================================
+
+// analyzeDefine determines the loop structure of a define.
+func analyzeDefine(def *Define) (loopParamIdx int, baseResult string) {
+	loopParamIdx = -1
+	baseResult = "false"
+
+	// Find which parameter has list destructuring [... | Rest]
+	for _, clause := range def.Clauses {
+		for j, pat := range clause.Patterns {
+			if strings.Contains(pat, "|") {
+				loopParamIdx = j
+				break
+			}
+		}
+		if loopParamIdx >= 0 {
+			break
+		}
+	}
+
+	// Find base case (empty list pattern [])
+	for _, clause := range def.Clauses {
+		if loopParamIdx >= 0 && loopParamIdx < len(clause.Patterns) {
+			if clause.Patterns[loopParamIdx] == "[]" {
+				baseResult = clause.Result
+				break
+			}
+		}
+	}
+
+	return
+}
+
+// extractDestructureBindings parses a pattern like "[[X Y] | Rest]" and returns
+// the variable names for the element's fields (e.g., ["X", "Y"]).
+func extractDestructureBindings(pattern string) []string {
+	// Strip outer brackets and | Rest]
+	inner := pattern
+	inner = strings.TrimPrefix(inner, "[")
+	pipeIdx := strings.Index(inner, "|")
+	if pipeIdx == -1 {
+		return nil
+	}
+	inner = strings.TrimSpace(inner[:pipeIdx])
+
+	// Check for nested destructuring [[X Y]]
+	if strings.HasPrefix(inner, "[") {
+		inner = strings.TrimPrefix(inner, "[")
+		inner = strings.TrimSuffix(inner, "]")
+		return strings.Fields(inner)
+	}
+
+	// Simple element: [Med | Meds] → the element variable is "Med"
+	fields := strings.Fields(inner)
+	if len(fields) == 1 {
+		return fields
+	}
+	return nil
+}
+
+// translateDefineGuard translates a where-clause s-expression to Go code.
+func (st *SymbolTable) translateDefineGuard(guard string, localVarMap map[string]string) string {
+	expr := parseSExpr(guard)
+	if !expr.IsCall() {
+		return "true"
+	}
+	return st.translateGuardExpr(expr, localVarMap)
+}
+
+func (st *SymbolTable) translateGuardExpr(expr *SExpr, varMap map[string]string) string {
+	if !expr.IsCall() {
+		if r, ok := st.resolveAtom(expr.Atom, varMap); ok {
+			return r.GoCode
+		}
+		return expr.Atom
+	}
+
+	switch expr.Op() {
+	case "and":
+		if len(expr.Children) == 3 {
+			l := st.translateGuardExpr(expr.Children[1], varMap)
+			r := st.translateGuardExpr(expr.Children[2], varMap)
+			return l + " && " + r
+		}
+	case "or":
+		if len(expr.Children) == 3 {
+			l := st.translateGuardExpr(expr.Children[1], varMap)
+			r := st.translateGuardExpr(expr.Children[2], varMap)
+			return l + " || " + r
+		}
+	case "not":
+		if len(expr.Children) == 2 {
+			inner := st.translateGuardExpr(expr.Children[1], varMap)
+			return "!(" + inner + ")"
+		}
+	case "=":
+		if len(expr.Children) == 3 {
+			lhs, lok := st.resolveExpr(expr.Children[1], varMap)
+			rhs, rok := st.resolveExpr(expr.Children[2], varMap)
+			if lok && rok {
+				goL := st.unwrap(lhs)
+				goR := st.unwrap(rhs)
+				return goL + " == " + goR
+			}
+		}
+	default:
+		// Check if it's a call to another defined function
+		if _, ok := st.Defines[expr.Op()]; ok {
+			goName := defineGoName(expr.Op())
+			var args []string
+			for i := 1; i < len(expr.Children); i++ {
+				r, ok := st.resolveExpr(expr.Children[i], varMap)
+				if ok {
+					args = append(args, r.GoCode)
+				} else {
+					args = append(args, toCamelCase(expr.Children[i].Atom))
+				}
+			}
+			// Resolve types for the called define if not yet done
+			if _, resolved := st.DefineResolved[expr.Op()]; !resolved {
+				st.resolveDefineTypes(expr, varMap)
+			}
+			return fmt.Sprintf("%s(%s)", goName, strings.Join(args, ", "))
+		}
+	}
+	return "/* TODO: " + expr.String() + " */ true"
+}
+
+// resolveTransitiveDefines walks resolved defines and resolves any defines
+// called from their guards, repeating until fixpoint.
+func (st *SymbolTable) resolveTransitiveDefines() {
+	changed := true
+	for changed {
+		changed = false
+		for name, def := range st.Defines {
+			resolved, ok := st.DefineResolved[name]
+			if !ok {
+				continue
+			}
+			loopParamIdx, _ := analyzeDefine(def)
+			for _, clause := range def.Clauses {
+				if clause.Guard == "" {
+					continue
+				}
+				expr := parseSExpr(clause.Guard)
+				calledName := findDefineCalls(expr)
+				if calledName == "" {
+					continue
+				}
+				if _, alreadyResolved := st.DefineResolved[calledName]; alreadyResolved {
+					continue
+				}
+				// Build varMap for this clause using the resolved param types
+				localVarMap := make(map[string]string)
+				for i, p := range resolved.ParamTypes {
+					if i == loopParamIdx {
+						continue
+					}
+					if i < len(clause.Patterns) && clause.Patterns[i] != "_" && !strings.HasPrefix(clause.Patterns[i], "[") {
+						localVarMap[clause.Patterns[i]] = p.ShenType
+					}
+				}
+				// Add loop element binding
+				if loopParamIdx >= 0 && loopParamIdx < len(resolved.ParamTypes) && loopParamIdx < len(clause.Patterns) {
+					listParam := resolved.ParamTypes[loopParamIdx]
+					bindings := extractDestructureBindings(clause.Patterns[loopParamIdx])
+					if len(bindings) == 1 && bindings[0] != "_" {
+						localVarMap[bindings[0]] = listParam.ElemShenType
+					}
+				}
+				// Resolve the called define's types from this call context
+				st.resolveDefineTypes(expr, localVarMap)
+				changed = true
+			}
+		}
+	}
+}
+
+func generateDefineHelpers(b *strings.Builder, st *SymbolTable) {
+	// Resolve transitive dependencies before ordering
+	st.resolveTransitiveDefines()
+
+	// Fixpoint loop: generating one define's code may resolve types for
+	// another define (via guard translation). Keep going until no new
+	// defines are generated.
+	generated := make(map[string]bool)
+
+	for {
+		// Order ungenerated, resolved defines by dependency
+		var ordered []*Define
+		emitted := make(map[string]bool)
+		for k := range generated {
+			emitted[k] = true
+		}
+
+		for pass := 0; pass < 3; pass++ {
+			for name, def := range st.Defines {
+				if emitted[name] {
+					continue
+				}
+				if _, ok := st.DefineResolved[name]; !ok {
+					continue
+				}
+				allDepsEmitted := true
+				for _, clause := range def.Clauses {
+					if clause.Guard != "" {
+						expr := parseSExpr(clause.Guard)
+						if calledName := findDefineCalls(expr); calledName != "" {
+							if _, isDef := st.Defines[calledName]; isDef && !emitted[calledName] {
+								allDepsEmitted = false
+							}
+						}
+					}
+				}
+				if allDepsEmitted {
+					ordered = append(ordered, def)
+					emitted[name] = true
+				}
+			}
+		}
+
+		if len(ordered) == 0 {
+			break
+		}
+
+		for _, def := range ordered {
+			resolved := st.DefineResolved[def.Name]
+			generateOneDefine(b, def, resolved, st)
+			generated[def.Name] = true
+		}
+	}
+}
+
+func findDefineCalls(expr *SExpr) string {
+	if !expr.IsCall() {
+		return ""
+	}
+	if strings.HasSuffix(expr.Op(), "?") {
+		return expr.Op()
+	}
+	for _, child := range expr.Children {
+		if name := findDefineCalls(child); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func generateOneDefine(b *strings.Builder, def *Define, resolved *DefineResolved, st *SymbolTable) {
+	loopParamIdx, baseResult := analyzeDefine(def)
+	if loopParamIdx < 0 || loopParamIdx >= len(resolved.ParamTypes) {
+		b.WriteString(fmt.Sprintf("// TODO: could not analyze define %s (no list iteration found)\n\n", def.Name))
+		return
+	}
+
+	// Function signature
+	var params []string
+	for _, p := range resolved.ParamTypes {
+		params = append(params, fmt.Sprintf("%s %s", p.GoName, p.GoType))
+	}
+	b.WriteString(fmt.Sprintf("// %s is generated from Shen define %s\n", resolved.GoName, def.Name))
+	b.WriteString(fmt.Sprintf("func %s(%s) bool {\n", resolved.GoName, strings.Join(params, ", ")))
+
+	// Loop over the list parameter
+	listParam := resolved.ParamTypes[loopParamIdx]
+	elemVar := "elem"
+	b.WriteString(fmt.Sprintf("\tfor _, %s := range %s {\n", elemVar, listParam.GoName))
+
+	// Generate if-blocks for guarded clauses
+	for _, clause := range def.Clauses {
+		if clause.Guard == "" {
+			continue
+		}
+		if loopParamIdx >= len(clause.Patterns) {
+			continue
+		}
+
+		// Build local variable map for this clause
+		localVarMap := make(map[string]string)
+
+		// Add non-list parameters
+		for i, p := range resolved.ParamTypes {
+			if i == loopParamIdx {
+				continue
+			}
+			// Find the variable name used in this clause's pattern
+			if i < len(clause.Patterns) && clause.Patterns[i] != "_" {
+				localVarMap[clause.Patterns[i]] = p.ShenType
+			}
+		}
+
+		// Add element destructuring bindings
+		bindings := extractDestructureBindings(clause.Patterns[loopParamIdx])
+		if len(bindings) > 1 && listParam.ElemShenType != "" {
+			// Nested destructure [[X Y] | Rest] — X and Y are fields of the element type
+			elemInfo := st.Lookup(listParam.ElemShenType)
+			if elemInfo != nil && len(elemInfo.Fields) >= len(bindings) {
+				for j, varName := range bindings {
+					if varName == "_" {
+						continue
+					}
+					field := elemInfo.Fields[j]
+					// Map the variable to an accessor: elem.FieldName()
+					// We create a synthetic type entry so resolveAtom can find it
+					localVarMap[varName] = field.ShenType
+				}
+				// Generate field access variables
+				for j, varName := range bindings {
+					if varName == "_" {
+						continue
+					}
+					field := elemInfo.Fields[j]
+					accessor := elemVar + "." + toPascalCase(field.ShenName) + "()"
+					// Override the camelCase mapping — we need elem.Field() not just varName
+					// We do this by directly substituting in the varMap
+					localVarMap[varName] = field.ShenType
+					// We need to patch resolveAtom to emit the right code.
+					// Simplest: just do string replacement after translation.
+					_ = accessor
+				}
+			}
+		} else if len(bindings) == 1 && bindings[0] != "_" {
+			// Simple element [Med | Meds]
+			localVarMap[bindings[0]] = listParam.ElemShenType
+		}
+
+		// Translate guard expression
+		guardGo := st.translateDefineGuard(clause.Guard, localVarMap)
+
+		// Post-process: replace camelCase variable references with actual element accessors
+		if len(bindings) > 1 && listParam.ElemShenType != "" {
+			elemInfo := st.Lookup(listParam.ElemShenType)
+			if elemInfo != nil {
+				for j, varName := range bindings {
+					if varName == "_" || j >= len(elemInfo.Fields) {
+						continue
+					}
+					field := elemInfo.Fields[j]
+					accessor := elemVar + "." + toPascalCase(field.ShenName) + "()"
+					if st.IsWrapper(field.ShenType) {
+						// Replace varName.Val() with elem.Field().Val()
+						guardGo = strings.ReplaceAll(guardGo, toCamelCase(varName)+".Val()", accessor+".Val()")
+						// Also replace bare varName references
+						guardGo = strings.ReplaceAll(guardGo, toCamelCase(varName), accessor)
+					} else {
+						guardGo = strings.ReplaceAll(guardGo, toCamelCase(varName), accessor)
+					}
+				}
+			}
+		} else if len(bindings) == 1 && bindings[0] != "_" {
+			// Replace element variable reference with loop var
+			guardGo = strings.ReplaceAll(guardGo, toCamelCase(bindings[0]), elemVar)
+		}
+
+		b.WriteString(fmt.Sprintf("\t\tif %s {\n\t\t\treturn %s\n\t\t}\n", guardGo, clause.Result))
+	}
+
+	b.WriteString("\t}\n")
+	b.WriteString(fmt.Sprintf("\treturn %s\n", baseResult))
+	b.WriteString("}\n\n")
+}
+
+// ============================================================================
 // Parser
 // ============================================================================
 
-func parseFile(path string) ([]Datatype, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	content := string(data)
-	var types []Datatype
+// extractBlocks finds all balanced-paren blocks starting with the given prefix.
+func extractBlocks(content, prefix string) []string {
+	var blocks []string
+	remaining := content
 	for {
-		idx := strings.Index(content, "(datatype ")
+		idx := strings.Index(remaining, prefix)
 		if idx == -1 {
 			break
 		}
-		content = content[idx:]
+		remaining = remaining[idx:]
 		depth, end := 0, -1
-		for i, ch := range content {
+		for i, ch := range remaining {
 			if ch == '(' {
 				depth++
 			} else if ch == ')' {
@@ -640,13 +1121,34 @@ func parseFile(path string) ([]Datatype, error) {
 		if end == -1 {
 			break
 		}
-		block := content[:end]
-		content = content[end:]
+		blocks = append(blocks, remaining[:end])
+		remaining = remaining[end:]
+	}
+	return blocks
+}
+
+func parseFile(path string) ([]Datatype, []Define, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	content := string(data)
+
+	var types []Datatype
+	for _, block := range extractBlocks(content, "(datatype ") {
 		if dt := parseDatatype(block); dt != nil {
 			types = append(types, *dt)
 		}
 	}
-	return types, nil
+
+	var defines []Define
+	for _, block := range extractBlocks(content, "(define ") {
+		if def := parseDefine(block); def != nil {
+			defines = append(defines, *def)
+		}
+	}
+
+	return types, defines, nil
 }
 
 func parseDatatype(block string) *Datatype {
@@ -708,6 +1210,151 @@ func allChar(s string, ch rune) bool {
 	return true
 }
 
+func parseDefine(block string) *Define {
+	// Strip outer parens: (define name\n body)
+	block = strings.TrimPrefix(block, "(define ")
+	nlIdx := strings.Index(block, "\n")
+	if nlIdx == -1 {
+		return nil
+	}
+	name := strings.TrimSpace(block[:nlIdx])
+	// Strip trailing close-paren that ends the (define ...) block
+	body := strings.TrimRight(block[nlIdx:], " \t\n)")
+
+	def := &Define{Name: name}
+
+	// Join body into single line, then split on " -> " to get alternating segments.
+	// segments[0] = first clause patterns
+	// segments[i] = previous clause result [where guard] + next clause patterns
+	// segments[last] = last clause result
+	bodyOneLine := strings.Join(strings.Fields(body), " ")
+	segments := strings.Split(bodyOneLine, " -> ")
+	if len(segments) < 2 {
+		return nil
+	}
+
+	// Process pairs: (segments[i], segments[i+1]) form a clause.
+	// But segments[i+1] may contain both the result AND the next clause's patterns.
+	// We carry forward the "remaining patterns" from each segment.
+	currentPatterns := segments[0]
+
+	for i := 1; i < len(segments); i++ {
+		seg := segments[i]
+		var result, guard, nextPatterns string
+
+		// Check for 'where' keyword first
+		whereIdx := strings.Index(seg, " where ")
+		if whereIdx != -1 {
+			result = strings.TrimSpace(seg[:whereIdx])
+			afterWhere := strings.TrimSpace(seg[whereIdx+7:])
+			// Guard is a balanced s-expression
+			if strings.HasPrefix(afterWhere, "(") {
+				guardExpr, endIdx := extractBalancedParen(afterWhere)
+				guard = guardExpr
+				nextPatterns = strings.TrimSpace(afterWhere[endIdx:])
+			} else {
+				guard = afterWhere
+			}
+		} else {
+			// No where clause — split result from next patterns.
+			// Result is one token (true/false) or a balanced paren expression.
+			seg = strings.TrimSpace(seg)
+			if strings.HasPrefix(seg, "(") {
+				expr, endIdx := extractBalancedParen(seg)
+				result = expr
+				nextPatterns = strings.TrimSpace(seg[endIdx:])
+			} else {
+				tokens := strings.Fields(seg)
+				result = tokens[0]
+				if len(tokens) > 1 {
+					nextPatterns = strings.Join(tokens[1:], " ")
+				}
+			}
+		}
+
+		// Clean up result
+		result = strings.TrimRight(result, ")")
+		result = strings.TrimSpace(result)
+		if strings.HasPrefix(result, "(") {
+			r, _ := extractBalancedParen(result + ")")
+			if r != "" {
+				result = r
+			}
+		}
+
+		patterns := splitPatterns(currentPatterns)
+		if len(patterns) > 0 {
+			def.Clauses = append(def.Clauses, DefineClause{
+				Patterns: patterns,
+				Result:   result,
+				Guard:    guard,
+			})
+		}
+
+		currentPatterns = nextPatterns
+	}
+
+	if len(def.Clauses) == 0 {
+		return nil
+	}
+	return def
+}
+
+// splitPatterns tokenizes a pattern string respecting bracket nesting.
+// "[Med | Meds]" stays as one token; "[[X Y] | Rest]" stays as one token.
+func splitPatterns(s string) []string {
+	var patterns []string
+	var current strings.Builder
+	depth := 0
+	for _, ch := range s {
+		switch ch {
+		case '[':
+			depth++
+			current.WriteRune(ch)
+		case ']':
+			depth--
+			current.WriteRune(ch)
+			if depth == 0 && current.Len() > 0 {
+				patterns = append(patterns, current.String())
+				current.Reset()
+			}
+		case ' ', '\t':
+			if depth > 0 {
+				current.WriteRune(ch)
+			} else if current.Len() > 0 {
+				patterns = append(patterns, current.String())
+				current.Reset()
+			}
+		default:
+			current.WriteRune(ch)
+		}
+	}
+	if current.Len() > 0 {
+		patterns = append(patterns, current.String())
+	}
+	return patterns
+}
+
+// extractBalancedParen extracts a balanced parenthesized expression from s.
+// Returns the expression and the index past its end.
+func extractBalancedParen(s string) (string, int) {
+	if len(s) == 0 || s[0] != '(' {
+		return "", 0
+	}
+	depth := 0
+	for i, ch := range s {
+		if ch == '(' {
+			depth++
+		} else if ch == ')' {
+			depth--
+			if depth == 0 {
+				return s[:i+1], i + 1
+			}
+		}
+	}
+	return s, len(s)
+}
+
 func buildRule(premLines, concLines []string) *Rule {
 	r := &Rule{}
 	for _, line := range premLines {
@@ -753,6 +1400,10 @@ func buildRule(premLines, concLines []string) *Rule {
 // ============================================================================
 
 func shenTypeToGo(t string) string {
+	if strings.HasPrefix(t, "(list ") {
+		inner := strings.TrimSuffix(strings.TrimPrefix(t, "(list "), ")")
+		return "[]" + shenTypeToGo(inner)
+	}
 	switch t {
 	case "string", "symbol":
 		return "string"
@@ -765,6 +1416,14 @@ func shenTypeToGo(t string) string {
 	default:
 		return toPascalCase(t)
 	}
+}
+
+// listElemType extracts the element type from a "(list X)" type string.
+func listElemType(t string) string {
+	if strings.HasPrefix(t, "(list ") {
+		return strings.TrimSuffix(strings.TrimPrefix(t, "(list "), ")")
+	}
+	return ""
 }
 
 func toPascalCase(s string) string {
@@ -781,6 +1440,15 @@ func toPascalCase(s string) string {
 	return b.String()
 }
 
+// goKeywords lists Go reserved words that can't be used as identifiers.
+var goKeywords = map[string]bool{
+	"break": true, "case": true, "chan": true, "const": true, "continue": true,
+	"default": true, "defer": true, "else": true, "fallthrough": true, "for": true,
+	"func": true, "go": true, "goto": true, "if": true, "import": true,
+	"interface": true, "map": true, "package": true, "range": true, "return": true,
+	"select": true, "struct": true, "switch": true, "type": true, "var": true,
+}
+
 func toCamelCase(s string) string {
 	pc := toPascalCase(s)
 	if len(pc) == 0 {
@@ -788,7 +1456,11 @@ func toCamelCase(s string) string {
 	}
 	runes := []rune(pc)
 	runes[0] = unicode.ToLower(runes[0])
-	return string(runes)
+	name := string(runes)
+	if goKeywords[name] {
+		name += "_"
+	}
+	return name
 }
 
 func isPrimitive(t string) bool {
@@ -874,6 +1546,11 @@ func generateGo(types []Datatype, st *SymbolTable, pkg string, specPath string) 
 			b.WriteString("\n")
 		}
 	}
+	// Generate helper functions from (define ...) blocks AFTER types,
+	// so that verified premises have had a chance to resolve define types.
+	// Use fixpoint loop for transitive resolution (define A calls define B).
+	generateDefineHelpers(&b, st)
+
 	return b.String()
 }
 
@@ -898,6 +1575,7 @@ func generateConstrained(b *strings.Builder, gt GeneratedType, st *SymbolTable) 
 	for _, v := range gt.Rule.Verified {
 		goExpr, errMsg := st.verifiedToGo(v, varMap)
 		safeMsg := strings.ReplaceAll(errMsg, "%", "%%")
+		safeMsg = strings.ReplaceAll(safeMsg, `"`, `\"`)
 		b.WriteString(fmt.Sprintf("\tif !(%s) {\n\t\treturn %s{}, fmt.Errorf(\"%s: %%v\", x)\n\t}\n", goExpr, gt.GoName, safeMsg))
 	}
 	b.WriteString(fmt.Sprintf("\treturn %s{v: x}, nil\n}\n\n", gt.GoName))
@@ -940,6 +1618,7 @@ func generateGuarded(b *strings.Builder, gt GeneratedType, st *SymbolTable) {
 	for _, v := range gt.Rule.Verified {
 		goExpr, errMsg := st.verifiedToGo(v, varMap)
 		safeMsg := strings.ReplaceAll(errMsg, "%", "%%")
+		safeMsg = strings.ReplaceAll(safeMsg, `"`, `\"`)
 		b.WriteString(fmt.Sprintf("\tif !(%s) {\n\t\treturn %s{}, fmt.Errorf(\"%s\")\n\t}\n", goExpr, gt.GoName, safeMsg))
 	}
 	b.WriteString(fmt.Sprintf("\treturn %s{\n", gt.GoName))
@@ -1001,19 +1680,25 @@ func printSymbolTable(types []Datatype, st *SymbolTable, path string) {
 
 func main() {
 	outFile := flag.String("out", "", "Output file path (default: stdout)")
+	specFile := flag.String("spec", "", "Spec file path (alternative to positional arg)")
+	pkgName := flag.String("pkg", "", "Go package name (alternative to positional arg)")
 	dryRun := flag.Bool("dry-run", false, "Parse and show symbol table only, don't generate code")
 	flag.Parse()
 
 	path := "specs/core.shen"
-	if flag.NArg() > 0 {
+	if *specFile != "" {
+		path = *specFile
+	} else if flag.NArg() > 0 {
 		path = flag.Arg(0)
 	}
 	pkg := "shenguard"
-	if flag.NArg() > 1 {
+	if *pkgName != "" {
+		pkg = *pkgName
+	} else if flag.NArg() > 1 {
 		pkg = flag.Arg(1)
 	}
 
-	types, err := parseFile(path)
+	types, defines, err := parseFile(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -1022,7 +1707,20 @@ func main() {
 	st := newSymbolTable()
 	st.Build(types)
 
+	// Register defines in symbol table
+	for i := range defines {
+		st.Defines[defines[i].Name] = &defines[i]
+	}
+
 	printSymbolTable(types, st, path)
+
+	if len(defines) > 0 {
+		fmt.Fprintf(os.Stderr, "Defined functions:\n")
+		for _, def := range defines {
+			fmt.Fprintf(os.Stderr, "  %-28s [%d clauses]\n", def.Name, len(def.Clauses))
+		}
+		fmt.Fprintln(os.Stderr)
+	}
 
 	if *dryRun {
 		return
