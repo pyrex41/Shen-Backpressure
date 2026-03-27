@@ -25,7 +25,7 @@ You have four commands and one skill for adding formal verification to AI coding
 1. Asks about your domain (entities, invariants, operations)
 2. Drafts `specs/core.shen` — Shen sequent-calculus type specifications
 3. Shows you the specs for confirmation before writing anything
-4. Detects and installs Shen runtime (prefers shen-sbcl, avoids shen-go)
+4. Installs shen-sbcl (Shen on SBCL) for type checking
 5. Generates guard types (Go or TypeScript) with opaque constructors
 6. Verifies all gates pass
 
@@ -75,13 +75,11 @@ You have four commands and one skill for adding formal verification to AI coding
 
 ## Shen Runtime
 
-Gate 4 needs a Shen implementation. **Any port works** — the spec is pure Shen, independent of what language the guard types target. shengen is a separate text-processing tool.
+Gate 4 needs a Shen implementation to run `tc+`. Use **shen-sbcl** (Shen on SBCL/Common Lisp). shengen is a separate text-processing tool that does NOT need a Shen runtime.
 
-| Runtime | Status | Install |
-|---------|--------|---------|
-| shen-sbcl | Recommended | `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl` |
-| shen-scheme | Works | Needs Chez Scheme |
-| shen-go | Avoid | Known crash bugs on macOS (memory allocation overflow) |
+Install: `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`
+
+If SBCL is already installed: shen-sbcl can be added on top. Do NOT use shen-go (known crash bugs).
 
 ## Concepts
 
