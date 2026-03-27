@@ -23,16 +23,17 @@ If init was already done, tell the user: "It looks like `/sb:init` was already r
 Ask the user:
 
 1. **Domain description**: Entities, invariants, operations — plain English
-2. **Target language**: Go (default) or TypeScript for guard types
+2. **Target language**: What language for the guard types and application code?
 3. **LLM harness**: `claude -p` (default), `cursor-agent -p`, `codex -p`, or custom
 4. **Build/test commands**: What builds and tests the project
 5. **Plan items**: What tasks should the loop work through
-6. **Module name**: e.g., `github.com/user/project`
 
 ## Step 2: Create Directories
 
+Create the directory structure appropriate for the target language:
 ```bash
-mkdir -p cmd/ralph bin specs prompts plans internal/shenguard
+mkdir -p bin specs prompts plans
+# Plus language-specific directories (e.g., cmd/ralph for Go, src/ for TS)
 ```
 
 ## Step 3: Generate Shen Specs
@@ -48,14 +49,14 @@ Install shen-sbcl (Shen on SBCL) for Gate 4, shen-check.sh with 30-second timeou
 ## Step 5: Generate Guard Types
 
 ```bash
-./bin/shengen-codegen.sh specs/core.shen shenguard internal/shenguard/guards_gen.go
+./bin/shengen-codegen.sh specs/core.shen <package-name> <output-path>
 ```
 
 Show the user what was generated.
 
 ## Step 6: Generate Ralph Infrastructure
 
-**`cmd/ralph/main.go`** — Orchestrator with four gates: shengen → test → build → shen-check. Harness set from Step 1.
+**Ralph orchestrator** (e.g., `cmd/ralph/main.go` for Go, `ralph.ts` for TS, or a shell script) — runs four gates: shengen → test → build → shen-check. Harness set from Step 1.
 - `RALPH_MAX_ITER` env var (default 10)
 - `RALPH_HARNESS` env var for harness override
 - `RALPH_HARNESS_TIMEOUT` env var for per-call timeout (default 10 minutes)
@@ -66,10 +67,7 @@ Show the user what was generated.
 
 **`Makefile`** — Targets: all, shengen, build, test, shen-check, run, clean.
 
-**`go.mod`** (if needed):
-```bash
-go mod init <module> && go mod tidy
-```
+**Project init** (if needed) — `go mod init`, `npm init`, `cargo init`, etc.
 
 ## Step 7: Update .gitignore
 

@@ -25,15 +25,15 @@ Ask the user:
 1. **Domain description** — What are the key entities, invariants, and operations? Plain English is fine.
 
 2. **Target language** — What language are the guard types for?
-   - Go (default) — uses `cmd/shengen` → `internal/shenguard/guards_gen.go`
-   - TypeScript — uses `cmd/shengen-ts` → `internal/shenguard/guards.ts`
+   - Go — uses `cmd/shengen` → generates `.go` with unexported struct fields
+   - TypeScript — uses `cmd/shengen-ts` → generates `.ts` with private class fields
    - Other — use `/sb:create-shengen` to build a codegen tool for their language
 
 3. **Project layout** — Where should files go? Defaults:
    - `specs/core.shen` — Shen type specifications
-   - `bin/shen-check.sh` — Shen verification wrapper
+   - `bin/shen-check.sh` — Shen verification wrapper (uses shen-sbcl)
    - `bin/shengen` or `bin/shengen-codegen.sh` — codegen tooling
-   - `internal/shenguard/` — generated guard types
+   - Generated guard types go wherever is idiomatic for the target language
 
 ## Step 2: Draft specs/core.shen
 
@@ -150,13 +150,9 @@ Create `bin/shengen-codegen.sh` wrapper. Make executable.
 
 Write `specs/core.shen` with the confirmed content.
 
-Generate guard types:
+Generate guard types using whichever shengen matches the target language:
 ```bash
-# Go
-./bin/shengen-codegen.sh specs/core.shen shenguard internal/shenguard/guards_gen.go
-
-# TypeScript
-npx tsx cmd/shengen-ts/shengen.ts specs/core.shen --out internal/shenguard/guards.ts
+./bin/shengen-codegen.sh specs/core.shen <package-name> <output-path>
 ```
 
 Show the user the generated types — explain how each Shen type maps to a guard type with a validated constructor.
