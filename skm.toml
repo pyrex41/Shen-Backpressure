@@ -1,5 +1,5 @@
 [[bundles]]
-name = "sh"
-path = "."
-description = "Shen Backpressure — skills, agents, and commands for the Shen Web Tools demo"
-tags = ["shen", "web-tools", "medicare", "frontend"]
+name = "sb"
+path = "sb"
+description = "Shen Backpressure — four-gate verification with Shen sequent-calculus specs and codegen bridge"
+tags = ["shen", "backpressure", "codegen", "type-safety"]
