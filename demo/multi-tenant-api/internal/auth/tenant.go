@@ -7,23 +7,25 @@ import (
 	"multi-tenant-api/internal/shenguard"
 )
 
-// CheckTenantAccess verifies that the authenticated user is a member of the
-// given tenant and, if so, constructs a TenantAccess proof. The proof chain
-// is: AuthenticatedUser + tenant membership check → TenantAccess.
-func CheckTenantAccess(db *sql.DB, authUser shenguard.AuthenticatedUser, tenantID shenguard.TenantId) (shenguard.TenantAccess, error) {
+// CheckTenantAccess verifies that the principal is a member of the given tenant
+// and, if so, constructs a TenantAccess proof. The proof chain is:
+// AuthenticatedPrincipal + tenant membership check → TenantAccess.
+// For human principals, checks user_id in tenant_memberships.
+// For service principals, checks service_id in tenant_memberships.
+func CheckTenantAccess(db *sql.DB, principal shenguard.AuthenticatedPrincipal, userID string, tenantID shenguard.TenantId) (shenguard.TenantAccess, error) {
 	var exists int
 	err := db.QueryRow(
 		"SELECT COUNT(*) FROM tenant_memberships WHERE user_id = ? AND tenant_id = ?",
-		authUser.User().Val(), tenantID.Val(),
+		userID, tenantID.Val(),
 	).Scan(&exists)
 	if err != nil {
 		return shenguard.TenantAccess{}, fmt.Errorf("check tenant membership: %w", err)
 	}
 
 	isMember := exists > 0
-	access, err := shenguard.NewTenantAccess(authUser, tenantID, isMember)
+	access, err := shenguard.NewTenantAccess(principal, tenantID, isMember)
 	if err != nil {
-		return shenguard.TenantAccess{}, fmt.Errorf("tenant access denied: user %s is not a member of tenant %s", authUser.User().Val(), tenantID.Val())
+		return shenguard.TenantAccess{}, fmt.Errorf("tenant access denied: %s is not a member of tenant %s", userID, tenantID.Val())
 	}
 	return access, nil
 }

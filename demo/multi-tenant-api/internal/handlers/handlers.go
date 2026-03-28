@@ -75,21 +75,23 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListResources(w http.ResponseWriter, r *http.Request) {
-	authUser, ok := auth.UserFromContext(r.Context())
+	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	human, _ := auth.HumanFromContext(r.Context())
+	userID := human.Auth().User().Val()
 
 	tenantID := shenguard.NewTenantId(r.PathValue("tid"))
-	access, err := auth.CheckTenantAccess(s.DB, authUser, tenantID)
+	access, err := auth.CheckTenantAccess(s.DB, principal, userID, tenantID)
 	if err != nil {
-		_ = auth.LogAccess(s.DB, authUser.User().Val(), tenantID.Val(), "", "list_resources", false)
+		_ = auth.LogAccess(s.DB, userID, tenantID.Val(), "", "list_resources", false)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 
-	_ = auth.LogAccess(s.DB, authUser.User().Val(), access.Tenant().Val(), "", "list_resources", true)
+	_ = auth.LogAccess(s.DB, userID, access.Tenant().Val(), "", "list_resources", true)
 
 	rows, err := s.DB.Query(
 		"SELECT id, title, body, created_at FROM resources WHERE tenant_id = ?",
@@ -125,16 +127,18 @@ func (s *Server) handleListResources(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetResource(w http.ResponseWriter, r *http.Request) {
-	authUser, ok := auth.UserFromContext(r.Context())
+	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	human, _ := auth.HumanFromContext(r.Context())
+	userID := human.Auth().User().Val()
 
 	tenantID := shenguard.NewTenantId(r.PathValue("tid"))
-	access, err := auth.CheckTenantAccess(s.DB, authUser, tenantID)
+	access, err := auth.CheckTenantAccess(s.DB, principal, userID, tenantID)
 	if err != nil {
-		_ = auth.LogAccess(s.DB, authUser.User().Val(), tenantID.Val(), r.PathValue("rid"), "get_resource", false)
+		_ = auth.LogAccess(s.DB, userID, tenantID.Val(), r.PathValue("rid"), "get_resource", false)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
@@ -142,12 +146,12 @@ func (s *Server) handleGetResource(w http.ResponseWriter, r *http.Request) {
 	resourceID := shenguard.NewResourceId(r.PathValue("rid"))
 	ra, err := auth.CheckResourceAccess(s.DB, access, resourceID)
 	if err != nil {
-		_ = auth.LogAccess(s.DB, authUser.User().Val(), access.Tenant().Val(), resourceID.Val(), "get_resource", false)
+		_ = auth.LogAccess(s.DB, userID, access.Tenant().Val(), resourceID.Val(), "get_resource", false)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 
-	_ = auth.LogAccess(s.DB, authUser.User().Val(), ra.Access().Tenant().Val(), ra.Resource().Val(), "get_resource", true)
+	_ = auth.LogAccess(s.DB, userID, ra.Access().Tenant().Val(), ra.Resource().Val(), "get_resource", true)
 
 	var title, body, createdAt string
 	err = s.DB.QueryRow(
@@ -170,16 +174,18 @@ func (s *Server) handleGetResource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateResource(w http.ResponseWriter, r *http.Request) {
-	authUser, ok := auth.UserFromContext(r.Context())
+	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	human, _ := auth.HumanFromContext(r.Context())
+	userID := human.Auth().User().Val()
 
 	tenantID := shenguard.NewTenantId(r.PathValue("tid"))
-	access, err := auth.CheckTenantAccess(s.DB, authUser, tenantID)
+	access, err := auth.CheckTenantAccess(s.DB, principal, userID, tenantID)
 	if err != nil {
-		_ = auth.LogAccess(s.DB, authUser.User().Val(), tenantID.Val(), "", "create_resource", false)
+		_ = auth.LogAccess(s.DB, userID, tenantID.Val(), "", "create_resource", false)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
@@ -207,7 +213,7 @@ func (s *Server) handleCreateResource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = auth.LogAccess(s.DB, authUser.User().Val(), access.Tenant().Val(), id, "create_resource", true)
+	_ = auth.LogAccess(s.DB, userID, access.Tenant().Val(), id, "create_resource", true)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)

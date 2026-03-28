@@ -57,7 +57,7 @@ interface FieldInfo {
 interface TypeInfo {
   shenName: string;
   tsName: string;
-  category: "wrapper" | "constrained" | "composite" | "guarded" | "alias";
+  category: "wrapper" | "constrained" | "composite" | "guarded" | "alias" | "sumtype";
   fields: FieldInfo[];
   wrappedPrim: string | null;
   wrappedType: string | null;
@@ -66,6 +66,7 @@ interface TypeInfo {
 class SymbolTable {
   types: Map<string, TypeInfo> = new Map();
   concCount: Map<string, number> = new Map();
+  sumTypes: Map<string, string[]> = new Map();
 
   build(datatypes: Datatype[]): void {
     // Pass 1: count conclusion type producers
@@ -87,6 +88,10 @@ class SymbolTable {
           (this.concCount.get(typeName) ?? 0) > 1
         ) {
           typeName = dt.name;
+          // Track sum type: conclusion type → concrete block names
+          const existing = this.sumTypes.get(r.conc.typeName) ?? [];
+          existing.push(typeName);
+          this.sumTypes.set(r.conc.typeName, existing);
         }
 
         const info: TypeInfo = {
@@ -145,6 +150,24 @@ class SymbolTable {
         this.types.set(typeName, info);
       }
     }
+
+    // Pass 3: Register synthetic entries for sum types.
+    for (const [concType] of this.sumTypes) {
+      if (!this.types.has(concType)) {
+        this.types.set(concType, {
+          shenName: concType,
+          tsName: toPascalCase(concType),
+          category: "sumtype",
+          fields: [],
+          wrappedPrim: null,
+          wrappedType: null,
+        });
+      }
+    }
+  }
+
+  isSumType(name: string): boolean {
+    return this.sumTypes.has(name);
   }
 
   lookup(name: string): TypeInfo | undefined {
@@ -410,6 +433,8 @@ function verifiedToTs(
       return translateEq(st, expr, varMap);
     case "not":
       return translateNot(st, expr, varMap);
+    case "element?":
+      return translateElement(st, expr, varMap);
   }
   return [`/* TODO: ${v.raw} */ true`, `unhandled op: ${op(expr)}`];
 }
@@ -473,6 +498,39 @@ function translateNot(
   if (!resolved)
     return [`/* TODO: ${sexprToString(expr)} */ true`, "could not resolve not"];
   return [`!(${resolved.code})`, `negation of ${resolved.code}`];
+}
+
+function translateElement(
+  st: SymbolTable,
+  expr: SExpr,
+  varMap: Map<string, string>
+): [string, string] {
+  if (!expr.children || expr.children.length < 3)
+    return ["/* TODO: element? */ true", "element? needs args"];
+  const resolved = resolveExpr(st, expr.children[1], varMap);
+  if (!resolved)
+    return ["/* TODO: element? */ true", "could not resolve element?"];
+  // Collect set elements from remaining children.
+  // Shen list [a b c] tokenizes as atoms with brackets attached,
+  // e.g. "[a", "b", "c]" — strip brackets to get clean element names.
+  const elements: string[] = [];
+  for (let i = 2; i < expr.children.length; i++) {
+    let atom = expr.children[i].atom ?? "";
+    atom = atom.replace(/^\[/, "").replace(/\]$/, "");
+    if (atom) elements.push(atom);
+  }
+  if (elements.length > 0) {
+    const val = unwrap(st, resolved);
+    const setLiteral = `new Set([${elements.map((e) => `"${e}"`).join(", ")}])`;
+    return [
+      `${setLiteral}.has(${val})`,
+      `${resolved.code} must be in the valid set`,
+    ];
+  }
+  return [
+    `/* TODO: element? ${resolved.code} */ true`,
+    `${resolved.code} must be in the valid set`,
+  ];
 }
 
 // ============================================================================
@@ -688,6 +746,19 @@ function generateTs(types: Datatype[], st: SymbolTable, specPath: string): strin
   lines.push("// Constructors are the ONLY way to create these types — bypassing them");
   lines.push("// is a violation of the formal spec.");
   lines.push("");
+
+  // Generate sum type unions.
+  const sumTypeVariants = new Set<string>();
+  for (const [concType, variants] of st.sumTypes) {
+    const tsIface = toPascalCase(concType);
+    const variantTypes = variants.map((v) => toPascalCase(v));
+    lines.push(`// --- ${tsIface} (sum type) ---`);
+    lines.push(`// Multiple Shen datatype blocks produce this type.`);
+    lines.push(`// Variants: ${variants.join(", ")}`);
+    lines.push(`export type ${tsIface} = ${variantTypes.join(" | ")};`);
+    lines.push("");
+    for (const v of variants) sumTypeVariants.add(v);
+  }
 
   for (const dt of types) {
     for (const gt of classify(dt, st)) {

@@ -10,6 +10,13 @@ import (
 	"fmt"
 )
 
+// --- AuthenticatedPrincipal (sum type) ---
+// Multiple Shen datatype blocks produce this type.
+// Variants: human-principal, service-principal
+type AuthenticatedPrincipal interface {
+	isAuthenticatedPrincipal()
+}
+
 // --- UserId ---
 // Shen: (datatype user-id)
 type UserId struct{ v string }
@@ -102,26 +109,93 @@ func (t AuthenticatedUser) Expiry() TokenExpiry { return t.expiry }
 func (t AuthenticatedUser) User() UserId { return t.user }
 
 
+// --- ServiceId ---
+// Shen: (datatype service-id)
+type ServiceId struct{ v string }
+
+func NewServiceId(x string) ServiceId { return ServiceId{v: x} }
+
+func (t ServiceId) Val() string { return t.v }
+
+func (t ServiceId) String() string { return t.v }
+
+
+// --- ServiceCredential ---
+// Shen: (datatype service-credential)
+type ServiceCredential struct {
+	service ServiceId
+	secret string
+}
+
+func NewServiceCredential(service ServiceId, secret string) (ServiceCredential, error) {
+	if !(!(secret == "")) {
+		return ServiceCredential{}, fmt.Errorf("not: secret must equal \"\"")
+	}
+	return ServiceCredential{
+		service: service,
+		secret: secret,
+	}, nil
+}
+
+func (t ServiceCredential) Service() ServiceId { return t.service }
+
+func (t ServiceCredential) Secret() string { return t.secret }
+
+
+// --- HumanPrincipal ---
+// Shen: (datatype human-principal)
+type HumanPrincipal struct {
+	auth AuthenticatedUser
+}
+
+func NewHumanPrincipal(auth AuthenticatedUser) HumanPrincipal {
+	return HumanPrincipal{
+		auth: auth,
+	}
+}
+
+func (t HumanPrincipal) Auth() AuthenticatedUser { return t.auth }
+
+func (t HumanPrincipal) isAuthenticatedPrincipal() {}
+
+
+// --- ServicePrincipal ---
+// Shen: (datatype service-principal)
+type ServicePrincipal struct {
+	cred ServiceCredential
+}
+
+func NewServicePrincipal(cred ServiceCredential) ServicePrincipal {
+	return ServicePrincipal{
+		cred: cred,
+	}
+}
+
+func (t ServicePrincipal) Cred() ServiceCredential { return t.cred }
+
+func (t ServicePrincipal) isAuthenticatedPrincipal() {}
+
+
 // --- TenantAccess ---
 // Shen: (datatype tenant-access)
 type TenantAccess struct {
-	auth AuthenticatedUser
+	principal AuthenticatedPrincipal
 	tenant TenantId
 	isMember bool
 }
 
-func NewTenantAccess(auth AuthenticatedUser, tenant TenantId, isMember bool) (TenantAccess, error) {
+func NewTenantAccess(principal AuthenticatedPrincipal, tenant TenantId, isMember bool) (TenantAccess, error) {
 	if !(isMember == true) {
 		return TenantAccess{}, fmt.Errorf("isMember must equal true")
 	}
 	return TenantAccess{
-		auth: auth,
+		principal: principal,
 		tenant: tenant,
 		isMember: isMember,
 	}, nil
 }
 
-func (t TenantAccess) Auth() AuthenticatedUser { return t.auth }
+func (t TenantAccess) Principal() AuthenticatedPrincipal { return t.principal }
 
 func (t TenantAccess) Tenant() TenantId { return t.tenant }
 
