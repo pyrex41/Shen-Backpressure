@@ -15,11 +15,11 @@ func TestMiddlewareValidToken(t *testing.T) {
 		t.Fatalf("NewToken: %v", err)
 	}
 
-	var gotUser shenguard.AuthenticatedUser
+	var gotHuman shenguard.HumanPrincipal
 	var gotOK bool
 
 	handler := Middleware(testSecret)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotUser, gotOK = UserFromContext(r.Context())
+		gotHuman, gotOK = HumanFromContext(r.Context())
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -32,10 +32,10 @@ func TestMiddlewareValidToken(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	if !gotOK {
-		t.Fatal("AuthenticatedUser not found in context")
+		t.Fatal("HumanPrincipal not found in context")
 	}
-	if gotUser.User().Val() != "u-alice" {
-		t.Errorf("user = %q, want %q", gotUser.User().Val(), "u-alice")
+	if gotHuman.Auth().User().Val() != "u-alice" {
+		t.Errorf("user = %q, want %q", gotHuman.Auth().User().Val(), "u-alice")
 	}
 }
 

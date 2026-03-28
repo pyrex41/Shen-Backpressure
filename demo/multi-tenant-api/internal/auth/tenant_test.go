@@ -8,7 +8,7 @@ import (
 	"multi-tenant-api/internal/shenguard"
 )
 
-func makeAuthUser(t *testing.T, userID string) shenguard.AuthenticatedUser {
+func makePrincipal(t *testing.T, userID string) (shenguard.HumanPrincipal, string) {
 	t.Helper()
 	tok, err := shenguard.NewJwtToken("test-token")
 	if err != nil {
@@ -18,7 +18,8 @@ func makeAuthUser(t *testing.T, userID string) shenguard.AuthenticatedUser {
 	if err != nil {
 		t.Fatalf("NewTokenExpiry: %v", err)
 	}
-	return shenguard.NewAuthenticatedUser(tok, exp, shenguard.NewUserId(userID))
+	authUser := shenguard.NewAuthenticatedUser(tok, exp, shenguard.NewUserId(userID))
+	return shenguard.NewHumanPrincipal(authUser), userID
 }
 
 func TestCheckTenantAccessGranted(t *testing.T) {
@@ -31,19 +32,16 @@ func TestCheckTenantAccessGranted(t *testing.T) {
 		t.Fatalf("Seed: %v", err)
 	}
 
-	authUser := makeAuthUser(t, "u-alice")
+	principal, userID := makePrincipal(t, "u-alice")
 	tenantID := shenguard.NewTenantId("t-acme")
 
-	access, err := CheckTenantAccess(d, authUser, tenantID)
+	access, err := CheckTenantAccess(d, principal, userID, tenantID)
 	if err != nil {
 		t.Fatalf("CheckTenantAccess: %v", err)
 	}
 
 	if access.Tenant().Val() != "t-acme" {
 		t.Errorf("tenant: got %s, want t-acme", access.Tenant().Val())
-	}
-	if access.Auth().User().Val() != "u-alice" {
-		t.Errorf("user: got %s, want u-alice", access.Auth().User().Val())
 	}
 }
 
@@ -58,10 +56,10 @@ func TestCheckTenantAccessDenied(t *testing.T) {
 	}
 
 	// Bob is a member of t-globex, NOT t-acme
-	authUser := makeAuthUser(t, "u-bob")
+	principal, userID := makePrincipal(t, "u-bob")
 	tenantID := shenguard.NewTenantId("t-acme")
 
-	_, err = CheckTenantAccess(d, authUser, tenantID)
+	_, err = CheckTenantAccess(d, principal, userID, tenantID)
 	if err == nil {
 		t.Fatal("expected error for non-member access, got nil")
 	}
@@ -77,10 +75,10 @@ func TestCheckTenantAccessNonexistentUser(t *testing.T) {
 		t.Fatalf("Seed: %v", err)
 	}
 
-	authUser := makeAuthUser(t, "u-nobody")
+	principal, userID := makePrincipal(t, "u-nobody")
 	tenantID := shenguard.NewTenantId("t-acme")
 
-	_, err = CheckTenantAccess(d, authUser, tenantID)
+	_, err = CheckTenantAccess(d, principal, userID, tenantID)
 	if err == nil {
 		t.Fatal("expected error for nonexistent user, got nil")
 	}
@@ -88,9 +86,9 @@ func TestCheckTenantAccessNonexistentUser(t *testing.T) {
 
 func makeTenantAccess(t *testing.T, d *sql.DB, userID, tenantID string) shenguard.TenantAccess {
 	t.Helper()
-	authUser := makeAuthUser(t, userID)
+	principal, uid := makePrincipal(t, userID)
 	tid := shenguard.NewTenantId(tenantID)
-	access, err := CheckTenantAccess(d, authUser, tid)
+	access, err := CheckTenantAccess(d, principal, uid, tid)
 	if err != nil {
 		t.Fatalf("CheckTenantAccess: %v", err)
 	}

@@ -39,6 +39,7 @@ var gates = []gate{
 	{name: "go-test", cmd: "go", args: []string{"test", "./..."}},
 	{name: "go-build", cmd: "go", args: []string{"build", "./..."}},
 	{name: "shen-typecheck", cmd: "./bin/shen-check.sh"},
+	{name: "tcb-audit", cmd: "../../bin/shenguard-audit.sh"},
 }
 
 func logf(format string, args ...any) {

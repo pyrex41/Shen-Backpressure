@@ -51,15 +51,42 @@
   ===================================
   [Token Expiry User] : authenticated-user;)
 
-\* --- TenantAccess — requires authenticated user who is a member --- *\
+\* --- Service credentials for background jobs / cron --- *\
+
+(datatype service-id
+  X : string;
+  ==============
+  X : service-id;)
+
+(datatype service-credential
+  Service : service-id;
+  Secret : string;
+  (not (= Secret "")) : verified;
+  ================================
+  [Service Secret] : service-credential;)
+
+\* --- Authenticated principal — sum type: human OR service account --- *\
+\* Two blocks produce the same conclusion type → generates a Go interface *\
+
+(datatype human-principal
+  Auth : authenticated-user;
+  ===========================
+  Auth : authenticated-principal;)
+
+(datatype service-principal
+  Cred : service-credential;
+  ============================
+  Cred : authenticated-principal;)
+
+\* --- TenantAccess — requires authenticated principal who is a member --- *\
 
 (datatype tenant-access
-  Auth : authenticated-user;
+  Principal : authenticated-principal;
   Tenant : tenant-id;
   IsMember : boolean;
   (= IsMember true) : verified;
   ================================
-  [Auth Tenant IsMember] : tenant-access;)
+  [Principal Tenant IsMember] : tenant-access;)
 
 \* --- ResourceAccess — requires tenant access + tenant owns resource --- *\
 

@@ -1,7 +1,7 @@
-.PHONY: all shengen build test shen-check run run-relaxed clean
+.PHONY: all shengen build test shen-check audit run run-relaxed clean
 
 # Run all verification gates in order
-all: shengen test build shen-check
+all: shengen test build shen-check audit
 
 # Gate 1: Regenerate guard types from Shen specs
 shengen:
@@ -18,6 +18,10 @@ build:
 # Gate 4: Shen type consistency check
 shen-check:
 	./bin/shen-check.sh
+
+# Gate 5: TCB audit — verify shenguard package integrity
+audit:
+	../../bin/shenguard-audit.sh
 
 # Run Ralph loop (strict mode)
 run:

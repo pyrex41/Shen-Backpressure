@@ -46,17 +46,25 @@ func Middleware(secret []byte) func(http.Handler) http.Handler {
 
 			userID := shenguard.NewUserId(result.Claims.Sub)
 			authUser := shenguard.NewAuthenticatedUser(jwtToken, expiry, userID)
+			principal := shenguard.NewHumanPrincipal(authUser)
 
-			ctx := context.WithValue(r.Context(), authUserKey, authUser)
+			ctx := context.WithValue(r.Context(), authUserKey, principal)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
-// UserFromContext retrieves the AuthenticatedUser from the request context.
-// Returns the zero value and false if not present.
-func UserFromContext(ctx context.Context) (shenguard.AuthenticatedUser, bool) {
-	u, ok := ctx.Value(authUserKey).(shenguard.AuthenticatedUser)
+// PrincipalFromContext retrieves the AuthenticatedPrincipal from the request context.
+// Returns nil and false if not present.
+func PrincipalFromContext(ctx context.Context) (shenguard.AuthenticatedPrincipal, bool) {
+	u, ok := ctx.Value(authUserKey).(shenguard.AuthenticatedPrincipal)
+	return u, ok
+}
+
+// HumanFromContext retrieves the HumanPrincipal from the request context.
+// Returns the zero value and false if the principal is not a HumanPrincipal.
+func HumanFromContext(ctx context.Context) (shenguard.HumanPrincipal, bool) {
+	u, ok := ctx.Value(authUserKey).(shenguard.HumanPrincipal)
 	return u, ok
 }
 

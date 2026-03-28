@@ -103,7 +103,8 @@ type TypeInfo struct {
 
 type SymbolTable struct {
 	Types          map[string]*TypeInfo
-	ConcCount      map[string]int // how many blocks produce each conclusion type
+	ConcCount      map[string]int      // how many blocks produce each conclusion type
+	SumTypes       map[string][]string  // conclusion type → list of concrete block names
 	Defines        map[string]*Define
 	DefineResolved map[string]*DefineResolved
 }
@@ -112,9 +113,17 @@ func newSymbolTable() *SymbolTable {
 	return &SymbolTable{
 		Types:          make(map[string]*TypeInfo),
 		ConcCount:      make(map[string]int),
+		SumTypes:       make(map[string][]string),
 		Defines:        make(map[string]*Define),
 		DefineResolved: make(map[string]*DefineResolved),
 	}
+}
+
+// IsSumType returns true if the given Shen type name is a sum type
+// (i.e., multiple datatype blocks produce this conclusion type).
+func (st *SymbolTable) IsSumType(name string) bool {
+	_, ok := st.SumTypes[name]
+	return ok
 }
 
 func (st *SymbolTable) Build(types []Datatype) {
@@ -141,9 +150,13 @@ func (st *SymbolTable) Build(types []Datatype) {
 			typeName := r.Conc.TypeName
 			if dt.Name != typeName && concCount[typeName] > 1 {
 				typeName = dt.Name
+				// Track sum type: conclusion type → concrete block names
+				st.SumTypes[r.Conc.TypeName] = append(st.SumTypes[r.Conc.TypeName], typeName)
 			}
 
 			info := &TypeInfo{ShenName: typeName, GoName: toPascalCase(typeName)}
+
+			isSumVariant := dt.Name != r.Conc.TypeName && concCount[r.Conc.TypeName] > 1
 
 			if r.Conc.IsWrapped && len(r.Verified) == 0 && len(r.Premises) == 1 && isPrimitive(r.Premises[0].TypeName) {
 				info.Category = "wrapper"
@@ -151,18 +164,20 @@ func (st *SymbolTable) Build(types []Datatype) {
 			} else if r.Conc.IsWrapped && len(r.Verified) > 0 && len(r.Premises) >= 1 && isPrimitive(r.Premises[0].TypeName) {
 				info.Category = "constrained"
 				info.WrappedPrim = r.Premises[0].TypeName
-			} else if r.Conc.IsWrapped && len(r.Premises) == 1 && !isPrimitive(r.Premises[0].TypeName) {
+			} else if r.Conc.IsWrapped && len(r.Premises) == 1 && !isPrimitive(r.Premises[0].TypeName) && !isSumVariant {
+				// Only use alias if NOT a sum type variant — sum variants need distinct types
 				info.Category = "alias"
 				info.WrappedType = r.Premises[0].TypeName
 			} else if !r.Conc.IsWrapped && len(r.Verified) > 0 {
 				info.Category = "guarded"
-			} else if !r.Conc.IsWrapped {
+			} else if !r.Conc.IsWrapped || isSumVariant {
 				info.Category = "composite"
 			} else {
 				info.Category = "composite"
 			}
 
-			if !r.Conc.IsWrapped {
+			// Build field info for composites/guarded AND sum type variants with wrapped conclusions
+			if !r.Conc.IsWrapped || isSumVariant {
 				premMap := make(map[string]string)
 				for _, p := range r.Premises {
 					premMap[p.VarName] = p.TypeName
@@ -180,6 +195,20 @@ func (st *SymbolTable) Build(types []Datatype) {
 
 			st.Types[typeName] = info
 		}
+	}
+
+	// Pass 3: Register synthetic entries for sum types.
+	// When downstream types reference a sum type conclusion (e.g. "authenticated-principal"),
+	// the symbol table needs an entry so field lookups and accessor resolution work.
+	for concType, variants := range st.SumTypes {
+		if _, exists := st.Types[concType]; !exists {
+			st.Types[concType] = &TypeInfo{
+				ShenName: concType,
+				GoName:   toPascalCase(concType),
+				Category: "sumtype",
+			}
+		}
+		_ = variants
 	}
 }
 
@@ -1528,6 +1557,22 @@ func generateGo(types []Datatype, st *SymbolTable, pkg string, specPath string) 
 		b.WriteString("import (\n\t\"fmt\"\n)\n\n")
 	}
 
+	// Generate sum type interfaces.
+	// Each sum type gets an interface with a private marker method.
+	// Concrete variants implement this interface.
+	sumTypeVariants := make(map[string]bool) // tracks which concrete types need marker methods
+	for concType, variants := range st.SumTypes {
+		goIface := toPascalCase(concType)
+		markerMethod := "is" + goIface
+		b.WriteString(fmt.Sprintf("// --- %s (sum type) ---\n", goIface))
+		b.WriteString(fmt.Sprintf("// Multiple Shen datatype blocks produce this type.\n"))
+		b.WriteString(fmt.Sprintf("// Variants: %s\n", strings.Join(variants, ", ")))
+		b.WriteString(fmt.Sprintf("type %s interface {\n\t%s()\n}\n\n", goIface, markerMethod))
+		for _, v := range variants {
+			sumTypeVariants[v] = true
+		}
+	}
+
 	for _, dt := range types {
 		for _, gt := range classify(dt, st) {
 			b.WriteString(fmt.Sprintf("// --- %s ---\n// Shen: (datatype %s)\n", gt.GoName, gt.Name))
@@ -1537,11 +1582,23 @@ func generateGo(types []Datatype, st *SymbolTable, pkg string, specPath string) 
 			case "constrained":
 				generateConstrained(&b, gt, st)
 			case "composite":
-				generateComposite(&b, gt)
+				generateComposite(&b, gt, st)
 			case "guarded":
 				generateGuarded(&b, gt, st)
 			case "alias":
 				generateAlias(&b, gt)
+			}
+			// If this type is a variant of a sum type, emit marker method
+			if sumTypeVariants[gt.Name] {
+				// Find which sum type this belongs to
+				for concType := range st.SumTypes {
+					for _, v := range st.SumTypes[concType] {
+						if v == gt.Name {
+							goIface := toPascalCase(concType)
+							b.WriteString(fmt.Sprintf("func (t %s) is%s() {}\n\n", gt.GoName, goIface))
+						}
+					}
+				}
 			}
 			b.WriteString("\n")
 		}
@@ -1582,7 +1639,7 @@ func generateConstrained(b *strings.Builder, gt GeneratedType, st *SymbolTable) 
 	b.WriteString(fmt.Sprintf("func (t %s) Val() %s { return t.v }\n\n", gt.GoName, goType))
 }
 
-func generateComposite(b *strings.Builder, gt GeneratedType) {
+func generateComposite(b *strings.Builder, gt GeneratedType, st *SymbolTable) {
 	b.WriteString(fmt.Sprintf("type %s struct {\n", gt.GoName))
 	var params []string
 	for _, p := range gt.Rule.Premises {
@@ -1678,11 +1735,87 @@ func printSymbolTable(types []Datatype, st *SymbolTable, path string) {
 	fmt.Fprintln(os.Stderr)
 }
 
+// ============================================================================
+// Scoped DB Wrapper Generator
+// ============================================================================
+
+// generateDBWrappers emits proof-carrying DB wrapper types.
+// For each GUARDED or COMPOSITE type that contains an ID field (a wrapper around string),
+// it generates a scoped DB struct whose constructor requires the proof type and captures
+// the verified ID at construction time.
+func generateDBWrappers(types []Datatype, st *SymbolTable, pkg string, specPath string) string {
+	var wrappers []struct {
+		proofGoName string // e.g. "TenantAccess"
+		idField     string // e.g. "tenant"
+		idGoType    string // e.g. "TenantId"
+		idAccessor  string // e.g. "Tenant"
+	}
+
+	for _, dt := range types {
+		for _, gt := range classify(dt, st) {
+			if gt.Category != "guarded" && gt.Category != "composite" {
+				continue
+			}
+			// Look for fields whose type is a string wrapper (an ID type)
+			for _, p := range gt.Rule.Premises {
+				fieldInfo := st.Lookup(p.TypeName)
+				if fieldInfo == nil || fieldInfo.Category != "wrapper" || fieldInfo.WrappedPrim != "string" {
+					continue
+				}
+				wrappers = append(wrappers, struct {
+					proofGoName string
+					idField     string
+					idGoType    string
+					idAccessor  string
+				}{
+					proofGoName: gt.GoName,
+					idField:     toCamelCase(p.VarName),
+					idGoType:    toPascalCase(p.TypeName),
+					idAccessor:  toPascalCase(p.VarName),
+				})
+			}
+		}
+	}
+
+	if len(wrappers) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("// Code generated by shengen from %s. DO NOT EDIT.\n", specPath))
+	b.WriteString("//\n")
+	b.WriteString("// Scoped DB wrappers — proof-carrying database access.\n")
+	b.WriteString("// Each wrapper captures a verified ID from a guard type proof,\n")
+	b.WriteString("// ensuring all queries are automatically scoped.\n\n")
+	b.WriteString(fmt.Sprintf("package %s\n\n", pkg))
+	b.WriteString("import \"database/sql\"\n\n")
+
+	for _, w := range wrappers {
+		wrapperName := w.proofGoName + "DB"
+		b.WriteString(fmt.Sprintf("// %s provides %s-scoped database access.\n", wrapperName, w.idGoType))
+		b.WriteString(fmt.Sprintf("// Constructed from a %s proof — the %s is captured and cannot be changed.\n", w.proofGoName, w.idField))
+		b.WriteString(fmt.Sprintf("type %s struct {\n", wrapperName))
+		b.WriteString(fmt.Sprintf("\tDB      *sql.DB\n"))
+		b.WriteString(fmt.Sprintf("\t%s string\n", w.idField))
+		b.WriteString("}\n\n")
+		b.WriteString(fmt.Sprintf("// New%s creates a scoped DB wrapper from a %s proof.\n", wrapperName, w.proofGoName))
+		b.WriteString(fmt.Sprintf("func New%s(db *sql.DB, proof %s) %s {\n", wrapperName, w.proofGoName, wrapperName))
+		b.WriteString(fmt.Sprintf("\treturn %s{DB: db, %s: proof.%s().Val()}\n",
+			wrapperName, w.idField, w.idAccessor))
+		b.WriteString("}\n\n")
+		b.WriteString(fmt.Sprintf("// ScopedID returns the verified %s captured at construction time.\n", w.idField))
+		b.WriteString(fmt.Sprintf("func (d %s) ScopedID() string { return d.%s }\n\n", wrapperName, w.idField))
+	}
+
+	return b.String()
+}
+
 func main() {
 	outFile := flag.String("out", "", "Output file path (default: stdout)")
 	specFile := flag.String("spec", "", "Spec file path (alternative to positional arg)")
 	pkgName := flag.String("pkg", "", "Go package name (alternative to positional arg)")
 	dryRun := flag.Bool("dry-run", false, "Parse and show symbol table only, don't generate code")
+	dbWrappers := flag.String("db-wrappers", "", "Generate scoped DB wrappers to this file")
 	flag.Parse()
 
 	path := "specs/core.shen"
@@ -1736,5 +1869,17 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Generated %s from %s (package %s)\n", *outFile, path, pkg)
 	} else {
 		fmt.Print(output)
+	}
+
+	// Generate scoped DB wrappers if requested
+	if *dbWrappers != "" {
+		dbOutput := generateDBWrappers(types, st, pkg, path)
+		if dbOutput != "" {
+			if err := os.WriteFile(*dbWrappers, []byte(dbOutput), 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "error writing %s: %v\n", *dbWrappers, err)
+				os.Exit(1)
+			}
+			fmt.Fprintf(os.Stderr, "Generated %s (scoped DB wrappers)\n", *dbWrappers)
+		}
 	}
 }
