@@ -1,11 +1,11 @@
 ---
 name: loop
-description: Configure and launch a Ralph loop — an autonomous outer loop that calls an LLM harness repeatedly with four-gate Shen backpressure. Requires /sb:init first.
+description: Configure and launch a Ralph loop — an autonomous outer loop that calls an LLM harness repeatedly with five-gate Shen backpressure. Requires /sb:init first.
 ---
 
 # Ralph Loop — Configure and Launch
 
-You configure and launch a Ralph loop — an autonomous outer loop that repeatedly calls an LLM harness to do work, then validates through four gates before allowing the next iteration. This is ONE way to use Shen backpressure. For CI or manual workflows, see `/sb:init`.
+You configure and launch a Ralph loop — an autonomous outer loop that repeatedly calls an LLM harness to do work, then validates through five gates before allowing the next iteration. This is ONE way to use Shen backpressure. For CI or manual workflows, see `/sb:init`.
 
 **Prerequisite**: Run `/sb:init` first to set up specs, shengen, and guard types.
 
@@ -17,6 +17,7 @@ Ralph (outer loop)
   └─> Gate 2: go test / npm test / etc.
   └─> Gate 3: build (compile against regenerated types)
   └─> Gate 4: shen tc+ (verify spec consistency)
+  └─> Gate 5: tcb audit (diff generated code, reject unexpected files)
        ├─> ALL PASS → next iteration (or done)
        └─> FAIL → inject errors into prompt → call harness again
 ```
@@ -48,11 +49,12 @@ Ask the user:
 
 Create these files:
 
-**`cmd/ralph/main.go`** (or equivalent) — The orchestrator. Runs four gates in order:
+**`cmd/ralph/main.go`** (or equivalent) — The orchestrator. Runs five gates in order:
 1. shengen (regenerate guard types)
 2. test
 3. build
 4. shen-check
+5. tcb-audit (diff generated code, reject unexpected files)
 
 Set the harness command from Step 2.
 
@@ -73,7 +75,7 @@ Set the harness command from Step 2.
 make all
 ```
 
-All four gates must pass. Fix any failures before launching.
+All five gates must pass. Fix any failures before launching.
 
 ## Step 5: Launch
 

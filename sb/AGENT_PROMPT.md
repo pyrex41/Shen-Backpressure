@@ -2,16 +2,17 @@
 
 You are operating inside a Ralph loop with Shen sequent-calculus backpressure and a codegen bridge. Every iteration, your changes must pass four gates before advancing.
 
-## The Four Gates
+## The Five Gates
 
 ```
 Gate 1: shengen      → Regenerates Go guard types from specs/core.shen
 Gate 2: go test      → Tests run against the regenerated types
 Gate 3: go build     → Compilation check against regenerated types
 Gate 4: shen tc+     → Verifies the spec is internally consistent
+Gate 5: tcb audit    → Diffs generated code, rejects unexpected files in shenguard/
 ```
 
-Gate 1 runs first. If you change `specs/core.shen`, the generated types in `internal/shenguard/guards_gen.go` change. If your Go code uses old type signatures, Gate 3 fails. If your tests pass wrong values to constructors, Gate 2 fails. If your spec is contradictory, Gate 4 fails.
+Gate 1 runs first. If you change `specs/core.shen`, the generated types in `internal/shenguard/guards_gen.go` change. If your Go code uses old type signatures, Gate 3 fails. If your tests pass wrong values to constructors, Gate 2 fails. If your spec is contradictory, Gate 4 fails. If you hand-edit generated files or add non-generated files to `internal/shenguard/`, Gate 5 fails.
 
 ## Context Files — Read Every Iteration
 
@@ -124,6 +125,27 @@ txAmount := tx.Amount()     // Amount from Transaction accessor
 ```
 → Go: `NewBalanceChecked(float64, Transaction) (BalanceChecked, error)` — checks `bal >= tx.Amount.Val()`
 
+### Sum type (alternative constructors)
+Multiple `(datatype ...)` blocks with the same conclusion type:
+```shen
+(datatype human-principal
+  User : authenticated-user;
+  =============================
+  User : authenticated-principal;)
+
+(datatype service-principal
+  Cred : service-credential;
+  =============================
+  Cred : authenticated-principal;)
+```
+→ Go: `AuthenticatedPrincipal` interface + `HumanPrincipal`/`ServicePrincipal` concrete structs with private marker methods
+
+### Set membership (`element?`)
+```shen
+(element? Role [admin owner member]) : verified;
+```
+→ Go: `map[string]bool{"admin": true, "owner": true, "member": true}[role]`
+
 ## Anti-Patterns
 
 **Never edit `guards_gen.go`** — it's regenerated every iteration. Change `specs/core.shen` instead.
@@ -142,6 +164,7 @@ txAmount := tx.Amount()     // Amount from Transaction accessor
 | go test | Constructor rejecting test input, or handler not using guard types | Fix test data or handler code |
 | go build | Generated types changed (spec evolved) and Go code uses old signatures | Update Go code to match new type signatures |
 | shen tc+ | Spec is internally inconsistent | Fix contradictory rules in `specs/core.shen` |
+| tcb audit | Generated file was hand-edited, or unexpected files in shenguard/ | Regenerate with shengen; remove non-generated files from shenguard/ |
 
 ## Iteration Rules
 
@@ -149,7 +172,7 @@ txAmount := tx.Amount()     // Amount from Transaction accessor
 2. If backpressure errors appear below, fix those FIRST before working on plan items.
 3. Every new domain concept needs a datatype in `specs/core.shen`. Add the spec first, then write Go code.
 4. No placeholders. Every file must be complete, compilable, runnable.
-5. All four gates must pass before you stop.
+5. All five gates must pass before you stop.
 
 ## Backpressure Errors (from previous iteration)
 <!-- The orchestrator appends gate failures here automatically -->

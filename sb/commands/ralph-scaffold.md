@@ -1,11 +1,11 @@
 ---
 name: ralph-scaffold
-description: All-in-one setup for a Shen-backpressure project with Ralph loop. Combines /sb:init (specs, shengen, guard types) + /sb:loop (orchestrator, prompt, plan) into a single flow. Goes from zero to running four-gate verification.
+description: All-in-one setup for a Shen-backpressure project with Ralph loop. Combines /sb:init (specs, shengen, guard types) + /sb:loop (orchestrator, prompt, plan) into a single flow. Goes from zero to running five-gate verification.
 ---
 
 # Scaffold — Full Setup in One Command
 
-Combines `/sb:init` + `/sb:loop` into one flow. Goes from "I have a project" to "four-gate formal verification is running with a Ralph loop." If you don't want Ralph, use `/sb:init` instead.
+Combines `/sb:init` + `/sb:loop` into one flow. Goes from "I have a project" to "five-gate formal verification is running with a Ralph loop." If you don't want Ralph, use `/sb:init` instead.
 
 You scaffold and verify everything. You do NOT run the loop or implement domain code.
 
@@ -34,7 +34,7 @@ Draft `specs/core.shen` from the domain description. Use the standard pattern hi
 
 ## Step 4: Install Tooling
 
-Install shen-go, shen-check.sh, shengen, and shengen-codegen.sh. Build shengen from source.
+Install shen-sbcl (Shen on SBCL) for Gate 4, shen-check.sh with 30-second timeout, shengen, and shengen-codegen.sh. Follow `/sb:init` Step 4 for details. Do NOT use shen-go (known crash bugs).
 
 ## Step 5: Generate Guard Types
 
@@ -46,13 +46,15 @@ Show the user what was generated.
 
 ## Step 6: Generate Ralph Infrastructure
 
-**`cmd/ralph/main.go`** — Orchestrator with four gates: shengen → test → build → shen-check. Harness set from Step 1.
+**`cmd/ralph/main.go`** — Orchestrator with five gates: shengen → test → build → shen-check → tcb-audit. Harness set from Step 1.
 
 **`prompts/main_prompt.md`** — Inner harness prompt with guard type discipline, domain context, and backpressure errors section.
 
 **`plans/fix_plan.md`** — Task list from Step 1.
 
-**`Makefile`** — Targets: all, shengen, build, test, shen-check, run, clean.
+**`bin/shenguard-audit.sh`** — Gate 5: TCB audit. Re-runs shengen, diffs output, rejects unexpected files in shenguard package.
+
+**`Makefile`** — Targets: all, shengen, build, test, shen-check, audit, run, clean.
 
 **`go.mod`** (if needed):
 ```bash
@@ -79,7 +81,7 @@ All gates must pass. Fix any failures before declaring setup complete.
 
 Tell the user:
 - What was created and where
-- The four gates and what each catches
+- The five gates and what each catches
 - The proof chain and how to use guard types
 - How to run: `make run` or `make run-relaxed`
 - How to modify: specs for types, prompt for instructions, plan for tasks

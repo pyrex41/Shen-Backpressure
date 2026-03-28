@@ -128,7 +128,38 @@ A conclusion is one of:
 
 The generated type should be named after the **conclusion type** (`BalanceChecked`), not the block name (`BalanceInvariant`), because other types reference the conclusion type name.
 
-**Collision rule**: When multiple blocks produce the same conclusion type (sum types / alternative constructors), use the **block name** for each Go type to avoid name collisions. Detect this with a pre-pass that counts producers per conclusion type.
+**Collision rule**: When multiple blocks produce the same conclusion type (sum types / alternative constructors), use the **block name** for each concrete type to avoid name collisions. Detect this with a pre-pass that counts producers per conclusion type.
+
+### 2g. Sum types (multiple blocks → same conclusion type)
+
+When two or more `(datatype ...)` blocks have different block names but the same conclusion type name, they form a **sum type**. Each block becomes a concrete variant; the conclusion type becomes the abstract sum type.
+
+```shen
+(datatype human-principal          \* block name → concrete type *\
+  User : authenticated-user;
+  =============================
+  User : authenticated-principal;) \* conclusion type → sum type *\
+
+(datatype service-principal        \* block name → concrete type *\
+  Cred : service-credential;
+  =============================
+  Cred : authenticated-principal;) \* same conclusion type *\
+```
+
+Detection: in the symbol table pre-pass, if `ConcCount[type_name] > 1`, that type is a sum type. Each variant is named after its **block name** (not the conclusion type) to avoid collisions.
+
+### 2h. `(define ...)` blocks (Go shengen only)
+
+Shen `define` blocks define helper functions using pattern matching with `->` as clause separator and optional `where` guards:
+
+```shen
+(define has-required-role
+  [] _ -> false
+  [[Role _] | Rest] Target -> true where (= Role Target)
+  [_ | Rest] Target -> (has-required-role Rest Target))
+```
+
+shengen can parse these and emit iterative Go functions. This is optional — not all target languages need this.
 
 ---
 
@@ -172,6 +203,14 @@ Where "primitive" means `string`, `number`, `symbol`, or `boolean`.
 | **COMPOSITE** | N fields | none | composite | Struct/record with N typed fields. Constructor takes guard types, returns the composite. No validation. |
 | **GUARDED** | N fields | 1+ checks | composite | Struct/record with N typed fields. Constructor takes guard types, validates preconditions, returns composite or error. |
 | **ALIAS** | 1 custom type | none | wrapped | Type alias to another guard type. No constructor needed. |
+| **SUMTYPE** | (synthetic) | — | — | Interface/union over variants that share a conclusion type. Generated in a separate pass. |
+
+### Sum type detection
+
+Sum types are NOT detected by the classifier. They are detected in the **symbol table pre-pass** (§4b) by counting how many blocks produce each conclusion type. When `ConcCount[type] > 1`:
+- Each variant block is classified normally (typically COMPOSITE) and named after the **block name**
+- A synthetic SUMTYPE entry is added for the conclusion type name
+- The sum type entry lists which variants implement it
 
 ---
 
@@ -464,6 +503,27 @@ function translate_verified(premise, var_map, symbol_table) -> (code, error_mess
   return FALLBACK_TODO(premise.raw)
 ```
 
+### 7e. Set membership (`element?`)
+
+```
+function translate_membership(expr, var_map, st):
+  var_expr = expr.children[1]  # the variable being tested
+  # Children 2+ are bracket-wrapped atoms: "[a", "b", "c]"
+  # Strip leading [ and trailing ] from each atom
+  members = parse_list_literal(expr.children[2:])
+  var_code = resolve(var_expr, var_map, st)
+
+  # Language-specific set membership:
+  # Go:         map[string]bool{"a": true, "b": true}[varCode]
+  # TypeScript: new Set(["a", "b", "c"]).has(varCode)
+  # Rust:       ["a", "b", "c"].contains(&var_code)
+  # Python:     var_code in {"a", "b", "c"}
+  return (
+    code = set_contains(members, unwrap(var_code)),
+    msg  = var_code.code + " must be one of " + members
+  )
+```
+
 ### 7b. Comparison (`>=`, `<=`, `>`, `<`)
 
 ```
@@ -512,9 +572,9 @@ function translate_equality(expr, var_map, st):
 | `(>= Bal (head Tx))` | `bal >= tx.amount.value()` | Cross-type field access via symbol table |
 | `(= (tail X) (tail Y))` | `x.fieldN == y.fieldN` | Structural match on shared field type |
 | `(= (head X) Y)` | `x.field0 == y` | Direct field access + variable comparison |
-| `(element? Op [...])` | `/* membership check */` | Typically emits a TODO or set-contains call |
+| `(element? Op [a b c])` | Go: `map[string]bool{"a":true,...}[op]`; TS: `new Set(["a","b","c"]).has(op)` | Set membership check |
 
-### 7e. Fallback
+### 7f. Fallback
 
 When a verified premise uses a pattern shengen cannot translate, emit a language-appropriate TODO marker:
 
@@ -618,6 +678,31 @@ type BalanceChecked:
 type PromptRequired = UnknownProfile
 ```
 
+#### SUMTYPE (generated from sum type detection)
+
+```
+# Input: Multiple blocks (human-principal, service-principal) → authenticated-principal
+# Output: Abstract type + concrete variants with marker
+
+# Go:
+type AuthenticatedPrincipal interface {
+    isAuthenticatedPrincipal()   # private marker method — lowercase = unexported
+}
+# Each variant (HumanPrincipal, ServicePrincipal) implements this interface
+func (t HumanPrincipal) isAuthenticatedPrincipal() {}
+
+# TypeScript:
+export type AuthenticatedPrincipal = HumanPrincipal | ServicePrincipal;
+
+# Rust:
+pub enum AuthenticatedPrincipal {
+    Human(HumanPrincipal),
+    Service(ServicePrincipal),
+}
+```
+
+The enforcement mechanism: any function accepting `AuthenticatedPrincipal` can only receive a value constructed through one of the variant constructors. In Go, the private marker method prevents external implementations.
+
 ### 8c. Naming conventions
 
 Convert Shen's hyphenated names to the target language's convention:
@@ -687,9 +772,10 @@ Arguments:
   PACKAGE_NAME   Name for the generated package/module (default: "shenguard")
 
 Options:
-  --lang=LANG    Target language: go, rust, typescript, python, java (default: go)
-  --out=FILE     Output file path (default: stdout)
-  --dry-run      Parse and show symbol table only, don't generate code
+  --lang=LANG         Target language: go, rust, typescript, python, java (default: go)
+  --out=FILE          Output file path (default: stdout)
+  --dry-run           Parse and show symbol table only, don't generate code
+  --db-wrappers=FILE  Also generate scoped DB wrappers (proof-carrying query builders)
 
 Output:
   Generated code to stdout (or --out file)
@@ -752,6 +838,7 @@ Use this as your task list when building shengen:
 - [ ] **Symbol table**: Build TypeInfo entries with field layouts from conclusion field order
 - [ ] **Symbol table**: Handle block name ≠ conclusion type name
 - [ ] **Symbol table**: Handle sum type collisions (multiple blocks → same conclusion type)
+- [ ] **Symbol table**: Register synthetic SUMTYPE entries for sum type conclusion types
 - [ ] **S-expression parser**: Tokenize Shen expressions
 - [ ] **S-expression parser**: Parse into nested AST
 - [ ] **Resolver**: Resolve atoms (variables via var_map, numeric literals)
@@ -767,13 +854,17 @@ Use this as your task list when building shengen:
 - [ ] **Translator**: Equality with resolved operands
 - [ ] **Translator**: Equality with structural match fallback
 - [ ] **Translator**: Negated equality
+- [ ] **Translator**: `element?` set membership with list literal parsing
 - [ ] **Translator**: Fallback TODO for unrecognized patterns
 - [ ] **Generator**: Emit WRAPPER type + constructor + accessor
 - [ ] **Generator**: Emit CONSTRAINED type + validating constructor + accessor
 - [ ] **Generator**: Emit COMPOSITE type + constructor
 - [ ] **Generator**: Emit GUARDED type + validating constructor
 - [ ] **Generator**: Emit ALIAS type
+- [ ] **Generator**: Emit SUMTYPE interface/union + variant marker methods
 - [ ] **Generator**: Escape `%` and other format characters in error messages
+- [ ] **Generator (optional)**: Emit scoped DB wrappers for `--db-wrappers` flag
+- [ ] **Parser (optional)**: Parse `(define ...)` blocks with pattern matching and `where` guards
 - [ ] **Generator**: Header comment with "DO NOT EDIT"
 - [ ] **CLI**: Accept spec file path and package name arguments
 - [ ] **CLI**: Print symbol table to stderr
