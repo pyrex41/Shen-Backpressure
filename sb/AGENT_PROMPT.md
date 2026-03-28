@@ -28,13 +28,57 @@ The generated types have **private/unexported fields** — the only way to creat
 
 At entry points (HTTP handlers, CLI commands, message consumers), immediately wrap raw values in guard types. The constructor validates the spec's constraints and returns an error if they're violated.
 
+**Go:**
+```go
+amount, err := shenguard.NewAmount(rawFloat)
+if err != nil {
+    http.Error(w, err.Error(), 400)
+    return
+}
+```
+
+**TypeScript:**
+```typescript
+const amount = Amount.create(rawNumber);
+if (amount instanceof Error) { res.status(400).json({ error: amount.message }); return; }
+```
+
+**Rust:**
+```rust
+let amount = Amount::new(raw_float)?; // returns Result<Amount, GuardError>
+```
+
 ### Rule 2: Trust Internally
 
 Once values are wrapped in guard types, trust them. Internal functions accept and return guard types, not primitives. Don't re-validate what the constructor already checked.
 
+**Go:**
+```go
+// GOOD — accepts guard type
+func processTransfer(t shenguard.SafeTransfer) { ... }
+// BAD — accepts raw primitives, bypasses proof chain
+func processTransfer(amount float64, from string, to string) { ... }
+```
+
+**TypeScript:**
+```typescript
+// GOOD
+function processTransfer(t: SafeTransfer): void { ... }
+// BAD
+function processTransfer(amount: number, from: string, to: string): void { ... }
+```
+
+**Rust:**
+```rust
+// GOOD
+fn process_transfer(t: SafeTransfer) { ... }
+// BAD
+fn process_transfer(amount: f64, from: &str, to: &str) { ... }
+```
+
 ### Rule 3: Follow the Proof Chain
 
-If type B requires type A as a parameter, you must construct A first. The compiler enforces this — you cannot construct B without first having a valid A. Example:
+If type B requires type A as a parameter, you must construct A first. The compiler enforces this — you cannot construct B without first having a valid A:
 
 ```
 Raw input → NewAmount(raw) → Amount
@@ -47,7 +91,11 @@ You cannot skip a step. SafeTransfer requires a BalanceChecked, which requires p
 
 ### Rule 4: Extract with Accessors
 
-To get raw values back (for SQL queries, JSON output, templates), use the accessor methods on guard types. Fields are private — direct field access won't compile.
+To get raw values back (for SQL queries, JSON output, templates), use the accessor methods. Fields are private — direct field access won't compile.
+
+**Go:** `amount.Val()`, `tx.From().Val()`, `tx.Amount()`
+**TypeScript:** `amount.val()`, `tx.from().val()`, `tx.amount()`
+**Rust:** `amount.val()`, `tx.from().val()`, `tx.amount()`
 
 ## Spec Patterns
 
@@ -58,7 +106,11 @@ To get raw values back (for SQL queries, JSON output, templates), use the access
   ==============
   X : account-id;)
 ```
-→ Constructor takes a string, returns the guard type. No validation, no error.
+Constructor takes a string, returns the guard type. No validation, no error.
+
+**Go:** `NewAccountId(string) AccountId`
+**TS:** `AccountId.create(string): AccountId`
+**Rust:** `AccountId::new(String) -> AccountId`
 
 ### Constrained (validated)
 ```shen
@@ -68,7 +120,11 @@ To get raw values back (for SQL queries, JSON output, templates), use the access
   ====================
   X : amount;)
 ```
-→ Constructor takes a number, returns (guard type, error). Rejects negative values.
+Constructor takes a number, returns (guard type, error). Rejects negative values.
+
+**Go:** `NewAmount(float64) (Amount, error)`
+**TS:** `Amount.create(number): Amount | Error`
+**Rust:** `Amount::new(f64) -> Result<Amount, GuardError>`
 
 ### Composite (struct)
 ```shen
@@ -79,7 +135,11 @@ To get raw values back (for SQL queries, JSON output, templates), use the access
   ===================================
   [Amount From To] : transaction;)
 ```
-→ Constructor takes already-validated guard types as fields. No error — inputs are pre-validated.
+Constructor takes already-validated guard types as fields. No error — inputs are pre-validated.
+
+**Go:** `NewTransaction(Amount, AccountId, AccountId) Transaction`
+**TS:** `Transaction.create(Amount, AccountId, AccountId): Transaction`
+**Rust:** `Transaction::new(Amount, AccountId, AccountId) -> Transaction`
 
 ### Guarded (invariant proof)
 ```shen
@@ -90,7 +150,21 @@ To get raw values back (for SQL queries, JSON output, templates), use the access
   =======================================
   [Bal Tx] : balance-checked;)
 ```
-→ Constructor takes a number and a Transaction, checks that balance >= transaction amount. Returns error if invariant is violated.
+Constructor takes a number and a Transaction, checks that balance >= transaction amount. Returns error if invariant is violated.
+
+**Go:** `NewBalanceChecked(float64, Transaction) (BalanceChecked, error)`
+**TS:** `BalanceChecked.create(number, Transaction): BalanceChecked | Error`
+**Rust:** `BalanceChecked::new(f64, Transaction) -> Result<BalanceChecked, GuardError>`
+
+## Why the Compiler Catches It
+
+The trick is private fields. You literally cannot write:
+
+**Go:** `Amount{v: 50}` — won't compile, `v` is unexported
+**TS:** `new Amount(50)` — won't compile, constructor is private
+**Rust:** `Amount { v: 50.0 }` — won't compile, `v` is `pub(crate)`
+
+The only path is the constructor: `NewAmount(50)` / `Amount.create(50)` / `Amount::new(50.0)`.
 
 ## Anti-Patterns
 
