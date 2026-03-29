@@ -6,7 +6,17 @@ user-invocable: false
 
 # Shen-Backpressure
 
-Formal type specs (Shen sequent calculus) + codegen bridge (shengen) that generates guard types with opaque constructors in Go or TypeScript. The generated types enforce domain invariants at compile time — you can't construct a value without proving its preconditions.
+Formal type specs (Shen sequent calculus) + codegen bridge (shengen) that generates guard types with opaque constructors in any language with module-level visibility (Go, TypeScript, Rust, etc.). The generated types enforce domain invariants at compile time — you can't construct a value without proving its preconditions.
+
+## Why This Works — Compiler Enforcement, Not LLM Policing
+
+Guard types use the target language's **module-private fields** to make the compiler itself enforce invariants:
+
+- **Go**: struct fields are lowercase (unexported) — code outside the package literally cannot construct the struct
+- **TypeScript**: class fields are `private` with static factory — no way to instantiate without validation
+- **Rust/Swift/Kotlin**: private fields with public factory methods — same pattern
+
+When a function requires a guard type as input, the caller must have produced it through the constructor chain. If code tries to skip a step, **the build fails** — not because an LLM checked it, but because the compiler rejected it. The LLM writes code; the compiler enforces the proof chain. Gate 3 (build) catches violations automatically.
 
 ## How Enforcement Actually Works
 
@@ -34,7 +44,7 @@ This means if a function signature requires `TenantAccess`, the caller **must** 
 specs/core.shen          Shen sequent-calculus type rules
        |
        v  (shengen — text parser, NOT a Shen interpreter)
-internal/shenguard/      Generated guard types with private fields
+Generated guard types    Private fields — compiler enforces constructors
        |
        v  (import)
 Application code         Must use constructors — compiler enforces this
@@ -80,3 +90,13 @@ Pattern-matching `define` blocks with `where` guards generate Go helper function
 
 ### Scoped DB Wrappers (`--db-wrappers`)
 The `--db-wrappers <file>` flag generates proof-carrying DB wrappers that capture a verified ID at construction time, so all queries auto-scope.
+
+## Shen Runtime for Gate 4
+
+Gate 4 (shen tc+) needs a Shen implementation. Use **shen-sbcl** (Shen on SBCL/Common Lisp) — most reliable, fastest startup.
+
+Install: `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`
+
+Do NOT use shen-go — it has known memory allocation crash bugs.
+
+**Important:** shengen (the codegen tool) is a separate Go/TS program that reads `.shen` files as text and emits guard types. It does NOT run Shen code. Only Gate 4 needs an actual Shen runtime.

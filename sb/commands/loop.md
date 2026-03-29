@@ -14,7 +14,7 @@ Ralph (outer loop)
   └─> Gate 1: shengen (regenerate guard types from spec)
   └─> call harness (claude -p, cursor-agent, codex, etc.)
        └─> harness makes code changes
-  └─> Gate 2: go test / npm test / etc.
+  └─> Gate 2: test (go test, npm test, cargo test, etc.)
   └─> Gate 3: build (compile against regenerated types)
   └─> Gate 4: shen tc+ (verify spec consistency)
   └─> Gate 5: tcb audit (diff generated code, reject unexpected files)
@@ -26,11 +26,13 @@ Ralph (outer loop)
 
 Verify `/sb:init` was already run:
 - `specs/core.shen` exists
-- Guard types exist (`internal/shenguard/`)
+- Guard types exist (generated file from shengen)
 - `bin/shen-check.sh` exists and is executable
 - shengen tooling exists
 
 If any are missing, tell the user to run `/sb:init` first.
+
+Also verify Gate 4 works by running `bin/shen-check.sh` once. If it crashes or times out, the Shen runtime needs fixing before the loop can run — check which runtime shen-check.sh uses and switch to shen-sbcl if needed.
 
 ## Step 2: Gather Loop Configuration
 
@@ -49,7 +51,7 @@ Ask the user:
 
 Create these files:
 
-**`cmd/ralph/main.go`** (or equivalent) — The orchestrator. Runs five gates in order:
+**Ralph orchestrator** (e.g., `cmd/ralph/main.go` for Go, `ralph.ts` for TS, or a shell script) — runs five gates in order:
 1. shengen (regenerate guard types)
 2. test
 3. build
@@ -57,6 +59,10 @@ Create these files:
 5. tcb-audit (diff generated code, reject unexpected files)
 
 Set the harness command from Step 2.
+- `RALPH_MAX_ITER` env var (default 10)
+- `RALPH_HARNESS` env var for harness override
+- `RALPH_HARNESS_TIMEOUT` env var for per-call timeout (default 10 minutes)
+- Backpressure error injection: on gate failure, append the error output to the harness prompt
 
 **`prompts/main_prompt.md`** — What the harness receives each iteration. Include:
 - Domain context and file locations
@@ -87,5 +93,6 @@ Options:
 - `make run-relaxed` — test and build in parallel
 - `RALPH_HARNESS="<cmd>" make run` — override harness
 - `RALPH_MAX_ITER=20 make run` — max iterations (default 10)
+- `RALPH_HARNESS_TIMEOUT=15m make run` — increase harness timeout
 
 The loop runs autonomously. Ctrl+C to stop.

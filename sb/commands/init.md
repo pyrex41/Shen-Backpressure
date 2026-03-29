@@ -14,9 +14,9 @@ You do NOT assume any particular workflow or orchestrator. You set up the founda
 
 ### Why this works — compiler enforcement, not LLM policing
 
-Guard types use the target language's **module-private fields** to make the compiler enforce invariants. In Go, struct fields are unexported (lowercase); in TypeScript, class fields are `private`; in Rust, fields are non-pub. This means there is no syntax for constructing a guard type except through its generated constructor — the compiler rejects any other path.
+Guard types use the target language's **module-private fields** so the **compiler itself** enforces invariants — not the LLM, not a linter, not a runtime assertion. In Go, struct fields are unexported (lowercase); in TypeScript, fields are `private`; in Rust, fields are non-pub. There is no syntax for constructing a guard type except through its generated constructor, which validates the Shen spec's preconditions.
 
-When a function signature requires a guard type (e.g., `TenantAccess`), the caller must have produced it through the constructor chain. If an LLM tries to skip a step, `go build` or `tsc` fails. The error feeds back as backpressure. **The compiler checks the invariants, not the LLM.**
+When a function requires a guard type as input (e.g., `ResourceAccess`), the caller must have produced it through the constructor chain. If an LLM writes code that skips a step, `go build` or `tsc` fails in Gate 3. The error feeds back as backpressure. **The compiler checks the invariants, not the LLM.**
 
 ## Step 1: Gather Requirements
 
@@ -25,15 +25,15 @@ Ask the user:
 1. **Domain description** — What are the key entities, invariants, and operations? Plain English is fine.
 
 2. **Target language** — What language are the guard types for?
-   - Go (default) — uses `cmd/shengen` → `internal/shenguard/guards_gen.go`
-   - TypeScript — uses `cmd/shengen-ts` → `internal/shenguard/guards.ts`
+   - Go — uses `cmd/shengen` → generates `.go` with unexported struct fields
+   - TypeScript — uses `cmd/shengen-ts` → generates `.ts` with private class fields
    - Other — use `/sb:create-shengen` to build a codegen tool for their language
 
 3. **Project layout** — Where should files go? Defaults:
    - `specs/core.shen` — Shen type specifications
    - `bin/shen-check.sh` — Shen verification wrapper (uses shen-sbcl)
    - `bin/shengen` or `bin/shengen-codegen.sh` — codegen tooling
-   - `internal/shenguard/` — generated guard types
+   - Generated guard types go wherever is idiomatic for the target language
 
 ## Step 2: Draft specs/core.shen
 
@@ -126,7 +126,7 @@ Use `\* comment *\` to document sections.
 
 ### Shen Runtime (for Gate 4: type checking)
 
-Gate 4 runs Shen's type checker (`tc+`) on the spec. **Any Shen port works** — the spec is pure Shen, independent of what language the guard types target. Use shen-sbcl (Shen on SBCL/Common Lisp):
+Gate 4 runs Shen's type checker (`tc+`) on the spec. **Any Shen port works** — the spec is pure Shen, independent of what language the guard types target. Use **shen-sbcl** (Shen on SBCL/Common Lisp):
 
 ```bash
 # Check if shen-sbcl is available
@@ -134,9 +134,9 @@ command -v shen-sbcl || command -v sbcl
 ```
 
 - **If SBCL is installed**: install shen-sbcl via `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`
-- **If neither is installed**: `brew install sbcl` then install shen-sbcl as above
+- **If neither**: `brew install sbcl` then install shen-sbcl as above
 
-Do NOT use shen-go. It has known memory allocation crash bugs and hangs during cold bootstrap on macOS.
+Do NOT use shen-go — it has known memory allocation crash bugs and hangs during cold bootstrap.
 
 ### shengen (codegen tool)
 
@@ -150,7 +150,14 @@ If neither exists and the project is based on the Shen-Backpressure repo, check 
 
 ### shen-check.sh
 
-Create `bin/shen-check.sh` using shen-sbcl:
+Create `bin/shen-check.sh` using shen-sbcl. The script must:
+- Accept a spec path argument (default: `specs/core.shen`)
+- Enable type checking (`(tc +)`)
+- Load the spec file
+- Exit 0 with `RESULT: PASS` on success
+- Exit 1 with `RESULT: FAIL` on type error
+- Include a timeout (30 seconds) to prevent hangs
+
 
 ```bash
 #!/bin/bash
@@ -171,13 +178,9 @@ Create `bin/shengen-codegen.sh` wrapper. Make executable.
 
 Write `specs/core.shen` with the confirmed content.
 
-Generate guard types:
+Generate guard types using whichever shengen matches the target language:
 ```bash
-# Go
-./bin/shengen-codegen.sh specs/core.shen shenguard internal/shenguard/guards_gen.go
-
-# TypeScript
-npx tsx cmd/shengen-ts/shengen.ts specs/core.shen --out internal/shenguard/guards.ts
+./bin/shengen-codegen.sh specs/core.shen <package-name> <output-path>
 ```
 
 Show the user the generated types — explain how each Shen type maps to a guard type with a validated constructor.
@@ -197,13 +200,15 @@ If the domain has ID types that should scope database queries, generate scoped D
 
 This produces `<ProofType>DB` structs (e.g., `TenantAccessDB`) that capture the verified ID at construction time. `ScopedID()` returns the proven value — use it in all queries to auto-scope without forgetting `WHERE tenant_id = ?`.
 
+If shen-check.sh times out or crashes, verify shen-sbcl is installed and working: `shen-sbcl -q -e "(+ 1 1)"`
+
 ## Step 7: Verify
 
 Run all gates:
 ```bash
 ./bin/shengen-codegen.sh specs/core.shen ...  # Gate 1: regenerate
-go test ./... (or npm test)                    # Gate 2: test
-go build ./... (or tsc)                        # Gate 3: build
+# Gate 2: test (go test, npm test, cargo test, etc.)
+# Gate 3: build (go build, tsc, cargo build, etc.)
 ./bin/shen-check.sh                            # Gate 4: type check
 ./bin/shenguard-audit.sh                       # Gate 5: TCB audit
 ```
