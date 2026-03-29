@@ -21,9 +21,6 @@ cmd/sb/skilldata/
 # Backpressure logs (generated at runtime)
 demo/*/plans/backpressure.log
 
-# Thoughts directory (research notes)
-thoughts/
-
 # Repomix output
 repomix-output.xml
 
