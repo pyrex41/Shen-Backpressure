@@ -216,5 +216,20 @@ Multiple `(datatype ...)` blocks with the same conclusion type:
 4. No placeholders. Every file must be complete, compilable, runnable.
 5. All five gates must pass before you stop.
 
+## Hardened Mode
+
+If the project uses `--mode hardened`, the generated guard types have additional bypass prevention:
+
+- **Go**: Sealed interfaces (can't name the concrete type), zero-value trap (panics on uninitialized use), `UnmarshalJSON` that re-validates through constructors
+- **Rust**: No Clone/Copy on guarded types (proofs are consumed on use), `#[non_exhaustive]`, sealed traits for sum types
+- **TypeScript**: `#private` fields (runtime enforcement), branded types, `Object.freeze`
+- **Python**: Closure vaults, HMAC provenance tokens, `__init_subclass__` prevention
+
+When writing code against hardened types:
+- In Go: use the interface type (`Amount`), not the unexported struct
+- In Rust: don't try to clone guarded types — consume them via `into_*` methods
+- In TypeScript: don't cast to `any` — `#private` fields are still inaccessible
+- In Python: always use factory functions (`new_amount()`), never construct directly
+
 ## Backpressure Errors (from previous iteration)
 <!-- The orchestrator appends gate failures here automatically -->
