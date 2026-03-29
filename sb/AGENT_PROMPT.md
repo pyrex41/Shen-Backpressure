@@ -1,6 +1,6 @@
 # Shen-Backpressure Agent Reference
 
-You are operating inside a Ralph loop with Shen sequent-calculus backpressure and a codegen bridge. Every iteration, your changes must pass four gates before advancing.
+You are operating inside a Ralph loop with Shen sequent-calculus backpressure and a codegen bridge. Every iteration, your changes must pass five gates before advancing.
 
 ## The Five Gates
 
