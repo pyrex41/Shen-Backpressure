@@ -1,6 +1,6 @@
 # Dosage Calculator — Shen-Backpressure Agent Prompt
 
-You are operating inside a Ralph loop with Shen sequent-calculus backpressure and a codegen bridge. Every iteration, your changes must pass four gates before advancing.
+You are operating inside a Ralph loop with Shen sequent-calculus backpressure and a codegen bridge. Every iteration, your changes must pass five gates before advancing.
 
 ## Domain
 
@@ -8,16 +8,17 @@ Clinical dosage calculator in Go where administering a drug requires proving: th
 
 Stack: Go stdlib net/http, SQLite, htmx frontend for a clinical dashboard. No frameworks.
 
-## The Four Gates
+## The Five Gates
 
 ```
 Gate 1: shengen      → Regenerates Go guard types from specs/core.shen
 Gate 2: go test      → Tests run against the regenerated types
 Gate 3: go build     → Compilation check (builds cmd/server)
 Gate 4: shen tc+     → Verifies the spec is internally consistent
+Gate 5: tcb audit    → Diffs generated code, rejects unexpected files in shenguard/
 ```
 
-Gate 1 runs first. If you change `specs/core.shen`, the generated types in `internal/shenguard/guards_gen.go` change. If your Go code uses old type signatures, Gate 3 fails. If your tests pass wrong values to constructors, Gate 2 fails. If your spec is contradictory, Gate 4 fails.
+Gate 1 runs first. If you change `specs/core.shen`, the generated types in `internal/shenguard/guards_gen.go` change. If your Go code uses old type signatures, Gate 3 fails. If your tests pass wrong values to constructors, Gate 2 fails. If your spec is contradictory, Gate 4 fails. If you hand-edit generated files or add non-generated files to `internal/shenguard/`, Gate 5 fails.
 
 ## Context Files — Read Every Iteration
 
@@ -123,7 +124,7 @@ clearance := admin.Clearance()        // InteractionClearance
 2. If backpressure errors appear below, fix those FIRST before working on plan items.
 3. Every new domain concept needs a datatype in `specs/core.shen`. Add the spec first, then write Go code.
 4. No placeholders. Every file must be complete, compilable, runnable.
-5. All four gates must pass before you stop.
+5. All five gates must pass before you stop.
 
 ## Backpressure Errors (from previous iteration)
 <!-- The orchestrator appends gate failures here automatically -->

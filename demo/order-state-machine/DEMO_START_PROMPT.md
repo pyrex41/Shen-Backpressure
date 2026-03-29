@@ -28,4 +28,4 @@ Operations:
 - GET /orders/:id → show order with full state history
 - Dashboard showing orders by state with available actions
 
-Use /sb:ralph-scaffold to set up the Ralph loop with four-gate backpressure, then run the loop to build it out.
+Use /sb:ralph-scaffold to set up the Ralph loop with five-gate backpressure, then run the loop to build it out.
