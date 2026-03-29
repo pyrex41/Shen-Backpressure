@@ -8,9 +8,18 @@ output = "{{.Output}}"
 # db_wrappers = ""
 
 [commands]
+gen = "./bin/shengen-codegen.sh"
 build = "{{.Build}}"
 test = "{{.Test}}"
 shen_check = "{{.Check}}"
+audit = "./bin/shenguard-audit.sh"
 
 [gates]
 relaxed = false
+
+[loop]
+harness = "claude -p"
+max_iter = 10
+timeout = "10m"
+prompt = "prompts/main_prompt.md"
+plan = "plans/fix_plan.md"
