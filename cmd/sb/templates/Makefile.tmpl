@@ -1,0 +1,24 @@
+.PHONY: all shengen build test shen-check audit run clean
+
+all: shengen test build shen-check audit
+
+shengen:
+	sb gen
+
+test:
+	{{.Test}}
+
+build:
+	{{.Build}}
+
+shen-check:
+	sb check
+
+audit:
+	sb audit
+
+gates:
+	sb gates
+
+run:
+	sb gates
