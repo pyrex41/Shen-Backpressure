@@ -232,7 +232,7 @@ Eight plan items. Eight iterations. **Zero gate failures.**
 
 That's not because the AI understood formal verification — it's because the guard types left it no wrong path. When the LLM tried to construct guard types incorrectly, `go build` failed, the error was fed back as [backpressure](https://banay.me/dont-waste-your-backpressure), and it corrected itself. The formal properties emerged from the type system, not from the model's reasoning. The `PROMPT.md` was heavily scaffolded with instructions about how to use the guard types, but the compiler did the actual enforcement.
 
-Four gates ran every iteration:
+Five gates ran every iteration:
 
 | Gate | Command | What It Catches |
 |------|---------|----------------|
@@ -240,6 +240,7 @@ Four gates ran every iteration:
 | 2. go test | `go test ./...` | Runtime invariant violations |
 | 3. go build | `go build ./...` | Type signature mismatches |
 | 4. shen tc+ | `./bin/shen-check.sh` | Contradictory specs |
+| 5. tcb audit | `./bin/shenguard-audit.sh` | Hand-edited generated code, unexpected files in shenguard/ |
 
 The gates form a "spec sandwich" — Gates 1 and 4 verify the formal foundation (synchronized and consistent), while Gates 2 and 3 verify the implementation (tested and compiled). No gap between the math and the code.
 
@@ -282,4 +283,4 @@ But for AI coding loops, that's exactly the right trade-off. You don't need a pr
 
 *[Shen-Backpressure](https://github.com/pyrex41/Shen-Backpressure) is open source. The multi-tenant demo shown here is at `demo/multi-tenant-api/`. The verifiable showboat demo for this post is at `blog/post-3-impossible-by-construction/demo.md` — run `showboat verify demo.md` to confirm every command output is real.*
 
-*This is part of a series on deterministic backpressure for AI coding. Next: [The Four-Gate Loop — Adding Formal Verification to Ralph](#).*
+*This is part of a series on deterministic backpressure for AI coding. Next: [The Five-Gate Loop — Adding Formal Verification to Ralph](#).*
