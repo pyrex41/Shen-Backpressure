@@ -24,6 +24,10 @@ demo/*/plans/backpressure.log
 # Repomix output
 repomix-output.xml
 
+# Python
+__pycache__/
+*.pyc
+
 # Node.js
 node_modules/
 dist/
