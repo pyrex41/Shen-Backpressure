@@ -119,9 +119,9 @@ cat specs/core.shen
   [Access Resource IsOwned] : resource-access;)
 ```
 
-## Four Verification Gates
+## Five Verification Gates
 
-The Ralph loop enforces correctness through four gates that run in sequence:
+The Ralph loop enforces correctness through five gates that run in sequence:
 
 1. **shengen** — Regenerate Go guard types from `specs/core.shen`
 2. **go test** — Run tests against the regenerated types
@@ -501,7 +501,7 @@ typechecked in 104 inferences
 
 ## How It Was Built
 
-The entire project was built autonomously by a Ralph loop — an outer loop that calls Claude Code repeatedly with four-gate Shen backpressure. The loop completed all 8 plan items in 8 iterations with zero gate failures:
+The entire project was built autonomously by a Ralph loop — an outer loop that calls Claude Code repeatedly with five-gate Shen backpressure. The loop completed all 8 plan items in 8 iterations with zero gate failures:
 
 1. SQLite database schema
 2. JWT signing and validation
