@@ -69,7 +69,7 @@ bin/shengen
 plans/backpressure.log
 ```
 
-## Step 8: Verify All Four Gates
+## Step 8: Verify All Five Gates
 
 ```bash
 make all

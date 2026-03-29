@@ -21,7 +21,7 @@ internal/shenguard/      Generated guard types (Go or TypeScript)
 Application code         Uses guard types at domain boundaries
        |
        v  (gates)
-Verification             shengen -> test -> build -> shen tc+
+Verification             shengen -> test -> build -> shen tc+ -> tcb audit
        |
        v  (fail?)
 Backpressure             Gate errors fed back (to LLM, CI, or developer)
@@ -53,7 +53,7 @@ cp Shen-Backpressure/sb/skills/shen-backpressure/SKILL.md .claude/skills/shen-ba
 | Command | What it does |
 |---------|-------------|
 | `/sb:init` | Add Shen backpressure to any project — specs, shengen, guard types, gates. Works with any workflow. |
-| `/sb:loop` | Configure and launch a Ralph loop (autonomous LLM harness with four-gate backpressure). Requires init. |
+| `/sb:loop` | Configure and launch a Ralph loop (autonomous LLM harness with five-gate backpressure). Requires init. |
 | `/sb:ralph-scaffold` | All-in-one: init + loop setup in a single flow. For people who know they want Ralph. |
 | `/sb:create-shengen` | Build a shengen codegen tool for any target language (Go, Rust, TS, Python, Java, etc.) |
 
@@ -74,9 +74,9 @@ Or step by step:
 > /sb:loop       # configure Ralph, launch
 ```
 
-## The Four Gates
+## The Five Gates
 
-Every iteration of the Ralph loop must pass all four gates:
+Every iteration of the Ralph loop must pass all five gates:
 
 | Gate | Command | What it catches |
 |------|---------|----------------|
@@ -84,6 +84,7 @@ Every iteration of the Ralph loop must pass all four gates:
 | 2. go test | `go test ./...` | Tests against regenerated types. Catches runtime invariant violations. |
 | 3. go build | `go build ./cmd/server` | Compiles against regenerated types. Catches type signature mismatches. |
 | 4. shen tc+ | `./bin/shen-check.sh` | Verifies spec internal consistency. Catches contradictory rules. |
+| 5. tcb audit | `./bin/shenguard-audit.sh` | Re-runs shengen, diffs output, rejects unexpected files in shenguard/. |
 
 ### The Codegen Bridge (shengen)
 
@@ -128,6 +129,7 @@ The LLM cannot bypass this — `Amount{v: 50}` won't compile (unexported `v`), `
 | Composite (`[A B C] : transaction`) | `struct{ a, b, c }` + accessors | `NewTransaction(A, B, C) Transaction` |
 | Guarded (`(>= Bal (head Tx)) : verified`) | `struct{ bal, tx }` + accessors | `NewBalanceChecked(...) (BalanceChecked, error)` |
 | Proof chain (`Check : balance-checked`) | `struct{ tx, check }` + accessors | `NewSafeTransfer(Transaction, BalanceChecked) SafeTransfer` |
+| Sum type (multiple blocks → same conclusion) | Go interface + concrete structs | `AuthenticatedPrincipal` = `HumanPrincipal \| ServicePrincipal` |
 
 ## Demos
 
@@ -169,7 +171,7 @@ demo/                    Working demo projects
 ## Design Decisions
 
 - **Why shengen?** Shen proves invariants deductively but doesn't generate Go code. shengen bridges the gap — the formal spec becomes compile-time enforcement via opaque types.
-- **Why four gates?** Gate 1 (shengen) ensures generated types stay in sync with specs. Gate 2 (tests) catches runtime violations. Gate 3 (build) catches type mismatches from spec changes. Gate 4 (shen tc+) catches inconsistent specs. No gap.
+- **Why five gates?** Gate 1 (shengen) ensures generated types stay in sync with specs. Gate 2 (tests) catches runtime violations. Gate 3 (build) catches type mismatches from spec changes. Gate 4 (shen tc+) catches inconsistent specs. Gate 5 (tcb audit) ensures the forgery boundary contains only generated code. No gap.
 - **Why opaque constructors?** Unexported `v` fields mean the Go compiler enforces the spec. You literally cannot create an `Amount` without going through `NewAmount`, which validates `>= 0`.
 - **Why Go for the orchestrator?** Fast compilation, `errgroup` for parallel gates, static binary.
 - **Why Shen over Coq/Lean/Agda?** Turing-complete, Lisp syntax LLMs handle well, runs as subprocess.
