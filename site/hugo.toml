@@ -1,0 +1,15 @@
+baseURL = 'http://localhost:1313/'
+languageCode = 'en-us'
+title = 'Shen-Backpressure'
+theme = 'ananke'
+
+[params]
+  subtitle = 'Formal backpressure for AI coding through Shen sequent-calculus types'
+  background_color_class = 'bg-dark-gray'
+  show_reading_time = true
+
+[markup]
+  [markup.highlight]
+    style = 'monokai'
+    lineNos = false
+    guessSyntax = true
