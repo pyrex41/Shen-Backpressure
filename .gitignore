@@ -6,7 +6,9 @@ demo/*/ralph
 demo/*/bin/shen
 demo/*/server
 bin/shengen
+bin/sb
 cmd/shengen/shengen
+cmd/sb/skilldata/
 
 # Databases and WAL files
 *.db
