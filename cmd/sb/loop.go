@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -139,38 +140,21 @@ func buildHarnessPrompt(cfg *Config, gateErrors string) string {
 func callHarness(cfg *Config, prompt string) error {
 	bin, args := SplitCommand(cfg.Harness)
 
-	// Write prompt to a temp file for debugging/inspection
-	tmpFile, err := os.CreateTemp("", "ralph-prompt-*.md")
-	if err != nil {
-		return fmt.Errorf("creating temp prompt: %w", err)
+	// Apply timeout using Go's context (works on all platforms, unlike GNU timeout)
+	ctx := context.Background()
+	if cfg.HarnessTimeout != "" {
+		if dur, err := time.ParseDuration(cfg.HarnessTimeout); err == nil {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, dur)
+			defer cancel()
+		}
 	}
-	defer os.Remove(tmpFile.Name())
-
-	if _, err := tmpFile.WriteString(prompt); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("writing prompt: %w", err)
-	}
-	tmpFile.Close()
 
 	// Pipe prompt via stdin — this is how claude -p and most headless LLM tools work.
-	// The temp file is kept for debugging; it is NOT passed as an argument.
-	cmd := exec.Command(bin, args...)
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = strings.NewReader(prompt)
-
-	// Apply timeout via the `timeout` command wrapper
-	if cfg.HarnessTimeout != "" {
-		dur, err := time.ParseDuration(cfg.HarnessTimeout)
-		if err == nil {
-			timeoutArgs := append([]string{dur.String(), bin}, args...)
-			timeoutCmd := exec.Command("timeout", timeoutArgs...)
-			timeoutCmd.Stdout = os.Stdout
-			timeoutCmd.Stderr = os.Stderr
-			timeoutCmd.Stdin = strings.NewReader(prompt)
-			return timeoutCmd.Run()
-		}
-	}
 
 	return cmd.Run()
 }
