@@ -17,10 +17,19 @@ type Config struct {
 	Spec    string // path to .shen spec file
 	Output  string // path to generated guard types
 	DBWrap  string // path to generated DB wrappers (optional)
-	Build   string // build command
-	Test    string // test command
-	Check   string // shen tc+ command
+	Gen     string // shengen command (gate 1)
+	Build   string // build command (gate 3)
+	Test    string // test command (gate 2)
+	Check   string // shen tc+ command (gate 4)
+	Audit   string // tcb audit command (gate 5)
 	Relaxed bool   // run test+build in parallel
+
+	// Loop config
+	Harness        string // LLM harness command (e.g. "claude -p")
+	MaxIter        int    // max loop iterations
+	HarnessTimeout string // per-harness-call timeout
+	Prompt         string // path to main prompt file
+	Plan           string // path to plan file
 }
 
 // tomlConfig mirrors the sb.toml file structure.
@@ -35,22 +44,37 @@ type tomlConfig struct {
 		DBWrappers string `toml:"db_wrappers"`
 	} `toml:"paths"`
 	Commands struct {
-		Build    string `toml:"build"`
-		Test     string `toml:"test"`
+		Gen       string `toml:"gen"`
+		Build     string `toml:"build"`
+		Test      string `toml:"test"`
 		ShenCheck string `toml:"shen_check"`
+		Audit     string `toml:"audit"`
 	} `toml:"commands"`
 	Gates struct {
 		Relaxed bool `toml:"relaxed"`
 	} `toml:"gates"`
+	Loop struct {
+		Harness string `toml:"harness"`
+		MaxIter int    `toml:"max_iter"`
+		Timeout string `toml:"timeout"`
+		Prompt  string `toml:"prompt"`
+		Plan    string `toml:"plan"`
+	} `toml:"loop"`
 }
 
 // LoadConfig loads configuration from sb.toml if present, otherwise detects by convention.
 func LoadConfig() (*Config, error) {
 	cfg := &Config{
-		Lang:  "go",
-		Pkg:   "shenguard",
-		Spec:  "specs/core.shen",
-		Check: "./bin/shen-check.sh",
+		Lang:           "go",
+		Pkg:            "shenguard",
+		Spec:           "specs/core.shen",
+		Check:          "./bin/shen-check.sh",
+		Audit:          "./bin/shenguard-audit.sh",
+		Harness:        "claude -p",
+		MaxIter:        10,
+		HarnessTimeout: "10m",
+		Prompt:         "prompts/main_prompt.md",
+		Plan:           "plans/fix_plan.md",
 	}
 
 	// Try loading sb.toml
@@ -74,6 +98,9 @@ func LoadConfig() (*Config, error) {
 		if tc.Paths.DBWrappers != "" {
 			cfg.DBWrap = tc.Paths.DBWrappers
 		}
+		if tc.Commands.Gen != "" {
+			cfg.Gen = tc.Commands.Gen
+		}
 		if tc.Commands.Build != "" {
 			cfg.Build = tc.Commands.Build
 		}
@@ -83,7 +110,26 @@ func LoadConfig() (*Config, error) {
 		if tc.Commands.ShenCheck != "" {
 			cfg.Check = tc.Commands.ShenCheck
 		}
+		if tc.Commands.Audit != "" {
+			cfg.Audit = tc.Commands.Audit
+		}
 		cfg.Relaxed = tc.Gates.Relaxed
+
+		if tc.Loop.Harness != "" {
+			cfg.Harness = tc.Loop.Harness
+		}
+		if tc.Loop.MaxIter > 0 {
+			cfg.MaxIter = tc.Loop.MaxIter
+		}
+		if tc.Loop.Timeout != "" {
+			cfg.HarnessTimeout = tc.Loop.Timeout
+		}
+		if tc.Loop.Prompt != "" {
+			cfg.Prompt = tc.Loop.Prompt
+		}
+		if tc.Loop.Plan != "" {
+			cfg.Plan = tc.Loop.Plan
+		}
 	}
 
 	// Convention detection for unset fields
@@ -104,6 +150,10 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
+	if cfg.Gen == "" {
+		cfg.Gen = "./bin/shengen-codegen.sh"
+	}
+
 	if cfg.Build == "" {
 		switch cfg.Lang {
 		case "go":
@@ -122,25 +172,34 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
+	// Env var overrides for loop config
+	if v := os.Getenv("RALPH_HARNESS"); v != "" {
+		cfg.Harness = v
+	}
+	if v := os.Getenv("RALPH_MAX_ITER"); v != "" {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
+			cfg.MaxIter = n
+		}
+	}
+	if v := os.Getenv("RALPH_HARNESS_TIMEOUT"); v != "" {
+		cfg.HarnessTimeout = v
+	}
+
 	return cfg, nil
 }
 
 // FindShengen locates the shengen binary using the discovery chain:
 // ./bin/shengen -> $SHENGEN_PATH -> $PATH -> build from cmd/shengen/main.go
 func FindShengen() (string, error) {
-	// Check ./bin/shengen
 	if _, err := os.Stat("bin/shengen"); err == nil {
 		return "bin/shengen", nil
 	}
-
-	// Check $SHENGEN_PATH
 	if p := os.Getenv("SHENGEN_PATH"); p != "" {
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
 		}
 	}
-
-	// Check $PATH
 	if p, err := exec.LookPath("shengen"); err == nil {
 		return p, nil
 	}
@@ -148,7 +207,7 @@ func FindShengen() (string, error) {
 	// Try to build from source
 	candidates := []string{
 		"cmd/shengen/main.go",
-		"../../cmd/shengen/main.go", // when running from a demo subdirectory
+		"../../cmd/shengen/main.go",
 	}
 	for _, src := range candidates {
 		if _, err := os.Stat(src); err == nil {

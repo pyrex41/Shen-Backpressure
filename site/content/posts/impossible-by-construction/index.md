@@ -289,4 +289,4 @@ But for AI coding loops, that's exactly the right trade-off. You don't need a pr
 
 *[Shen-Backpressure](https://github.com/pyrex41/Shen-Backpressure) is open source. The multi-tenant demo shown here is at `demo/multi-tenant-api/`. The verifiable showboat demo for this post is at `blog/post-3-impossible-by-construction/demo.md` — run `showboat verify demo.md` to confirm every command output is real.*
 
-*This is part of a series on deterministic backpressure for AI coding. Next: [The Five-Gate Loop — Adding Formal Verification to Ralph](#).*
+*This is part of a series on deterministic backpressure for AI coding. Next: [One Spec, Every Language](/posts/one-spec-every-language/) -- how the same Shen spec generates guard types across Go, TypeScript, Rust, and Python. Then: [Five Ways to Bypass a Guard Type](/posts/bypass-taxonomy/) -- the hardening deep dive.*

@@ -261,6 +261,8 @@ The spec compiles itself. The language determines how strong the compiled output
 
 ---
 
-*[Shen-Backpressure](https://github.com/pyrex41/Shen-Backpressure) is open source. The Go shengen tool is at `cmd/shengen/`. TypeScript examples are at `examples/payment_ts/` and `examples/email_crud_ts/`. The create-shengen spec for building shengen in any target language is at `sb/commands/create-shengen.md`.*
+*[Shen-Backpressure](https://github.com/pyrex41/Shen-Backpressure) is open source. The Go shengen tool is at `cmd/shengen/`. TypeScript examples are at `examples/payment_ts/` and `examples/email_crud_ts/`. Rust and Python examples are at `examples/payment_rs/` and `examples/payment_py/`. The create-shengen spec for building shengen in any target language is at `sb/commands/create-shengen.md`.*
 
 *Previous: [Making Cross-Tenant Access Impossible to Accidentally Bypass](/posts/impossible-by-construction/)*
+
+*Next: [Five Ways to Bypass a Guard Type (And How to Close Each One)](/posts/bypass-taxonomy/) -- the bypass prevention deep dive, covering hardened mode for [Rust](/posts/rust-linear-proofs/), [Go](/posts/go-hardening/), [TypeScript](/posts/typescript-branded-nominals/), and [Python](/posts/python-closure-vaults/).*

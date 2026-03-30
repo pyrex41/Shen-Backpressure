@@ -717,19 +717,6 @@ Convert Shen's hyphenated names to the target language's convention:
 
 Constructor names follow language convention: `NewBalanceChecked` (Go), `BalanceChecked::new` (Rust), `BalanceChecked.create` (TS/Python), `BalanceChecked.of` (Java).
 
-### 8c-1. Reserved word collisions
-
-Some Shen field names collide with target language keywords. When a field name (after case conversion) is a reserved word, append a trailing underscore or use an alternative:
-
-| Language | Reserved words to watch | Fix |
-|---|---|---|
-| Python | `from`, `to`, `in`, `is`, `not`, `and`, `or`, `type`, `class` | Append `_`: accessor `from_()`, parameter `from_`, field `_from` (internal name unchanged) |
-| Rust | `type`, `self`, `in`, `fn`, `mod`, `use` | Use `r#from` (raw identifier) or rename to `from_acct` |
-| Go | `type`, `func`, `map`, `range` | PascalCase usually avoids collisions (`From()` is fine) |
-| TypeScript | `in`, `delete`, `typeof` | camelCase usually avoids collisions |
-
-The most common collision is `from` in Python (a Shen `From : account-id` premise). The factory function should accept `from_` as the parameter name, and the accessor should be `from_()`.
-
 ### 8d. Error handling in constructors
 
 Use the target language's idiomatic error type:
