@@ -885,3 +885,188 @@ Use this as your task list when building shengen:
 - [ ] **Tests**: Symbol table tests for field resolution
 - [ ] **Tests**: Accessor chain tests (head/tail through nested types)
 - [ ] **Tests**: Integration tests with real spec → generated code → invariant enforcement
+
+---
+
+## 13. Hardened Mode (`--mode hardened`)
+
+Standard shengen output prevents **direct construction** (attack A) through module-private fields. Hardened mode closes additional bypass vectors: field mutation (B), zero-value exploitation (C), reflection (D), and serialization roundtrip (E).
+
+Add a `--mode standard|hardened` flag. Standard is the default. Hardened adds the mechanisms below, which vary by target language.
+
+### 13a. Bypass Taxonomy
+
+Every guard type is vulnerable to exactly five bypass attacks:
+
+| # | Attack | Example | Standard blocks? |
+|---|--------|---------|-----------------|
+| A | Direct construction | `Amount{v: -5}` (Go) | Yes (all languages) |
+| B | Field mutation | `(obj as any)._v = -5` (TS) | Partial (Go/Rust yes, TS/Py no) |
+| C | Zero-value | `var a Amount` (Go) | No |
+| D | Reflection/unsafe | `reflect.NewAt(...)` (Go) | No |
+| E | Deserialization | `json.Unmarshal(data, &amount)` | No |
+
+### 13b. Go Hardened
+
+**Sealed interfaces** — Hide the concrete type behind an interface with an unexported method:
+
+```go
+type Amount interface {
+    Val() float64
+    isAmount()  // unexported — external code cannot implement this
+}
+type amount struct {
+    v     float64
+    valid bool  // zero-value trap
+}
+func NewAmount(x float64) (Amount, error) {
+    if !(x >= 0) { return nil, fmt.Errorf("amount must be >= 0: %v", x) }
+    return &amount{v: x, valid: true}, nil
+}
+func (a *amount) Val() float64 {
+    if !a.valid { panic("shenguard: use of uninitialized Amount") }
+    return a.v
+}
+func (a *amount) isAmount() {}
+```
+
+Closes: A (can't name the type), B (can't access fields), C (`var a Amount` = nil, panics on use).
+
+Trade-off: interface = heap allocation. For hot paths, use struct mode with `valid` flag instead.
+
+**Zero-value trap** — Add `valid bool` field. `Val()` panics if `!valid`. Even if 0 is in the valid range, the construction path was bypassed.
+
+**JSON re-validation** — Implement `UnmarshalJSON` on every guard type:
+
+```go
+func (a *amount) UnmarshalJSON(data []byte) error {
+    var raw float64
+    if err := json.Unmarshal(data, &raw); err != nil { return err }
+    validated, err := NewAmount(raw)
+    if err != nil { return err }
+    *a = *validated.(*amount)
+    return nil
+}
+```
+
+Closes: E (deserialization always goes through constructor).
+
+**Reflection audit** — Add a grep in Gate 5 for `reflect.ValueOf`/`reflect.NewAt` touching guard types.
+
+### 13c. Rust Hardened
+
+**No Clone/Copy on guarded types** — A proof is consumed when used:
+
+```rust
+let check = BalanceChecked::new(100.0, tx)?;
+let safe = check.into_safe_transfer(tx);  // moves `check`
+// check is gone — can't reuse a stale proof
+```
+
+Rule: WRAPPER types derive `Clone + Debug + PartialEq`. GUARDED types derive nothing.
+
+**`#[non_exhaustive]`** — Prevents downstream destructuring:
+
+```rust
+#[non_exhaustive]
+pub struct BalanceChecked { ... }
+```
+
+**Sealed traits** for sum types — `mod private { pub trait Sealed {} }` prevents external implementations.
+
+**No Deserialize** — Never derive `serde::Deserialize`. Provide `from_json()` methods that re-validate through constructors.
+
+**Typestate** (optional, `--mode paranoid`) — For linear proof chains, emit PhantomData-based typestate where methods only exist on the correct state:
+
+```rust
+pub struct Transfer<State> { ..., _state: PhantomData<State> }
+impl Transfer<Unchecked> { pub fn verify_balance(self, bal: f64) -> Result<Transfer<Verified>, ...> }
+impl Transfer<Verified> { pub fn authorize(self, auth: AuthToken) -> Transfer<Authorized> }
+impl Transfer<Authorized> { pub fn execute(self) -> Receipt }
+```
+
+### 13d. TypeScript Hardened
+
+**ES2022 `#private` fields** — Runtime enforcement, not just compile-time:
+
+```typescript
+export class Amount {
+    readonly #v: number;  // runtime-private — (amt as any).#v is SyntaxError
+    declare readonly [AmountBrand]: never;  // nominal brand
+    private constructor(v: number) { this.#v = v; }
+    static create(x: number): Amount {
+        if (!(x >= 0)) throw new Error(`Amount must be >= 0: ${x}`);
+        return Object.freeze(new Amount(x));
+    }
+    val(): number { return this.#v; }
+}
+```
+
+Closes: A (private constructor + brand), B (`#private` is runtime-enforced), partial E (freeze prevents mutation).
+
+**Branded types** — `declare const AmountBrand: unique symbol` prevents structural bypass. Any object with `{ val(): number }` would normally satisfy the type — brands block this.
+
+**Object.freeze** — `return Object.freeze(new Amount(x))` in every constructor.
+
+**Discriminated unions** for sum types — `readonly kind = 'human' as const` enables exhaustive switch + each variant has its own brand.
+
+### 13e. Python Hardened
+
+**Closure vault** — Validated values live in closure scope, not object attributes:
+
+```python
+def _build_amount_factory():
+    _secret = os.urandom(32)
+    def create(x: float):
+        if not (x >= 0): raise ValueError(...)
+        token = hmac.new(_secret, struct.pack('!d', x), 'sha256').digest()
+        class _Impl:
+            __slots__ = ('__weakref__',)
+            def val(self_inner): return x
+            def _token(self_inner): return token
+            def __init_subclass__(cls, **kw): raise TypeError("Cannot subclass")
+        return object.__new__(_Impl)
+    def verify(amt):
+        try:
+            expected = hmac.new(_secret, struct.pack('!d', amt.val()), 'sha256').digest()
+            return hmac.compare_digest(amt._token(), expected)
+        except: return False
+    return create, verify
+
+new_amount, verify_amount = _build_amount_factory()
+```
+
+**HMAC provenance** — Each guard type is signed with a per-process secret. Tampering detection: if `amt.val` is reassigned, the HMAC check fails.
+
+**Recursive HMAC chain** — Composite types incorporate their fields' tokens into their own token. Tampering at any level breaks the chain.
+
+**Static lint gate** — AST walker that flags direct construction (`Amount(...)`) and `object.__setattr__` on guard types. Runs as part of Gate 5.
+
+### 13f. Implementation Guidance
+
+When implementing `--mode hardened`:
+
+1. The emitter checks the mode flag and dispatches to standard vs hardened generation per type category
+2. Hardened mode is strictly additive — it emits everything standard mode does, plus the hardening mechanisms
+3. The `--mode` flag should appear in the generated header comment so the TCB audit can verify consistency
+4. For Rust, consider `--mode paranoid` as a third tier that adds typestate for linear proof chains
+
+### 13g. Hardened Mode Checklist
+
+- [ ] **Go**: Sealed interface pattern (exported interface + unexported struct + unexported method)
+- [ ] **Go**: Zero-value trap (`valid bool` field, panic on uninitialized access)
+- [ ] **Go**: `UnmarshalJSON` on all guard types (re-validates through constructor)
+- [ ] **Go**: Reflection audit grep in Gate 5
+- [ ] **Rust**: No Clone/Copy on GUARDED types
+- [ ] **Rust**: `#[non_exhaustive]` on all types
+- [ ] **Rust**: Sealed trait pattern for sum types
+- [ ] **Rust**: No Deserialize derive; provide `from_json()` methods
+- [ ] **Rust**: (paranoid) Typestate pattern for linear proof chains
+- [ ] **TypeScript**: `#private` fields (ES2022 runtime private)
+- [ ] **TypeScript**: Branded types (`unique symbol`)
+- [ ] **TypeScript**: `Object.freeze` in constructors
+- [ ] **TypeScript**: Discriminated union with branded variants for sum types
+- [ ] **Python**: Closure vault (values in closure scope, not attributes)
+- [ ] **Python**: HMAC provenance tokens with per-process secret
+- [ ] **Python**: `__init_subclass__` prevention
+- [ ] **Python**: Static lint gate (AST walker for direct construction)

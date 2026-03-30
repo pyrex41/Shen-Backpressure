@@ -110,3 +110,45 @@ Install: `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`
 Do NOT use shen-go — it has known memory allocation crash bugs.
 
 **Important:** shengen (the codegen tool) is a separate Go/TS program that reads `.shen` files as text and emits guard types. It does NOT run Shen code. Only Gate 4 needs an actual Shen runtime.
+
+## Bypass Prevention & Hardened Mode
+
+Standard guard types prevent **direct construction** (attack A) through module-private fields. Five total bypass vectors exist:
+
+| Attack | What | Standard blocks? |
+|--------|------|-----------------|
+| A. Direct construction | `Amount{v: -5}` | Yes (all languages) |
+| B. Field mutation | `(obj as any)._v = -5` | Go/Rust yes, TS/Py no |
+| C. Zero-value | `var a Amount` (Go) | No |
+| D. Reflection/unsafe | `reflect.NewAt(...)` | No |
+| E. Deserialization | `json.Unmarshal(data, &amt)` | No |
+
+**Hardened mode** (`shengen --mode hardened`) closes these additional vectors per language:
+
+- **Go**: Sealed interfaces (unexported method), zero-value trap (`valid` flag), `UnmarshalJSON` re-validation
+- **Rust**: No Clone/Copy on guarded types (linear proofs), `#[non_exhaustive]`, sealed traits, no Deserialize
+- **TypeScript**: ES2022 `#private` fields (runtime enforcement), branded types (`unique symbol`), `Object.freeze`
+- **Python**: Closure vaults (values in closure scope), HMAC provenance tokens, `__init_subclass__` prevention
+
+The defense-in-depth stack (each layer catches what the previous misses):
+1. Language-level opacity (module privacy)
+2. Brands/sealing (nominal types, sealed interfaces)
+3. Runtime validation (constructors check invariants)
+4. Provenance tokens (HMAC, registries — Python)
+5. Static analysis (lint gates in Gate 5)
+6. TCB audit (hash verification of generated code)
+
+See `/sb:create-shengen` section 13 for full implementation details.
+
+## Target Language Shengen Implementations
+
+Shengen codegen tools exist for multiple languages:
+
+| Language | Tool | Location |
+|----------|------|----------|
+| Go | shengen (Go binary) | `cmd/shengen/main.go` |
+| TypeScript | shengen-ts | `cmd/shengen-ts/shengen.ts` |
+| Rust | shengen-rs (Python script) | `cmd/shengen-rs/shengen.py` |
+| Python | shengen-py (Python script) | `cmd/shengen-py/shengen.py` |
+
+All share the same architecture: Parse → Symbol Table → Resolve → Emit. All support `--mode standard|hardened`. Use `/sb:create-shengen` to build shengen for additional languages.
