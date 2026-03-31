@@ -51,3 +51,4 @@
 (defvar *anthropic-model* "claude-sonnet-4-6" "Anthropic model ID")
 (defvar *rho-binary* "rho-cli" "Path to rho-cli binary")
 (defvar *rho-model* nil "Model ID for rho-cli (nil = use rho default)")
+(defvar *rho-api-key* nil "API key for rho-cli (nil = use rho default auth)")
