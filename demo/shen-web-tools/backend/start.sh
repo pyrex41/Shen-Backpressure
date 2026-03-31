@@ -93,7 +93,13 @@ fi
 # Launch SBCL: load system, apply config, then boot
 # SHEN_WEB_TOOLS_NO_AUTOBOOT prevents boot during --load so configure runs first
 export SHEN_WEB_TOOLS_NO_AUTOBOOT=1
-exec sbcl --dynamic-space-size 2048 \
-     --load backend/load.lisp \
-     "${SBCL_ARGS[@]}" \
-     --eval "(shen-web-tools::boot)"
+if [ ${#SBCL_ARGS[@]} -eq 0 ]; then
+  exec sbcl --dynamic-space-size 2048 \
+       --load backend/load.lisp \
+       --eval "(shen-web-tools::boot)"
+else
+  exec sbcl --dynamic-space-size 2048 \
+       --load backend/load.lisp \
+       "${SBCL_ARGS[@]}" \
+       --eval "(shen-web-tools::boot)"
+fi
