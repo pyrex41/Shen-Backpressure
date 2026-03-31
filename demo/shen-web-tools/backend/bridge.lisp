@@ -265,6 +265,9 @@
          (cmd (if model
                   (append cmd (list "--model" model))
                   cmd))
+         (cmd (if *rho-api-key*
+                  (append cmd (list "--api-key" *rho-api-key*))
+                  cmd))
          (cmd (append cmd (list "--output-format" "text" prompt))))
     (handler-case
         (let ((output (uiop:run-program cmd

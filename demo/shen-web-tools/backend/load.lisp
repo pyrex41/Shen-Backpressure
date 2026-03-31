@@ -40,7 +40,9 @@
   (when search-p (setf *search-provider* search))
   (when fetch-p (setf *fetch-provider* fetch))
   (when ai-p (setf *ai-provider* ai))
-  (when key-p (setf *anthropic-api-key* api-key))
+  (when key-p
+    (setf *anthropic-api-key* api-key)
+    (setf *rho-api-key* api-key))
   (when model-p
     (setf *anthropic-model* model)
     (setf *rho-model* model))
@@ -55,6 +57,14 @@
       (setf *anthropic-api-key* key)
       (setf *ai-provider* :anthropic)
       (format t "Using Anthropic API (key from environment)~%")))
+
+  ;; Check for XAI_API_KEY (OpenAI-compatible, used by rho-cli)
+  (let ((key (uiop:getenv "XAI_API_KEY")))
+    (when (and key (> (length key) 0))
+      (setf *rho-api-key* key)
+      (when (eq *ai-provider* :mock)
+        (setf *ai-provider* :rho))
+      (format t "Using XAI API key for rho-cli~%")))
 
   ;; Auto-detect rho-cli on PATH
   (when (uiop:run-program (list "which" *rho-binary*) :ignore-error-status t :output nil)
