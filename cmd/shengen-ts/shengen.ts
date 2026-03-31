@@ -698,6 +698,11 @@ function buildRule(premLines: string[], concLines: string[]): Rule | null {
 // ============================================================================
 
 function shenTypeToTs(t: string): string {
+  // Handle parameterized types like (list search-hit) → SearchHit[]
+  const listMatch = t.match(/^\(list\s+(.+)\)$/);
+  if (listMatch) {
+    return shenTypeToTs(listMatch[1]) + "[]";
+  }
   switch (t) {
     case "string":
     case "symbol":
