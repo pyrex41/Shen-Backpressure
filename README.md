@@ -181,6 +181,35 @@ For gate loops and CI, shen-sbcl wins — startup dominates on small specs. For 
 
 shengen (the codegen tool) does NOT use a Shen runtime — it's a standalone parser that reads `.shen` files as text.
 
+### Installing Shen Runtimes (for agents and CI)
+
+**shen-cl (SBCL)** — recommended, fastest startup:
+
+```bash
+brew tap Shen-Language/homebrew-shen && brew install shen-sbcl
+```
+
+**shen-scheme (Chez Scheme)** — faster compute for large specs:
+
+```bash
+# Install Chez Scheme first
+brew install chezscheme
+
+# Build shen-scheme from source
+git clone https://github.com/Shen-Language/shen-scheme.git
+cd shen-scheme
+make
+sudo cp bin/shen-scheme /usr/local/bin/
+```
+
+Verify either runtime works with `shen-check.sh`:
+
+```bash
+./bin/shen-check.sh specs/core.shen
+```
+
+To force a specific backend: `SHEN=/path/to/binary ./bin/shen-check.sh`.
+
 ## Design Decisions
 
 - **Why shengen?** Shen proves invariants deductively but doesn't generate Go code. shengen bridges the gap — the formal spec becomes compile-time enforcement via opaque types.
