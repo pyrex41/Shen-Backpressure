@@ -103,11 +103,16 @@ The `--db-wrappers <file>` flag generates proof-carrying DB wrappers that captur
 
 ## Shen Runtime for Gate 4
 
-Gate 4 (shen tc+) needs a Shen implementation. Use **shen-sbcl** (Shen on SBCL/Common Lisp) — most reliable, fastest startup.
+Gate 4 (shen tc+) needs a Shen implementation. Two recommended backends:
 
-Install: `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`
+| Backend | Startup | Compute | Best for |
+|---------|---------|---------|----------|
+| **shen-sbcl** (shen-cl/SBCL) | **0.06s** | 1x | Gate loops, CI (startup-dominated) |
+| **shen-scheme** (Chez Scheme) | 0.44s | **1.6x faster** | Large specs, heavy typechecking |
 
-Do NOT use shen-go — it has known memory allocation crash bugs.
+Install shen-sbcl: `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`
+
+`bin/shen-check.sh` auto-detects whichever is on PATH (prefers shen-sbcl for startup speed). Override with `SHEN=/path/to/binary` to use any backend. Do NOT use shen-go — it has known memory allocation crash bugs.
 
 **Important:** shengen (the codegen tool) is a separate Go/TS program that reads `.shen` files as text and emits guard types. It does NOT run Shen code. Only Gate 4 needs an actual Shen runtime.
 
