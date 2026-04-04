@@ -8,6 +8,8 @@ demo/*/server
 bin/shengen
 bin/sb
 cmd/shengen/shengen
+cmd/sb/bin/
+cmd/sb/sb
 # cmd/sb/skilldata/ — embedded in binary, kept in sync with sb/
 
 # Databases and WAL files
