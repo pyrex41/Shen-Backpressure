@@ -1,0 +1,13 @@
+apiVersion: shenplane.io/v1
+kind: CacheClaim
+metadata:
+  name: session-cache
+  namespace: auth
+spec:
+  engine: redis
+  size: medium
+  region: us-east-1
+  tags:
+    team: identity
+    costCenter: eng-platform
+    environment: production

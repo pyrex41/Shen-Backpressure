@@ -1,0 +1,34 @@
+# This Claim is INVALID and will be rejected at admission time.
+# Shown here to demonstrate what the proof-derived errors look like.
+#
+# ERRORS:
+#   1. engine "sqlite" not in {postgres, mysql, mariadb}
+#      → NewDbEngine("sqlite") fails: element? check
+#   2. storageGB: 5 violates (>= X 10)
+#      → NewStorageGb(5) fails: minimum 10
+#   3. Missing tags.costCenter (required by org-tags)
+#      → NewOrgTags fails: costCenter is empty
+#   4. region "moon-base-1" not in valid regions
+#      → NewCloudRegion("moon-base-1") fails: element? check
+#
+# The user sees:
+#   Error: DatabaseClaim "bad-db" rejected:
+#     - spec.engine: "sqlite" is not a valid engine (postgres, mysql, mariadb)
+#     - spec.storageGB: 5 is below minimum (10)
+#     - spec.tags.costCenter: required field missing
+#     - spec.region: "moon-base-1" is not a valid region
+
+apiVersion: shenplane.io/v1
+kind: DatabaseClaim
+metadata:
+  name: bad-db
+  namespace: yolo
+spec:
+  engine: sqlite
+  size: medium
+  storageGB: 5
+  region: moon-base-1
+  tags:
+    team: backend
+    environment: production
+    # costCenter: missing!
