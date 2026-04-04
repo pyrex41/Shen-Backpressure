@@ -2,7 +2,22 @@
 
 YAML on the outside. Proofs on the inside.
 
-Users write familiar Kubernetes-style YAML Claims. The control plane enforces invariants that are **provably correct by construction** — not checked after the fact by schemas, policies, or runtime reconciliation.
+**A clean-sheet infrastructure control plane.** Users write familiar K8s-style YAML Claims. The control plane enforces invariants that are provably correct by construction — not checked after the fact by schemas, policies, or runtime reconciliation.
+
+See also: [`demo/shenguard-bolt-on/`](../shenguard-bolt-on/) — the bolt-on approach for teams that want to keep their existing Argo + Crossplane stack.
+
+## Who This Is For
+
+Teams that:
+- Are starting fresh (greenfield infra) or willing to migrate critical paths
+- Want the declarative YAML ergonomics of Crossplane without its baggage
+- Need **structural** guarantees, not just "policies that hopefully apply"
+- Are building platform engineering for autonomous/AI-driven infra workflows
+
+## What's Different (In One Sentence)
+
+**ShenGuard** bolts verification onto existing Argo+Crossplane.
+**ShenPlane** replaces the composition and validation layers entirely, keeping only the YAML surface and GitOps sync.
 
 ## How It Works
 
