@@ -168,6 +168,19 @@ demo/                    Working demo projects
 
 - **[The Loop](https://ghuntley.com/loop/)** — Why loop-based development changes the economics of software. Instead of building brick-by-brick, you allocate specs and goals to an autonomous agent and let it cycle. The key insight: watch the loop itself — failures become learning opportunities fed back as backpressure, not dead ends.
 
+## Shen Runtime (Gate 4)
+
+Gate 4 (`shen tc+`) is the only gate that needs a Shen runtime. The `bin/shen-check.sh` script auto-detects and supports multiple backends:
+
+| Backend | Startup | Compute | Install |
+|---------|---------|---------|---------|
+| **shen-sbcl** (default) | **0.06s** | 1x | `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl` |
+| **shen-scheme** | 0.44s | **1.6x faster** | Build from [shen-scheme](https://github.com/Shen-Language/shen-scheme) |
+
+For gate loops and CI, shen-sbcl wins — startup dominates on small specs. For large specs with heavy typechecking, shen-scheme's faster compute may matter. Override with `SHEN=/path/to/binary ./bin/shen-check.sh`.
+
+shengen (the codegen tool) does NOT use a Shen runtime — it's a standalone parser that reads `.shen` files as text.
+
 ## Design Decisions
 
 - **Why shengen?** Shen proves invariants deductively but doesn't generate Go code. shengen bridges the gap — the formal spec becomes compile-time enforcement via opaque types.

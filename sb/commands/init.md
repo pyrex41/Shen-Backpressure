@@ -126,15 +126,19 @@ Use `\* comment *\` to document sections.
 
 ### Shen Runtime (for Gate 4: type checking)
 
-Gate 4 runs Shen's type checker (`tc+`) on the spec. **Any Shen port works** — the spec is pure Shen, independent of what language the guard types target. Use **shen-sbcl** (Shen on SBCL/Common Lisp):
+Gate 4 runs Shen's type checker (`tc+`) on the spec. **Any Shen port works** — the spec is pure Shen, independent of what language the guard types target. Two recommended backends:
+
+| Backend | Install | Startup | Compute | Best for |
+|---------|---------|---------|---------|----------|
+| **shen-sbcl** (shen-cl on SBCL) | `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl` | **0.06s** | 1x | Gate loops, CI (startup-dominated) |
+| **shen-scheme** (Chez Scheme) | Build from [shen-scheme](https://github.com/Shen-Language/shen-scheme) | 0.44s | **1.6x faster** | Large specs, heavy typechecking |
+
+The `bin/shen-check.sh` script auto-detects whichever is installed (prefers shen-sbcl). Override with `SHEN=/path/to/binary`.
 
 ```bash
-# Check if shen-sbcl is available
-command -v shen-sbcl || command -v sbcl
+# Check what's available
+command -v shen-sbcl || command -v shen-scheme || command -v shen
 ```
-
-- **If SBCL is installed**: install shen-sbcl via `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`
-- **If neither**: `brew install sbcl` then install shen-sbcl as above
 
 Do NOT use shen-go — it has known memory allocation crash bugs and hangs during cold bootstrap.
 
@@ -150,23 +154,13 @@ If neither exists and the project is based on the Shen-Backpressure repo, check 
 
 ### shen-check.sh
 
-Create `bin/shen-check.sh` using shen-sbcl. The script must:
-- Accept a spec path argument (default: `specs/core.shen`)
-- Enable type checking (`(tc +)`)
-- Load the spec file
-- Exit 0 with `RESULT: PASS` on success
-- Exit 1 with `RESULT: FAIL` on type error
-- Include a timeout (30 seconds) to prevent hangs
-
-
-```bash
-#!/bin/bash
-set -euo pipefail
-SPEC="${1:-specs/core.shen}"
-[ -f "$SPEC" ] || { echo "ERROR: $SPEC not found"; exit 1; }
-timeout 30 shen-sbcl -q -e "(tc +)" -l "$SPEC" 2>&1 || { echo "RESULT: FAIL"; exit 1; }
-echo "RESULT: PASS"
-```
+Copy `bin/shen-check.sh` from the Shen-Backpressure repo. It auto-detects the Shen backend (`shen-sbcl` > `shen-scheme` > `shen`) and can be overridden with `$SHEN`. It:
+- Accepts a spec path argument (default: `specs/core.shen`)
+- Enables type checking (`(tc +)`)
+- Loads the spec file
+- Exits 0 with `RESULT: PASS` on success
+- Exits 1 with `RESULT: FAIL` on type error
+- Includes a timeout (30 seconds) to prevent hangs
 
 Make executable: `chmod +x bin/shen-check.sh`
 
