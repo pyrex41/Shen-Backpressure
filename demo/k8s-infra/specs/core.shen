@@ -542,3 +542,190 @@
   Deploy : gitops-deploy-ready;
   ==============================
   [Infra Deploy] : platform-ready;)
+
+
+\* ============================================= *\
+\*  SECTION 7: BOLT-ON INTEGRATION POINTS       *\
+\*                                               *\
+\*  These types model how Shen guards integrate  *\
+\*  into existing K8s toolchains without         *\
+\*  replacing anything. Each bolt-on point is    *\
+\*  an independent gate that can be adopted      *\
+\*  incrementally.                               *\
+\* ============================================= *\
+
+
+\* ---- 7a. Crossplane Composition Functions ---- *\
+\* Composition Functions are Go/Python code that  *\
+\* runs inside Crossplane's reconciliation loop.  *\
+\* Guard types make the function code safe.       *\
+
+\* A Composition Function receives a RunFunctionRequest *\
+\* and must return a RunFunctionResponse.               *\
+\* The guard types ensure the response is well-formed.  *\
+
+\* Desired resource produced by a composition function *\
+(datatype desired-resource
+  Name : resource-name;
+  Kind : resource-kind;
+  Ready : boolean;
+  ====================
+  [Name Kind Ready] : desired-resource;)
+
+\* A resource with all patches applied and validated *\
+(datatype patched-resource
+  Resource : desired-resource;
+  PatchesApplied : number;
+  PatchesValid : number;
+  (> PatchesApplied 0) : verified;
+  (= PatchesValid PatchesApplied) : verified;
+  =============================================
+  [Resource PatchesApplied PatchesValid] : patched-resource;)
+
+\* Composition function output: all resources patched and valid *\
+(datatype function-response-valid
+  ResourceCount : number;
+  AllPatched : boolean;
+  (> ResourceCount 0) : verified;
+  (= AllPatched true) : verified;
+  ================================
+  [ResourceCount AllPatched] : function-response-valid;)
+
+\* --- Security invariants for Crossplane resources --- *\
+\* These are the "bolted-on" policy proofs that ensure  *\
+\* cloud resources meet organizational requirements.    *\
+
+(datatype encryption-enabled
+  Resource : managed-resource;
+  Algorithm : string;
+  (not (= Algorithm "")) : verified;
+  ====================================
+  [Resource Algorithm] : encryption-enabled;)
+
+(datatype private-network
+  Resource : managed-resource;
+  SubnetType : string;
+  PublicAccess : boolean;
+  (= PublicAccess false) : verified;
+  (not (= SubnetType "")) : verified;
+  ====================================
+  [Resource SubnetType PublicAccess] : private-network;)
+
+(datatype cost-tagged
+  Resource : managed-resource;
+  Team : string;
+  Environment : string;
+  (not (= Team "")) : verified;
+  (not (= Environment "")) : verified;
+  ======================================
+  [Resource Team Environment] : cost-tagged;)
+
+\* Composite: resource meets all organizational policies *\
+(datatype policy-compliant
+  Encrypted : encryption-enabled;
+  Private : private-network;
+  Tagged : cost-tagged;
+  ========================
+  [Encrypted Private Tagged] : policy-compliant;)
+
+\* Secure database claim: the proof-carrying version of a Crossplane Claim *\
+\* Cannot create a database without proving encryption + private + tagged *\
+(datatype secure-db-claim
+  Resource : resource-complete;
+  Policy : policy-compliant;
+  Credential : mr-credentialed;
+  ==============================
+  [Resource Policy Credential] : secure-db-claim;)
+
+
+\* ---- 7b. Argo PreSync Hook Gate ---- *\
+\* A PreSync hook that runs shen-check  *\
+\* before Argo applies any manifests.   *\
+
+(datatype manifest-set
+  Source : source-binding;
+  ResourceCount : number;
+  (> ResourceCount 0) : verified;
+  ================================
+  [Source ResourceCount] : manifest-set;)
+
+\* Proof that all wave orderings in a manifest set are valid *\
+(datatype waves-valid
+  Manifests : manifest-set;
+  WaveCount : number;
+  AllOrdered : boolean;
+  (> WaveCount 0) : verified;
+  (= AllOrdered true) : verified;
+  ================================
+  [Manifests WaveCount AllOrdered] : waves-valid;)
+
+\* Proof that all CRDs precede their CRs *\
+(datatype crds-ordered
+  Manifests : manifest-set;
+  CrdCount : number;
+  AllPrecede : boolean;
+  (>= CrdCount 0) : verified;
+  (= AllPrecede true) : verified;
+  ================================
+  [Manifests CrdCount AllPrecede] : crds-ordered;)
+
+\* PreSync gate proof: waves valid + CRDs ordered + drift covered *\
+(datatype presync-cleared
+  Waves : waves-valid;
+  Crds : crds-ordered;
+  =====================
+  [Waves Crds] : presync-cleared;)
+
+
+\* ---- 7c. Admission Webhook Gate ---- *\
+\* ValidatingAdmissionWebhook that      *\
+\* rejects Claims at kubectl apply time *\
+
+\* Claim submitted by a user *\
+(datatype claim-submitted
+  Kind : resource-kind;
+  Name : resource-name;
+  Namespace : namespace;
+  ========================
+  [Kind Name Namespace] : claim-submitted;)
+
+\* Admission decision: requires all validation proofs *\
+(datatype admission-allowed
+  Claim : claim-submitted;
+  SchemaValid : boolean;
+  PolicyValid : boolean;
+  CredentialValid : boolean;
+  (= SchemaValid true) : verified;
+  (= PolicyValid true) : verified;
+  (= CredentialValid true) : verified;
+  ======================================
+  [Claim SchemaValid PolicyValid CredentialValid] : admission-allowed;)
+
+
+\* ---- 7d. CI Pipeline Gate ---- *\
+\* Runs in GitHub Actions / GitLab CI  *\
+\* before changes reach the cluster    *\
+
+(datatype pr-sha
+  X : string;
+  (not (= X "")) : verified;
+  ============================
+  X : pr-sha;)
+
+(datatype ci-gate-passed
+  Sha : pr-sha;
+  ShenTcPassed : boolean;
+  GuardsCompiled : boolean;
+  TestsPassed : boolean;
+  (= ShenTcPassed true) : verified;
+  (= GuardsCompiled true) : verified;
+  (= TestsPassed true) : verified;
+  ==================================
+  [Sha ShenTcPassed GuardsCompiled TestsPassed] : ci-gate-passed;)
+
+\* Full pre-merge proof: CI gates + presync validation *\
+(datatype merge-ready
+  CiGate : ci-gate-passed;
+  Presync : presync-cleared;
+  ==========================
+  [CiGate Presync] : merge-ready;)

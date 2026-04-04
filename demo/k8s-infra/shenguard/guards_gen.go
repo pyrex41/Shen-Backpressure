@@ -1199,3 +1199,433 @@ func (t PlatformReady) Infra() InfraProvisioned { return t.infra }
 func (t PlatformReady) Deploy() GitopsDeployReady { return t.deploy }
 
 
+// --- DesiredResource ---
+// Shen: (datatype desired-resource)
+type DesiredResource struct {
+	name ResourceName
+	kind ResourceKind
+	ready bool
+}
+
+func NewDesiredResource(name ResourceName, kind ResourceKind, ready bool) DesiredResource {
+	return DesiredResource{
+		name: name,
+		kind: kind,
+		ready: ready,
+	}
+}
+
+func (t DesiredResource) Name() ResourceName { return t.name }
+
+func (t DesiredResource) Kind() ResourceKind { return t.kind }
+
+func (t DesiredResource) Ready() bool { return t.ready }
+
+
+// --- PatchedResource ---
+// Shen: (datatype patched-resource)
+type PatchedResource struct {
+	resource DesiredResource
+	patchesApplied float64
+	patchesValid float64
+}
+
+func NewPatchedResource(resource DesiredResource, patchesApplied float64, patchesValid float64) (PatchedResource, error) {
+	if !(patchesApplied > 0) {
+		return PatchedResource{}, fmt.Errorf("patchesApplied must be > 0")
+	}
+	if !(patchesValid == patchesApplied) {
+		return PatchedResource{}, fmt.Errorf("patchesValid must equal patchesApplied")
+	}
+	return PatchedResource{
+		resource: resource,
+		patchesApplied: patchesApplied,
+		patchesValid: patchesValid,
+	}, nil
+}
+
+func (t PatchedResource) Resource() DesiredResource { return t.resource }
+
+func (t PatchedResource) PatchesApplied() float64 { return t.patchesApplied }
+
+func (t PatchedResource) PatchesValid() float64 { return t.patchesValid }
+
+
+// --- FunctionResponseValid ---
+// Shen: (datatype function-response-valid)
+type FunctionResponseValid struct {
+	resourceCount float64
+	allPatched bool
+}
+
+func NewFunctionResponseValid(resourceCount float64, allPatched bool) (FunctionResponseValid, error) {
+	if !(resourceCount > 0) {
+		return FunctionResponseValid{}, fmt.Errorf("resourceCount must be > 0")
+	}
+	if !(allPatched == true) {
+		return FunctionResponseValid{}, fmt.Errorf("allPatched must equal true")
+	}
+	return FunctionResponseValid{
+		resourceCount: resourceCount,
+		allPatched: allPatched,
+	}, nil
+}
+
+func (t FunctionResponseValid) ResourceCount() float64 { return t.resourceCount }
+
+func (t FunctionResponseValid) AllPatched() bool { return t.allPatched }
+
+
+// --- EncryptionEnabled ---
+// Shen: (datatype encryption-enabled)
+type EncryptionEnabled struct {
+	resource ManagedResource
+	algorithm string
+}
+
+func NewEncryptionEnabled(resource ManagedResource, algorithm string) (EncryptionEnabled, error) {
+	if !(!(algorithm == "")) {
+		return EncryptionEnabled{}, fmt.Errorf("not: algorithm must equal \"\"")
+	}
+	return EncryptionEnabled{
+		resource: resource,
+		algorithm: algorithm,
+	}, nil
+}
+
+func (t EncryptionEnabled) Resource() ManagedResource { return t.resource }
+
+func (t EncryptionEnabled) Algorithm() string { return t.algorithm }
+
+
+// --- PrivateNetwork ---
+// Shen: (datatype private-network)
+type PrivateNetwork struct {
+	resource ManagedResource
+	subnetType string
+	publicAccess bool
+}
+
+func NewPrivateNetwork(resource ManagedResource, subnetType string, publicAccess bool) (PrivateNetwork, error) {
+	if !(publicAccess == false) {
+		return PrivateNetwork{}, fmt.Errorf("publicAccess must equal false")
+	}
+	if !(!(subnetType == "")) {
+		return PrivateNetwork{}, fmt.Errorf("not: subnetType must equal \"\"")
+	}
+	return PrivateNetwork{
+		resource: resource,
+		subnetType: subnetType,
+		publicAccess: publicAccess,
+	}, nil
+}
+
+func (t PrivateNetwork) Resource() ManagedResource { return t.resource }
+
+func (t PrivateNetwork) SubnetType() string { return t.subnetType }
+
+func (t PrivateNetwork) PublicAccess() bool { return t.publicAccess }
+
+
+// --- CostTagged ---
+// Shen: (datatype cost-tagged)
+type CostTagged struct {
+	resource ManagedResource
+	team string
+	environment string
+}
+
+func NewCostTagged(resource ManagedResource, team string, environment string) (CostTagged, error) {
+	if !(!(team == "")) {
+		return CostTagged{}, fmt.Errorf("not: team must equal \"\"")
+	}
+	if !(!(environment == "")) {
+		return CostTagged{}, fmt.Errorf("not: environment must equal \"\"")
+	}
+	return CostTagged{
+		resource: resource,
+		team: team,
+		environment: environment,
+	}, nil
+}
+
+func (t CostTagged) Resource() ManagedResource { return t.resource }
+
+func (t CostTagged) Team() string { return t.team }
+
+func (t CostTagged) Environment() string { return t.environment }
+
+
+// --- PolicyCompliant ---
+// Shen: (datatype policy-compliant)
+type PolicyCompliant struct {
+	encrypted EncryptionEnabled
+	private PrivateNetwork
+	tagged CostTagged
+}
+
+func NewPolicyCompliant(encrypted EncryptionEnabled, private PrivateNetwork, tagged CostTagged) PolicyCompliant {
+	return PolicyCompliant{
+		encrypted: encrypted,
+		private: private,
+		tagged: tagged,
+	}
+}
+
+func (t PolicyCompliant) Encrypted() EncryptionEnabled { return t.encrypted }
+
+func (t PolicyCompliant) Private() PrivateNetwork { return t.private }
+
+func (t PolicyCompliant) Tagged() CostTagged { return t.tagged }
+
+
+// --- SecureDbClaim ---
+// Shen: (datatype secure-db-claim)
+type SecureDbClaim struct {
+	resource ResourceComplete
+	policy PolicyCompliant
+	credential MrCredentialed
+}
+
+func NewSecureDbClaim(resource ResourceComplete, policy PolicyCompliant, credential MrCredentialed) SecureDbClaim {
+	return SecureDbClaim{
+		resource: resource,
+		policy: policy,
+		credential: credential,
+	}
+}
+
+func (t SecureDbClaim) Resource() ResourceComplete { return t.resource }
+
+func (t SecureDbClaim) Policy() PolicyCompliant { return t.policy }
+
+func (t SecureDbClaim) Credential() MrCredentialed { return t.credential }
+
+
+// --- ManifestSet ---
+// Shen: (datatype manifest-set)
+type ManifestSet struct {
+	source SourceBinding
+	resourceCount float64
+}
+
+func NewManifestSet(source SourceBinding, resourceCount float64) (ManifestSet, error) {
+	if !(resourceCount > 0) {
+		return ManifestSet{}, fmt.Errorf("resourceCount must be > 0")
+	}
+	return ManifestSet{
+		source: source,
+		resourceCount: resourceCount,
+	}, nil
+}
+
+func (t ManifestSet) Source() SourceBinding { return t.source }
+
+func (t ManifestSet) ResourceCount() float64 { return t.resourceCount }
+
+
+// --- WavesValid ---
+// Shen: (datatype waves-valid)
+type WavesValid struct {
+	manifests ManifestSet
+	waveCount float64
+	allOrdered bool
+}
+
+func NewWavesValid(manifests ManifestSet, waveCount float64, allOrdered bool) (WavesValid, error) {
+	if !(waveCount > 0) {
+		return WavesValid{}, fmt.Errorf("waveCount must be > 0")
+	}
+	if !(allOrdered == true) {
+		return WavesValid{}, fmt.Errorf("allOrdered must equal true")
+	}
+	return WavesValid{
+		manifests: manifests,
+		waveCount: waveCount,
+		allOrdered: allOrdered,
+	}, nil
+}
+
+func (t WavesValid) Manifests() ManifestSet { return t.manifests }
+
+func (t WavesValid) WaveCount() float64 { return t.waveCount }
+
+func (t WavesValid) AllOrdered() bool { return t.allOrdered }
+
+
+// --- CrdsOrdered ---
+// Shen: (datatype crds-ordered)
+type CrdsOrdered struct {
+	manifests ManifestSet
+	crdCount float64
+	allPrecede bool
+}
+
+func NewCrdsOrdered(manifests ManifestSet, crdCount float64, allPrecede bool) (CrdsOrdered, error) {
+	if !(crdCount >= 0) {
+		return CrdsOrdered{}, fmt.Errorf("crdCount must be >= 0")
+	}
+	if !(allPrecede == true) {
+		return CrdsOrdered{}, fmt.Errorf("allPrecede must equal true")
+	}
+	return CrdsOrdered{
+		manifests: manifests,
+		crdCount: crdCount,
+		allPrecede: allPrecede,
+	}, nil
+}
+
+func (t CrdsOrdered) Manifests() ManifestSet { return t.manifests }
+
+func (t CrdsOrdered) CrdCount() float64 { return t.crdCount }
+
+func (t CrdsOrdered) AllPrecede() bool { return t.allPrecede }
+
+
+// --- PresyncCleared ---
+// Shen: (datatype presync-cleared)
+type PresyncCleared struct {
+	waves WavesValid
+	crds CrdsOrdered
+}
+
+func NewPresyncCleared(waves WavesValid, crds CrdsOrdered) PresyncCleared {
+	return PresyncCleared{
+		waves: waves,
+		crds: crds,
+	}
+}
+
+func (t PresyncCleared) Waves() WavesValid { return t.waves }
+
+func (t PresyncCleared) Crds() CrdsOrdered { return t.crds }
+
+
+// --- ClaimSubmitted ---
+// Shen: (datatype claim-submitted)
+type ClaimSubmitted struct {
+	kind ResourceKind
+	name ResourceName
+	namespace Namespace
+}
+
+func NewClaimSubmitted(kind ResourceKind, name ResourceName, namespace Namespace) ClaimSubmitted {
+	return ClaimSubmitted{
+		kind: kind,
+		name: name,
+		namespace: namespace,
+	}
+}
+
+func (t ClaimSubmitted) Kind() ResourceKind { return t.kind }
+
+func (t ClaimSubmitted) Name() ResourceName { return t.name }
+
+func (t ClaimSubmitted) Namespace() Namespace { return t.namespace }
+
+
+// --- AdmissionAllowed ---
+// Shen: (datatype admission-allowed)
+type AdmissionAllowed struct {
+	claim ClaimSubmitted
+	schemaValid bool
+	policyValid bool
+	credentialValid bool
+}
+
+func NewAdmissionAllowed(claim ClaimSubmitted, schemaValid bool, policyValid bool, credentialValid bool) (AdmissionAllowed, error) {
+	if !(schemaValid == true) {
+		return AdmissionAllowed{}, fmt.Errorf("schemaValid must equal true")
+	}
+	if !(policyValid == true) {
+		return AdmissionAllowed{}, fmt.Errorf("policyValid must equal true")
+	}
+	if !(credentialValid == true) {
+		return AdmissionAllowed{}, fmt.Errorf("credentialValid must equal true")
+	}
+	return AdmissionAllowed{
+		claim: claim,
+		schemaValid: schemaValid,
+		policyValid: policyValid,
+		credentialValid: credentialValid,
+	}, nil
+}
+
+func (t AdmissionAllowed) Claim() ClaimSubmitted { return t.claim }
+
+func (t AdmissionAllowed) SchemaValid() bool { return t.schemaValid }
+
+func (t AdmissionAllowed) PolicyValid() bool { return t.policyValid }
+
+func (t AdmissionAllowed) CredentialValid() bool { return t.credentialValid }
+
+
+// --- PrSha ---
+// Shen: (datatype pr-sha)
+type PrSha struct{ v string }
+
+func NewPrSha(x string) (PrSha, error) {
+	if !(!(x == "")) {
+		return PrSha{}, fmt.Errorf("not: x must equal \"\": %v", x)
+	}
+	return PrSha{v: x}, nil
+}
+
+func (t PrSha) Val() string { return t.v }
+
+
+// --- CiGatePassed ---
+// Shen: (datatype ci-gate-passed)
+type CiGatePassed struct {
+	sha PrSha
+	shenTcPassed bool
+	guardsCompiled bool
+	testsPassed bool
+}
+
+func NewCiGatePassed(sha PrSha, shenTcPassed bool, guardsCompiled bool, testsPassed bool) (CiGatePassed, error) {
+	if !(shenTcPassed == true) {
+		return CiGatePassed{}, fmt.Errorf("shenTcPassed must equal true")
+	}
+	if !(guardsCompiled == true) {
+		return CiGatePassed{}, fmt.Errorf("guardsCompiled must equal true")
+	}
+	if !(testsPassed == true) {
+		return CiGatePassed{}, fmt.Errorf("testsPassed must equal true")
+	}
+	return CiGatePassed{
+		sha: sha,
+		shenTcPassed: shenTcPassed,
+		guardsCompiled: guardsCompiled,
+		testsPassed: testsPassed,
+	}, nil
+}
+
+func (t CiGatePassed) Sha() PrSha { return t.sha }
+
+func (t CiGatePassed) ShenTcPassed() bool { return t.shenTcPassed }
+
+func (t CiGatePassed) GuardsCompiled() bool { return t.guardsCompiled }
+
+func (t CiGatePassed) TestsPassed() bool { return t.testsPassed }
+
+
+// --- MergeReady ---
+// Shen: (datatype merge-ready)
+type MergeReady struct {
+	ciGate CiGatePassed
+	presync PresyncCleared
+}
+
+func NewMergeReady(ciGate CiGatePassed, presync PresyncCleared) MergeReady {
+	return MergeReady{
+		ciGate: ciGate,
+		presync: presync,
+	}
+}
+
+func (t MergeReady) CiGate() CiGatePassed { return t.ciGate }
+
+func (t MergeReady) Presync() PresyncCleared { return t.presync }
+
+
