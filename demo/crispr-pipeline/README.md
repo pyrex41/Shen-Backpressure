@@ -4,6 +4,68 @@ Makes invalid edits, dangerous off-target hits, and protocol violations into **t
 
 The difference between catching a bad edit in silico vs. in a patient.
 
+## Where Computation Actually Plays In
+
+CRISPR is conceptually simple (a guided molecular scissors) but the **computational pipeline is where most design decisions happen** — and where most preventable errors originate.
+
+### The Real Workflow (What A Researcher Does On A Computer)
+
+```
+1. LOOK UP TARGET
+   Ensembl / UCSC Genome Browser → find the exon to target
+   (early constitutive exons for knockouts)
+
+2. FIND CANDIDATE GUIDES
+   Paste exon sequence into CRISPOR / Benchling / CHOPCHOP
+   Tool finds all 20-mers adjacent to a PAM site (NGG for SpCas9)
+   Typically 10-50 candidates per exon
+
+3. SCORE FOR EFFICIENCY
+   ML models predict cutting efficiency from sequence features:
+   - Rule Set 2 (Doench 2016): gradient-boosted regression, R² ~0.35
+   - CRISPRscan: linear regression on positional nucleotide features
+   - TIGER (2023): transformer model, state-of-the-art, R² ~0.45
+   These scores are imperfect — researchers order 2-3 top guides to hedge
+
+4. SEARCH FOR OFF-TARGETS
+   For each guide, search the 3-billion-base genome for every locus
+   within 0-4 mismatches:
+   - Cas-OFFinder: GPU-accelerated exact enumeration (minutes)
+   - FlashFry: pre-indexed database of all PAM-adjacent sites (seconds)
+   - CPU-only with 4+ mismatches: can take hours
+   This is THE computational bottleneck
+
+5. SCORE OFF-TARGET HITS
+   Each hit scored by position-weighted mismatch penalty:
+   - CFD score (Doench 2016): accounts for specific nucleotide substitution
+   - MIT specificity score (Hsu 2013): position-weighted, aggregate =
+     100 / (100 + sum of hit scores)
+   CFD generally outperforms MIT
+
+6. SELECT & ORDER
+   Pick guides with high efficiency + high specificity + no off-targets
+   in coding regions / essential genes. Order as synthetic oligos.
+
+         ——— WET LAB BEGINS ———
+
+7. POST-EDITING ANALYSIS
+   After editing, sequence the target locus:
+   - CRISPResso2: FASTQ reads + reference amplicon → Needleman-Wunsch
+     alignment → quantify indel frequencies → classify (NHEJ, HDR, unmod)
+   - GUIDE-seq: genome-wide off-target detection via dsODN integration
+   - CIRCLE-seq / DISCOVER-seq: similar empirical off-target mapping
+```
+
+### Where Computational Errors Lead To Wet Lab Failures
+
+| Failure Mode | What Went Wrong | Cost |
+|-------------|----------------|------|
+| Guide doesn't cut | Efficiency score was misleading (R² only ~0.35) | Wasted synthesis + transfection ($200-500) |
+| Off-target in essential gene | Search used too few mismatches, or missed bulges | Potentially catastrophic (cell death, oncogenesis) |
+| Guide doesn't match target | Cell line has SNPs vs. reference genome (hg38) | Complete experiment failure |
+| Post-edit analysis wrong | Insufficient read depth, bad alignment parameters | False confidence in edit quality |
+| Off-target false negative | Computational prediction missed chromatin effects | Real off-target cutting discovered too late |
+
 ## The 8 Layers
 
 | Layer | What It Proves | What It Prevents |
@@ -28,6 +90,14 @@ cas-variant ───┤
 pam-valid ─────┤
 gc-in-range ───┼──► guide-rna (all design criteria met)
 no-secondary───┘         │
+                    efficiency-sufficient (ML model score ≥ threshold)
+                         │                    ┌─ search-complete (genome-wide, ≥3 mismatches)
+                    ot-aggregate-score ◄──────┤
+                         │                    └─ CFD/MIT scoring method
+                    reference-verified (cell line matches reference genome)
+                         │
+                    guide-computationally-validated ◄── READY TO ORDER
+                         │
                     off-target-safe (specificity + essential genes clear)
                          │
                     edit-spec (guide + edit type + safety)
@@ -82,6 +152,27 @@ This is the same pattern as the workflow-saga spec, but the stakes are higher: t
 - **`biosafety-level`**: Correct containment level
 
 A germline edit is a type error. An expired IRB is a type error. Wrong biosafety level is a type error.
+
+## What The Computational Proofs Catch
+
+The spec (Layer 4a) adds proof types for every computational quality gate:
+
+| Proof Type | What It Validates | Tool It Maps To |
+|-----------|------------------|----------------|
+| `efficiency-sufficient` | ML model score ≥ threshold | Rule Set 2, CRISPRscan, TIGER |
+| `search-complete` | Genome-wide search with ≥3 mismatches | Cas-OFFinder, FlashFry |
+| `ot-aggregate-score` | CFD/MIT specificity score computed | CRISPOR, Benchling |
+| `reference-verified` | Cell line target sequenced + matches reference | Sanger sequencing |
+| `read-depth-sufficient` | Post-edit reads ≥ minimum depth | CRISPResso2 |
+| `guide-computationally-validated` | ALL computational gates passed | Composite proof |
+
+The key insight: `guide-computationally-validated` requires ALL four sub-proofs. You cannot proceed to the wet lab with:
+- An unscored guide (no `efficiency-sufficient`)
+- An incomplete off-target search (no `search-complete` — and it enforces ≥3 mismatches)
+- An unverified reference genome (no `reference-verified` — catches the SNP problem)
+- A guide that wasn't scored for off-targets (no `ot-aggregate-score`)
+
+The `edit-spec` type now takes `guide-computationally-validated` instead of raw `guide-rna` — the computational pipeline is a mandatory proof obligation before any wet lab work begins.
 
 ## Edit Types Supported
 

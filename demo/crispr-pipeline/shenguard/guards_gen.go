@@ -492,15 +492,336 @@ func (t BaseChange) To() string { return t.to }
 func (t BaseChange) Position() float64 { return t.position }
 
 
+// --- ScoringModel ---
+// Shen: (datatype scoring-model)
+type ScoringModel struct{ v string }
+
+func NewScoringModel(x string) (ScoringModel, error) {
+	if !(map[string]bool{"rule-set-2": true, "crisprscan": true, "tiger": true, "deepcrispr": true, "azimuth": true}[x]) {
+		return ScoringModel{}, fmt.Errorf("x must be in the valid set: %v", x)
+	}
+	return ScoringModel{v: x}, nil
+}
+
+func (t ScoringModel) Val() string { return t.v }
+
+
+// --- EfficiencyScore ---
+// Shen: (datatype efficiency-score)
+type EfficiencyScore struct{ v float64 }
+
+func NewEfficiencyScore(x float64) (EfficiencyScore, error) {
+	if !(x >= 0) {
+		return EfficiencyScore{}, fmt.Errorf("x must be >= 0: %v", x)
+	}
+	if !(x <= 100) {
+		return EfficiencyScore{}, fmt.Errorf("x must be <= 100: %v", x)
+	}
+	return EfficiencyScore{v: x}, nil
+}
+
+func (t EfficiencyScore) Val() float64 { return t.v }
+
+
+// --- EfficiencyThreshold ---
+// Shen: (datatype efficiency-threshold)
+type EfficiencyThreshold struct{ v float64 }
+
+func NewEfficiencyThreshold(x float64) (EfficiencyThreshold, error) {
+	if !(x > 0) {
+		return EfficiencyThreshold{}, fmt.Errorf("x must be > 0: %v", x)
+	}
+	if !(x <= 100) {
+		return EfficiencyThreshold{}, fmt.Errorf("x must be <= 100: %v", x)
+	}
+	return EfficiencyThreshold{v: x}, nil
+}
+
+func (t EfficiencyThreshold) Val() float64 { return t.v }
+
+
+// --- EfficiencySufficient ---
+// Shen: (datatype efficiency-sufficient)
+type EfficiencySufficient struct {
+	guide GuideRna
+	model ScoringModel
+	score EfficiencyScore
+	threshold EfficiencyThreshold
+}
+
+func NewEfficiencySufficient(guide GuideRna, model ScoringModel, score EfficiencyScore, threshold EfficiencyThreshold) (EfficiencySufficient, error) {
+	if !(score.Val() >= threshold.Val()) {
+		return EfficiencySufficient{}, fmt.Errorf("score must be >= threshold")
+	}
+	return EfficiencySufficient{
+		guide: guide,
+		model: model,
+		score: score,
+		threshold: threshold,
+	}, nil
+}
+
+func (t EfficiencySufficient) Guide() GuideRna { return t.guide }
+
+func (t EfficiencySufficient) Model() ScoringModel { return t.model }
+
+func (t EfficiencySufficient) Score() EfficiencyScore { return t.score }
+
+func (t EfficiencySufficient) Threshold() EfficiencyThreshold { return t.threshold }
+
+
+// --- SearchTool ---
+// Shen: (datatype search-tool)
+type SearchTool struct{ v string }
+
+func NewSearchTool(x string) (SearchTool, error) {
+	if !(map[string]bool{"cas-offinder": true, "flashfry": true, "bowtie": true, "crispor-builtin": true, "benchling": true}[x]) {
+		return SearchTool{}, fmt.Errorf("x must be in the valid set: %v", x)
+	}
+	return SearchTool{v: x}, nil
+}
+
+func (t SearchTool) Val() string { return t.v }
+
+
+// --- MismatchTolerance ---
+// Shen: (datatype mismatch-tolerance)
+type MismatchTolerance struct{ v float64 }
+
+func NewMismatchTolerance(x float64) (MismatchTolerance, error) {
+	if !(x >= 0) {
+		return MismatchTolerance{}, fmt.Errorf("x must be >= 0: %v", x)
+	}
+	if !(x <= 6) {
+		return MismatchTolerance{}, fmt.Errorf("x must be <= 6: %v", x)
+	}
+	return MismatchTolerance{v: x}, nil
+}
+
+func (t MismatchTolerance) Val() float64 { return t.v }
+
+
+// --- GenomeBuild ---
+// Shen: (datatype genome-build)
+type GenomeBuild struct{ v string }
+
+func NewGenomeBuild(x string) (GenomeBuild, error) {
+	if !(map[string]bool{"hg38": true, "hg19": true, "mm10": true, "mm39": true, "danRer11": true, "sacCer3": true}[x]) {
+		return GenomeBuild{}, fmt.Errorf("x must be in the valid set: %v", x)
+	}
+	return GenomeBuild{v: x}, nil
+}
+
+func (t GenomeBuild) Val() string { return t.v }
+
+
+// --- SearchComplete ---
+// Shen: (datatype search-complete)
+type SearchComplete struct {
+	tool SearchTool
+	mismatches MismatchTolerance
+	genome GenomeBuild
+	sitesFound float64
+}
+
+func NewSearchComplete(tool SearchTool, mismatches MismatchTolerance, genome GenomeBuild, sitesFound float64) (SearchComplete, error) {
+	if !(sitesFound >= 0) {
+		return SearchComplete{}, fmt.Errorf("sitesFound must be >= 0")
+	}
+	if !(mismatches.Val() >= 3) {
+		return SearchComplete{}, fmt.Errorf("mismatches must be >= 3")
+	}
+	return SearchComplete{
+		tool: tool,
+		mismatches: mismatches,
+		genome: genome,
+		sitesFound: sitesFound,
+	}, nil
+}
+
+func (t SearchComplete) Tool() SearchTool { return t.tool }
+
+func (t SearchComplete) Mismatches() MismatchTolerance { return t.mismatches }
+
+func (t SearchComplete) Genome() GenomeBuild { return t.genome }
+
+func (t SearchComplete) SitesFound() float64 { return t.sitesFound }
+
+
+// --- OtScoringMethod ---
+// Shen: (datatype ot-scoring-method)
+type OtScoringMethod struct{ v string }
+
+func NewOtScoringMethod(x string) (OtScoringMethod, error) {
+	if !(map[string]bool{"cfd": true, "mit-specificity": true, "crispor-aggregate": true}[x]) {
+		return OtScoringMethod{}, fmt.Errorf("x must be in the valid set: %v", x)
+	}
+	return OtScoringMethod{v: x}, nil
+}
+
+func (t OtScoringMethod) Val() string { return t.v }
+
+
+// --- OtAggregateScore ---
+// Shen: (datatype ot-aggregate-score)
+type OtAggregateScore struct {
+	method OtScoringMethod
+	score SpecificityScore
+	guide GuideRna
+	search SearchComplete
+}
+
+func NewOtAggregateScore(method OtScoringMethod, score SpecificityScore, guide GuideRna, search SearchComplete) OtAggregateScore {
+	return OtAggregateScore{
+		method: method,
+		score: score,
+		guide: guide,
+		search: search,
+	}
+}
+
+func (t OtAggregateScore) Method() OtScoringMethod { return t.method }
+
+func (t OtAggregateScore) Score() SpecificityScore { return t.score }
+
+func (t OtAggregateScore) Guide() GuideRna { return t.guide }
+
+func (t OtAggregateScore) Search() SearchComplete { return t.search }
+
+
+// --- ReferenceVerified ---
+// Shen: (datatype reference-verified)
+type ReferenceVerified struct {
+	genome GenomeBuild
+	cellLine CellType
+	targetSequenced bool
+	sequenceMatches bool
+}
+
+func NewReferenceVerified(genome GenomeBuild, cellLine CellType, targetSequenced bool, sequenceMatches bool) (ReferenceVerified, error) {
+	if !(targetSequenced == true) {
+		return ReferenceVerified{}, fmt.Errorf("targetSequenced must equal true")
+	}
+	if !(sequenceMatches == true) {
+		return ReferenceVerified{}, fmt.Errorf("sequenceMatches must equal true")
+	}
+	return ReferenceVerified{
+		genome: genome,
+		cellLine: cellLine,
+		targetSequenced: targetSequenced,
+		sequenceMatches: sequenceMatches,
+	}, nil
+}
+
+func (t ReferenceVerified) Genome() GenomeBuild { return t.genome }
+
+func (t ReferenceVerified) CellLine() CellType { return t.cellLine }
+
+func (t ReferenceVerified) TargetSequenced() bool { return t.targetSequenced }
+
+func (t ReferenceVerified) SequenceMatches() bool { return t.sequenceMatches }
+
+
+// --- AnalysisTool ---
+// Shen: (datatype analysis-tool)
+type AnalysisTool struct{ v string }
+
+func NewAnalysisTool(x string) (AnalysisTool, error) {
+	if !(map[string]bool{"crispresso2": true, "crispresso1": true, "ampliCan": true, "ice": true}[x]) {
+		return AnalysisTool{}, fmt.Errorf("x must be in the valid set: %v", x)
+	}
+	return AnalysisTool{v: x}, nil
+}
+
+func (t AnalysisTool) Val() string { return t.v }
+
+
+// --- ReadCount ---
+// Shen: (datatype read-count)
+type ReadCount struct{ v float64 }
+
+func NewReadCount(x float64) (ReadCount, error) {
+	if !(x > 0) {
+		return ReadCount{}, fmt.Errorf("x must be > 0: %v", x)
+	}
+	return ReadCount{v: x}, nil
+}
+
+func (t ReadCount) Val() float64 { return t.v }
+
+
+// --- ReadDepthSufficient ---
+// Shen: (datatype read-depth-sufficient)
+type ReadDepthSufficient struct {
+	reads ReadCount
+	minDepth ReadCount
+}
+
+func NewReadDepthSufficient(reads ReadCount, minDepth ReadCount) (ReadDepthSufficient, error) {
+	if !(reads.Val() >= minDepth.Val()) {
+		return ReadDepthSufficient{}, fmt.Errorf("reads must be >= minDepth")
+	}
+	return ReadDepthSufficient{
+		reads: reads,
+		minDepth: minDepth,
+	}, nil
+}
+
+func (t ReadDepthSufficient) Reads() ReadCount { return t.reads }
+
+func (t ReadDepthSufficient) MinDepth() ReadCount { return t.minDepth }
+
+
+// --- GenomeWideOtMethod ---
+// Shen: (datatype genome-wide-ot-method)
+type GenomeWideOtMethod struct{ v string }
+
+func NewGenomeWideOtMethod(x string) (GenomeWideOtMethod, error) {
+	if !(map[string]bool{"guide-seq": true, "circle-seq": true, "discover-seq": true, "site-seq": true}[x]) {
+		return GenomeWideOtMethod{}, fmt.Errorf("x must be in the valid set: %v", x)
+	}
+	return GenomeWideOtMethod{v: x}, nil
+}
+
+func (t GenomeWideOtMethod) Val() string { return t.v }
+
+
+// --- GuideComputationallyValidated ---
+// Shen: (datatype guide-computationally-validated)
+type GuideComputationallyValidated struct {
+	guide GuideRna
+	efficiency EfficiencySufficient
+	otScore OtAggregateScore
+	refMatch ReferenceVerified
+}
+
+func NewGuideComputationallyValidated(guide GuideRna, efficiency EfficiencySufficient, otScore OtAggregateScore, refMatch ReferenceVerified) GuideComputationallyValidated {
+	return GuideComputationallyValidated{
+		guide: guide,
+		efficiency: efficiency,
+		otScore: otScore,
+		refMatch: refMatch,
+	}
+}
+
+func (t GuideComputationallyValidated) Guide() GuideRna { return t.guide }
+
+func (t GuideComputationallyValidated) Efficiency() EfficiencySufficient { return t.efficiency }
+
+func (t GuideComputationallyValidated) OtScore() OtAggregateScore { return t.otScore }
+
+func (t GuideComputationallyValidated) RefMatch() ReferenceVerified { return t.refMatch }
+
+
 // --- EditSpec ---
 // Shen: (datatype edit-spec)
 type EditSpec struct {
-	guide GuideRna
+	guide GuideComputationallyValidated
 	type_ EditType
 	offTargetSafety OffTargetSafe
 }
 
-func NewEditSpec(guide GuideRna, type_ EditType, offTargetSafety OffTargetSafe) EditSpec {
+func NewEditSpec(guide GuideComputationallyValidated, type_ EditType, offTargetSafety OffTargetSafe) EditSpec {
 	return EditSpec{
 		guide: guide,
 		type_: type_,
@@ -508,7 +829,7 @@ func NewEditSpec(guide GuideRna, type_ EditType, offTargetSafety OffTargetSafe) 
 	}
 }
 
-func (t EditSpec) Guide() GuideRna { return t.guide }
+func (t EditSpec) Guide() GuideComputationallyValidated { return t.guide }
 
 func (t EditSpec) Type() EditType { return t.type_ }
 
