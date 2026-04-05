@@ -241,9 +241,194 @@
   ==============================
   [From To Position] : base-change;)
 
+\* ============================================= *\
+\*  LAYER 4a: COMPUTATIONAL SCORING             *\
+\*  These types model the actual algorithms used  *\
+\*  by real guide design tools (CRISPOR, Benchling*\
+\*  CHOPCHOP, FlashFry) and off-target search    *\
+\*  engines (Cas-OFFinder, BWA-based).            *\
+\*                                                *\
+\*  WHERE COMPUTATION PLAYS IN:                   *\
+\*                                                *\
+\*  1. Guide design: Paste a gene/exon sequence   *\
+\*     into CRISPOR/Benchling. The tool finds     *\
+\*     all 20-mers adjacent to a PAM (NGG for     *\
+\*     SpCas9), scores each for cutting efficiency *\
+\*     using ML models (Rule Set 2, CRISPRscan,   *\
+\*     TIGER), and ranks them.                    *\
+\*                                                *\
+\*  2. Off-target search: For each candidate      *\
+\*     guide, search the entire 3-billion-base    *\
+\*     genome for every locus within N mismatches  *\
+\*     (typically 0-4). Cas-OFFinder uses GPU-    *\
+\*     accelerated exact enumeration; FlashFry    *\
+\*     pre-indexes all PAM-adjacent sites.         *\
+\*     Cost: minutes (GPU) to hours (CPU, 4+ mm). *\
+\*                                                *\
+\*  3. Off-target scoring: Each hit is scored by  *\
+\*     CFD (Cutting Frequency Determination) or   *\
+\*     MIT specificity score — position-weighted   *\
+\*     mismatch penalty matrices from empirical    *\
+\*     cutting data. Aggregate = 100/(100+sum).   *\
+\*                                                *\
+\*  4. Post-editing: CRISPResso2 takes FASTQ      *\
+\*     reads + reference amplicon, aligns with     *\
+\*     Needleman-Wunsch, quantifies indel          *\
+\*     frequencies, classifies outcomes (NHEJ,     *\
+\*     HDR, unmodified). GUIDE-seq maps genome-   *\
+\*     wide off-target integration sites.          *\
+\*                                                *\
+\*  The Shen types below make the computational   *\
+\*  quality gates into proof obligations:          *\
+\*  - Efficiency score must exceed threshold       *\
+\*  - Off-target search must be complete           *\
+\*  - Reference genome must match cell line        *\
+\*  - Post-edit quantification must confirm edit   *\
+\* ============================================= *\
+
+\* --- On-target efficiency scoring --- *\
+\* ML models: Rule Set 2 (Doench 2016), CRISPRscan, TIGER (2023) *\
+\* These predict cutting efficiency from sequence features *\
+\* R-squared ~0.3-0.5 against actual cutting — imperfect but useful *\
+
+(datatype scoring-model
+  X : string;
+  (element? X [rule-set-2 crisprscan tiger deepcrispr azimuth]) : verified;
+  ==========================================================================
+  X : scoring-model;)
+
+(datatype efficiency-score
+  X : number;
+  (>= X 0) : verified;
+  (<= X 100) : verified;
+  =======================
+  X : efficiency-score;)
+
+(datatype efficiency-threshold
+  X : number;
+  (> X 0) : verified;
+  (<= X 100) : verified;
+  =======================
+  X : efficiency-threshold;)
+
+\* Proof that guide efficiency exceeds the design threshold *\
+(datatype efficiency-sufficient
+  Guide : guide-rna;
+  Model : scoring-model;
+  Score : efficiency-score;
+  Threshold : efficiency-threshold;
+  (>= Score Threshold) : verified;
+  ==================================
+  [Guide Model Score Threshold] : efficiency-sufficient;)
+
+\* --- Off-target search completeness --- *\
+\* Must search the full genome, not just a subset *\
+\* Cas-OFFinder or FlashFry with specified mismatch count *\
+
+(datatype search-tool
+  X : string;
+  (element? X [cas-offinder flashfry bowtie crispor-builtin benchling]) : verified;
+  =================================================================================
+  X : search-tool;)
+
+(datatype mismatch-tolerance
+  X : number;
+  (>= X 0) : verified;
+  (<= X 6) : verified;
+  =====================
+  X : mismatch-tolerance;)
+
+(datatype genome-build
+  X : string;
+  (element? X [hg38 hg19 mm10 mm39 danRer11 sacCer3]) : verified;
+  ================================================================
+  X : genome-build;)
+
+(datatype search-complete
+  Tool : search-tool;
+  Mismatches : mismatch-tolerance;
+  Genome : genome-build;
+  SitesFound : number;
+  (>= SitesFound 0) : verified;
+  (>= Mismatches 3) : verified;
+  ================================
+  [Tool Mismatches Genome SitesFound] : search-complete;)
+
+\* --- CFD / MIT scoring of each off-target hit --- *\
+\* CFD (Doench 2016): position × substitution matrix *\
+\* MIT (Hsu 2013): position-weighted mismatch penalty *\
+
+(datatype ot-scoring-method
+  X : string;
+  (element? X [cfd mit-specificity crispor-aggregate]) : verified;
+  ================================================================
+  X : ot-scoring-method;)
+
+(datatype ot-aggregate-score
+  Method : ot-scoring-method;
+  Score : specificity-score;
+  Guide : guide-rna;
+  Search : search-complete;
+  ==========================
+  [Method Score Guide Search] : ot-aggregate-score;)
+
+\* --- Reference genome match --- *\
+\* If the cell line has SNPs at the target, the guide may not match *\
+\* This is a common failure mode: design for hg38, cell line has a SNP *\
+
+(datatype reference-verified
+  Genome : genome-build;
+  CellLine : cell-type;
+  TargetSequenced : boolean;
+  SequenceMatches : boolean;
+  (= TargetSequenced true) : verified;
+  (= SequenceMatches true) : verified;
+  ======================================
+  [Genome CellLine TargetSequenced SequenceMatches] : reference-verified;)
+
+\* --- Post-editing computational analysis (CRISPResso2) --- *\
+\* Takes FASTQ reads + reference amplicon, quantifies editing *\
+
+(datatype analysis-tool
+  X : string;
+  (element? X [crispresso2 crispresso1 ampliCan ice]) : verified;
+  ===============================================================
+  X : analysis-tool;)
+
+(datatype read-count
+  X : number;
+  (> X 0) : verified;
+  ====================
+  X : read-count;)
+
+(datatype read-depth-sufficient
+  Reads : read-count;
+  MinDepth : read-count;
+  (>= Reads MinDepth) : verified;
+  ================================
+  [Reads MinDepth] : read-depth-sufficient;)
+
+\* Genome-wide off-target detection (empirical, not computational prediction) *\
+(datatype genome-wide-ot-method
+  X : string;
+  (element? X [guide-seq circle-seq discover-seq site-seq]) : verified;
+  =====================================================================
+  X : genome-wide-ot-method;)
+
+\* --- Computationally scored guide: ready for ordering --- *\
+\* This is the complete computational proof before wet lab begins *\
+
+(datatype guide-computationally-validated
+  Guide : guide-rna;
+  Efficiency : efficiency-sufficient;
+  OtScore : ot-aggregate-score;
+  RefMatch : reference-verified;
+  ================================
+  [Guide Efficiency OtScore RefMatch] : guide-computationally-validated;)
+
 \* --- Edit specification: guide + edit type + safety --- *\
 (datatype edit-spec
-  Guide : guide-rna;
+  Guide : guide-computationally-validated;
   Type : edit-type;
   OffTargetSafety : off-target-safe;
   ====================================
