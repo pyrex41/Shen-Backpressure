@@ -1,6 +1,6 @@
 # Scaffolded Examples for New Directions
 
-This directory contains starter scaffolds for exploring the directions outlined in `heavy_analysis.md`. Each subfolder includes a `DEMO_START_PROMPT.md` with:
+This directory contains starter scaffolds for exploring the directions outlined in `heavy_analysis.md`. Each subfolder includes a `PROMPT.md` with:
 
 - Rhetorical framing of usefulness
 - Specific invariants and domain
@@ -10,9 +10,9 @@ This directory contains starter scaffolds for exploring the directions outlined 
 
 ## Scaffolds Created:
 
-1. **shen-hono-example/** - Hono.js (recommended for JS perf/flexibility)
-2. **shen-fastapi-example/** - FastAPI (productivity-focused Python comparison)
-3. **shen-rust-axum-example/** - Rust/Axum for maximum speed and safety
+1. **shen-hono/** - Hono.js (recommended for JS perf/flexibility)
+2. **shen-fastapi/** - FastAPI (productivity-focused Python comparison)
+3. **shen-rust-axum/** - Rust/Axum for maximum speed and safety
 4. **shen-go-advanced/** - Go with advanced backpressure and concurrency proofs
 
 ## Next Steps (Persuasive Narrative Structure):
@@ -26,4 +26,4 @@ These examples collectively tell a compelling story: *One formal specification l
 
 This fully opens the box of options as requested, moving beyond past suggestions into comprehensive exploration. Each prompt is crafted to flesh out both technical depth and practical value.
 
-Run `ls -R demo/` to see the structure. Extend by copying patterns from `demo/order-state-machine/` and `demo/shen-web-tools/`.
+Run `ls -R examples/` to see the structure. Extend by copying patterns from `examples/order-state-machine/` and `examples/shen-web-tools/`.
