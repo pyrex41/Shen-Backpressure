@@ -43,7 +43,7 @@ Unknown users must go through the prompt flow first (`prompt-required` → `prof
 ## Running
 
 ```bash
-cd demo/email_crud
+cd examples/email-crud
 go build -o server ./cmd/server
 ./server
 # → http://localhost:8080

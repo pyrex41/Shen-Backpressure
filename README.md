@@ -131,12 +131,22 @@ The LLM cannot bypass this — `Amount{v: 50}` won't compile (unexported `v`), `
 | Proof chain (`Check : balance-checked`) | `struct{ tx, check }` + accessors | `NewSafeTransfer(Transaction, BalanceChecked) SafeTransfer` |
 | Sum type (multiple blocks → same conclusion) | Go interface + concrete structs | `AuthenticatedPrincipal` = `HumanPrincipal \| ServicePrincipal` |
 
-## Demos
+## Examples
 
-- **[`demo/payment/`](demo/payment/)** — Payment processor with balance invariants
-- **[`demo/email_crud/`](demo/email_crud/)** — Personalized email campaigns with demographic-based copy
+- **[`examples/payment/`](examples/payment/)** — Payment processor with balance invariants
+- **[`examples/email-crud/`](examples/email-crud/)** — Personalized email campaigns with demographic-based copy
+- **[`examples/multi-tenant-api/`](examples/multi-tenant-api/)** — Cross-tenant access prevention via proof chains
+- **[`examples/dosage-calculator/`](examples/dosage-calculator/)** — Clinical dosage with recursive drug interaction checks
+- **[`examples/shen-web-tools/`](examples/shen-web-tools/)** — Research pipeline with grounded-source enforcement (SBCL/Shen)
+- **[`examples/order-state-machine/`](examples/order-state-machine/)** — State machine with deadlock freedom as a type property
+- **[`examples/llm-hallucination-guard/`](examples/llm-hallucination-guard/)** — Closed enumerations rejecting LLM-hallucinated output
+- **[`examples/pipeline-state-machine/`](examples/pipeline-state-machine/)** — Stage-by-stage pipeline where skipping a stage is a compile error
+- **[`examples/category-showcase/`](examples/category-showcase/)** — All six shengen categories in one spec
+- **[`examples/polyglot-comparison/`](examples/polyglot-comparison/)** — Same spec, five language outputs side by side
+- **[`examples/sum-type-showcase/`](examples/sum-type-showcase/)** — Sum types with closed variant enforcement (Go + TypeScript)
+- **[`examples/relational-constraints/`](examples/relational-constraints/)** — Cross-type field equality invariants
 
-Reference guard type output in [`examples/`](examples/).
+Polyglot framework starters: [`shen-hono/`](examples/shen-hono/), [`shen-fastapi/`](examples/shen-fastapi/), [`shen-rust-axum/`](examples/shen-rust-axum/), [`shen-go-api/`](examples/shen-go-api/), [`shen-go-advanced/`](examples/shen-go-advanced/), [`shen-prolog-ui/`](examples/shen-prolog-ui/).
 
 ## Project Structure
 
@@ -146,8 +156,7 @@ sb/                      SKM bundle
   commands/              /sb:ralph-scaffold, /sb:setup, /sb:init, /sb:loop
   skills/                Auto-activated skill description
   AGENT_PROMPT.md        Reference manual for inner LLM harness
-examples/                Reference shengen output for each domain
-demo/                    Working demo projects
+examples/                Working examples and demo projects
 ```
 
 ## Supported Harnesses

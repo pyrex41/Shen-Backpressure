@@ -11,13 +11,13 @@ Demonstrates Shen-Backpressure with a payment processor domain.
 ```bash
 git clone https://github.com/tiancaiamao/shen-go /tmp/shen-go
 cd /tmp/shen-go && GOTOOLCHAIN=local make shen
-cp shen ../../demo/payment/bin/
+cp shen ../../examples/payment/bin/
 ```
 
 ### 2. Run
 
 ```bash
-cd demo/payment
+cd examples/payment
 
 # Build everything and run all gates
 make all
