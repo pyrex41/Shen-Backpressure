@@ -1,0 +1,12 @@
+apiVersion: shenplane.io/v1
+kind: BucketClaim
+metadata:
+  name: audit-logs
+  namespace: compliance
+spec:
+  access: private
+  region: us-east-1
+  tags:
+    team: security
+    costCenter: compliance
+    environment: production
