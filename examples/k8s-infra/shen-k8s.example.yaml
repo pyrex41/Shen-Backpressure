@@ -1,0 +1,86 @@
+# shen-k8s.yaml — Configuration for the Shen K8s infrastructure scanner.
+# Drop this in your repo root. All paths are relative to repo root.
+# Every section is optional — omit what you don't use.
+
+spec: shen/specs/core.shen
+
+sources:
+  argo:
+    # Argo Application / ApplicationSet YAMLs
+    applications:
+      - argocd/apps/**/*.yaml
+      - argocd/appsets/**/*.yaml
+    # Manifests that Argo will sync (raw, Helm-rendered, or Kustomize output)
+    manifests:
+      - manifests/**/*.yaml
+      - helm/rendered/**/*.yaml
+
+  crossplane:
+    xrds:
+      - crossplane/xrds/**/*.yaml
+    compositions:
+      - crossplane/compositions/**/*.yaml
+    claims:
+      - crossplane/claims/**/*.yaml
+      - teams/*/claims/**/*.yaml          # multi-team layout
+    provider_configs:
+      - crossplane/provider-configs/**/*.yaml
+
+  rollouts:
+    - rollouts/**/*.yaml
+    - apps/*/rollout.yaml
+
+  workflows:
+    - workflows/**/*.yaml
+    - pipelines/**/*.yaml
+
+# Known operator mutations — fields that get modified after apply.
+# The scanner checks each has a matching ignoreDifferences rule.
+known_mutations:
+  - operator: cert-manager
+    fields:
+      - spec.tls.certificate
+      - metadata.annotations.cert-manager.io/issuer
+  - operator: istio-sidecar-injector
+    fields:
+      - metadata.labels.istio.io/rev
+      - metadata.annotations.sidecar.istio.io/status
+  - operator: kube-proxy
+    fields:
+      - metadata.annotations.kubectl.kubernetes.io/last-applied-configuration
+
+# Ingress traffic-splitting capabilities
+ingress_capabilities:
+  istio:       { weighted_routing: true }
+  nginx:       { weighted_routing: true }   # requires canary annotations
+  traefik:     { weighted_routing: true }
+  alb:         { weighted_routing: true }
+  contour:     { weighted_routing: true }
+  ambassador:  { weighted_routing: true }
+
+# Optional: check live cluster state (credential expiry, health status)
+live_cluster:
+  enabled: false
+  kubeconfig: ~/.kube/config
+  context: production
+
+# Optional: schema hints for MR types not auto-discoverable
+schema_hints:
+  rds.aws.upbound.io/v1beta1/Instance:
+    required: [region, engine, instanceClass, allocatedStorage]
+    fields:
+      - region
+      - engine
+      - instanceClass
+      - allocatedStorage
+      - storageType
+      - storageEncrypted
+      - publiclyAccessible
+      - vpcSecurityGroupIds
+      - dbSubnetGroupName
+  s3.aws.upbound.io/v1beta1/Bucket:
+    required: [region]
+    fields:
+      - region
+      - acl
+      - tags

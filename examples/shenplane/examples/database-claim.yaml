@@ -1,0 +1,21 @@
+# A user writes this. That's it.
+# ShenPlane validates it against the Shen spec at admission time.
+# If it passes, the controller provisions:
+#   RDS instance + subnet group + security group + IAM role
+# All encrypted, private-networked, tagged, least-privilege.
+# Invalid Claims are rejected with proof-derived error messages.
+
+apiVersion: shenplane.io/v1
+kind: DatabaseClaim
+metadata:
+  name: prod-db
+  namespace: payments
+spec:
+  engine: postgres
+  size: large
+  storageGB: 500
+  region: us-east-1
+  tags:
+    team: payments
+    costCenter: eng-platform
+    environment: production

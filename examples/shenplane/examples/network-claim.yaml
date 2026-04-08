@@ -1,0 +1,13 @@
+apiVersion: shenplane.io/v1
+kind: NetworkClaim
+metadata:
+  name: payments-vpc
+  namespace: payments
+spec:
+  cidr: "10.0.0.0/16"
+  availabilityZones: 3
+  region: us-east-1
+  tags:
+    team: payments
+    costCenter: eng-platform
+    environment: production
