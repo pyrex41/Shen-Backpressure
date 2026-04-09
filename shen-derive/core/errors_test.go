@@ -49,12 +49,17 @@ func TestParseErrorMissingElse(t *testing.T) {
 	}
 }
 
-func TestParseErrorTrailingTokens(t *testing.T) {
-	_, err := Parse("1 2")
-	// This actually parses as App(1, 2) which would be a type error,
-	// not a parse error. That's fine.
+func TestParseTrailingTokens(t *testing.T) {
+	// "1 2" parses as App(1, 2) — valid syntax but a type error.
+	// Verify it parses successfully but fails type checking.
+	term, err := Parse("1 2")
 	if err != nil {
-		t.Logf("parse error (acceptable): %v", err)
+		t.Skipf("parse error (acceptable): %v", err)
+		return
+	}
+	_, err = CheckTerm(term)
+	if err == nil {
+		t.Error("expected type error for applying Int to Int")
 	}
 }
 

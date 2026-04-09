@@ -14,6 +14,7 @@ package payment_derived
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -354,16 +355,17 @@ func Processable(b0 int, txs []int) bool {
 	transcript.WriteString("The efficient Go implementation is equivalent to the naive specification.\n")
 	transcript.WriteString("Each step is justified by a named algebraic law with discharged side conditions.\n")
 
-	// Write transcript file
-	transcriptPath := "derivation.txt"
+	// Write transcript and generated Go to temp dir for inspection
+	tmpDir := t.TempDir()
+	transcriptPath := filepath.Join(tmpDir, "derivation.txt")
 	if err := os.WriteFile(transcriptPath, []byte(transcript.String()), 0644); err != nil {
 		t.Fatalf("write transcript: %v", err)
 	}
 	t.Logf("Derivation transcript written to %s", transcriptPath)
 	t.Logf("\n%s", transcript.String())
 
-	// Write the generated Go file for inspection
-	if err := os.WriteFile("processable.go", []byte(goCode), 0644); err != nil {
+	goPath := filepath.Join(tmpDir, "processable.go")
+	if err := os.WriteFile(goPath, []byte(goCode), 0644); err != nil {
 		t.Fatalf("write go: %v", err)
 	}
 }

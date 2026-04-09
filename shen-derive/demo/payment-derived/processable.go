@@ -4,7 +4,7 @@
 // Via: scanl-fold fusion (Bird, Algebra of Programming, §3.1)
 // Side conditions discharged by Shen tc+ and empirical testing.
 
-package derived
+package payment_derived
 
 // Processable checks whether all running balances remain non-negative
 // when applying a sequence of transaction amounts to an initial balance.

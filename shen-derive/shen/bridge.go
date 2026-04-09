@@ -94,17 +94,21 @@ func EmitObligation(cond laws.InstantiatedCondition) string {
 	return b.String()
 }
 
+// shenEmitter holds mutable state for a single Shen emission pass.
+type shenEmitter struct {
+	lambdaCounter int
+}
+
 // termToShen translates a core.Term to a Shen s-expression string.
 // It also returns any auxiliary (define ...) blocks needed for lambdas.
 func termToShen(t core.Term, prefix string) (string, []string) {
+	e := &shenEmitter{}
 	var defs []string
-	s := termToShenInner(t, prefix, &defs, 0)
+	s := e.termToShenInner(t, prefix, &defs, 0)
 	return s, defs
 }
 
-var lambdaCounter int
-
-func termToShenInner(t core.Term, prefix string, defs *[]string, depth int) string {
+func (e *shenEmitter) termToShenInner(t core.Term, prefix string, defs *[]string, depth int) string {
 	switch t := t.(type) {
 	case *core.Var:
 		return shenVarName(t.Name)
@@ -130,22 +134,22 @@ func termToShenInner(t core.Term, prefix string, defs *[]string, depth int) stri
 		if inner, ok := t.Func.(*core.App); ok {
 			if p, ok := inner.Func.(*core.Prim); ok {
 				if shenBinOp(p.Op) != "" {
-					lhs := termToShenInner(inner.Arg, prefix, defs, depth)
-					rhs := termToShenInner(t.Arg, prefix, defs, depth)
+					lhs := e.termToShenInner(inner.Arg, prefix, defs, depth)
+					rhs := e.termToShenInner(t.Arg, prefix, defs, depth)
 					return fmt.Sprintf("(%s %s %s)", shenBinOp(p.Op), lhs, rhs)
 				}
 			}
 		}
 		// General application
-		fn := termToShenInner(t.Func, prefix, defs, depth)
-		arg := termToShenInner(t.Arg, prefix, defs, depth)
+		fn := e.termToShenInner(t.Func, prefix, defs, depth)
+		arg := e.termToShenInner(t.Arg, prefix, defs, depth)
 		return fmt.Sprintf("(%s %s)", fn, arg)
 
 	case *core.Lam:
 		// Generate a named (define ...) for this lambda with type signature.
 		// Shen requires {type --> type --> ...} when (tc +) is active.
-		lambdaCounter++
-		name := fmt.Sprintf("%s-lam%d", prefix, lambdaCounter)
+		e.lambdaCounter++
+		name := fmt.Sprintf("%s-lam%d", prefix, e.lambdaCounter)
 
 		// Collect all parameters
 		params := []string{t.Param}
@@ -159,7 +163,7 @@ func termToShenInner(t core.Term, prefix string, defs *[]string, depth int) stri
 			}
 		}
 
-		bodyStr := termToShenInner(body, prefix, defs, depth+1)
+		bodyStr := e.termToShenInner(body, prefix, defs, depth+1)
 		shenParams := make([]string, len(params))
 		for i, p := range params {
 			shenParams[i] = shenVarName(p)
@@ -179,9 +183,9 @@ func termToShenInner(t core.Term, prefix string, defs *[]string, depth int) stri
 		return name
 
 	case *core.IfExpr:
-		cond := termToShenInner(t.Cond, prefix, defs, depth)
-		then := termToShenInner(t.Then, prefix, defs, depth)
-		els := termToShenInner(t.Else, prefix, defs, depth)
+		cond := e.termToShenInner(t.Cond, prefix, defs, depth)
+		then := e.termToShenInner(t.Then, prefix, defs, depth)
+		els := e.termToShenInner(t.Else, prefix, defs, depth)
 		return fmt.Sprintf("(if %s %s %s)", cond, then, els)
 
 	case *core.ListLit:
@@ -189,19 +193,19 @@ func termToShenInner(t core.Term, prefix string, defs *[]string, depth int) stri
 			return "[]"
 		}
 		elems := make([]string, len(t.Elems))
-		for i, e := range t.Elems {
-			elems[i] = termToShenInner(e, prefix, defs, depth)
+		for i, el := range t.Elems {
+			elems[i] = e.termToShenInner(el, prefix, defs, depth)
 		}
 		return "[" + strings.Join(elems, " ") + "]"
 
 	case *core.TupleLit:
-		fst := termToShenInner(t.Fst, prefix, defs, depth)
-		snd := termToShenInner(t.Snd, prefix, defs, depth)
+		fst := e.termToShenInner(t.Fst, prefix, defs, depth)
+		snd := e.termToShenInner(t.Snd, prefix, defs, depth)
 		return fmt.Sprintf("(@p %s %s)", fst, snd)
 
 	case *core.Let:
-		val := termToShenInner(t.Bound, prefix, defs, depth)
-		body := termToShenInner(t.Body, prefix, defs, depth)
+		val := e.termToShenInner(t.Bound, prefix, defs, depth)
+		body := e.termToShenInner(t.Body, prefix, defs, depth)
 		return fmt.Sprintf("(let %s %s %s)", shenVarName(t.Name), val, body)
 	}
 
@@ -442,9 +446,6 @@ func DischargeEmpirical(cond laws.InstantiatedCondition) DischargeResult {
 }
 
 func dischargeShen(cond laws.InstantiatedCondition, shenBin string) DischargeResult {
-	// Reset the lambda counter for deterministic output
-	lambdaCounter = 0
-
 	// Build the spec file content
 	spec := ShenPreamble() + "\n" + EmitObligation(cond)
 

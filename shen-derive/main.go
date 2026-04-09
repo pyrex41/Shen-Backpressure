@@ -21,6 +21,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/pyrex41/Shen-Backpressure/shen-derive/codegen"
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/core"
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/laws"
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/shen"
@@ -226,10 +227,17 @@ func cmdLower(args []string) {
 		fmt.Fprintf(os.Stderr, "parse error: %v\n", err)
 		os.Exit(1)
 	}
-
-	// For the CLI, just show the lowered expression
-	fmt.Println(core.PrettyPrint(term))
-	fmt.Fprintln(os.Stderr, "(full Go lowering requires type information; use the Go API for complete codegen)")
+	ty, err := core.CheckTerm(term)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "type error: %v\n", err)
+		os.Exit(1)
+	}
+	goCode, err := codegen.LowerToGo(term, ty, "Derived", "derived")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "lower error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Print(goCode)
 }
 
 func cmdLaws() {
