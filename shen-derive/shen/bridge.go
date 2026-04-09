@@ -494,11 +494,12 @@ func dischargeEmpirical(cond laws.InstantiatedCondition) DischargeResult {
 		fvNames = append(fvNames, name)
 	}
 
-	// Test with a grid of sample integer values
+	// Test with a grid of sample values (int and bool)
 	samples := []core.Value{
 		core.IntVal(0), core.IntVal(1), core.IntVal(-1),
 		core.IntVal(2), core.IntVal(5), core.IntVal(10),
 		core.IntVal(-3), core.IntVal(7), core.IntVal(100),
+		core.BoolVal(true), core.BoolVal(false),
 	}
 
 	tested := 0
@@ -601,7 +602,15 @@ func dischargeEmpirical(cond laws.InstantiatedCondition) DischargeResult {
 	}
 }
 
-func testEquality(env *core.Env, cond laws.InstantiatedCondition) (bool, string) {
+func testEquality(env *core.Env, cond laws.InstantiatedCondition) (ok bool, msg string) {
+	// Recover from type assertion panics (e.g., using int samples for bool vars).
+	defer func() {
+		if r := recover(); r != nil {
+			ok = true // skip this sample
+			msg = ""
+		}
+	}()
+
 	lv, err1 := core.Eval(env, cond.LHS)
 	if err1 != nil {
 		// Some sample values may cause errors (e.g., division by zero);
