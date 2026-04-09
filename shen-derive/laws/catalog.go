@@ -12,6 +12,7 @@ func Catalog() []*Rule {
 		MapFusion(),
 		MapFoldrFusion(),
 		FoldrFusion(),
+		AllScanlFusion(),
 	}
 }
 
@@ -185,6 +186,76 @@ func FoldrFusion() *Rule {
 	}
 }
 
+// --- all-scanl-fusion ---
+//
+// Law:
+//   foldr (\x acc -> p x && acc) True (scanl f e xs)
+//   =
+//   snd (foldl (\state x ->
+//         let next = f (fst state) x
+//         in (next, snd state && p next))
+//       (e, p e) xs)
+//
+// This is the running-invariant version of fusing `all p` with `scanl f e`.
+// It preserves the initial-element check from `scanl`, so the accumulator
+// starts at `(e, p e)` rather than `(e, True)`.
+//
+// Source: derived from the definitions of `all`, `scanl`, and `foldl`, in the
+// spirit of Bird-Meertens fusion.
+func AllScanlFusion() *Rule {
+	p := MetaVar("?p")
+	f := MetaVar("?f")
+	e := MetaVar("?e")
+	xs := MetaVar("?xs")
+
+	allStep := core.MkLam("x", nil,
+		core.MkLam("acc", nil,
+			core.MkApps(core.MkPrim(core.PrimAnd),
+				core.MkApp(p, core.MkVar("x")),
+				core.MkVar("acc"),
+			),
+		),
+	)
+
+	lhs := core.MkApp(
+		core.MkApps(core.MkPrim(core.PrimFoldr), allStep, core.MkBool(true)),
+		core.MkApps(core.MkPrim(core.PrimScanl), f, e, xs),
+	)
+
+	step := core.MkLam("state", nil,
+		core.MkLam("x", nil,
+			core.MkLet("next",
+				core.MkApps(f,
+					core.MkApp(core.MkPrim(core.PrimFst), core.MkVar("state")),
+					core.MkVar("x"),
+				),
+				core.MkTuple(
+					core.MkVar("next"),
+					core.MkApps(core.MkPrim(core.PrimAnd),
+						core.MkApp(core.MkPrim(core.PrimSnd), core.MkVar("state")),
+						core.MkApp(p, core.MkVar("next")),
+					),
+				),
+			),
+		),
+	)
+
+	rhs := core.MkApp(core.MkPrim(core.PrimSnd),
+		core.MkApps(core.MkPrim(core.PrimFoldl),
+			step,
+			core.MkTuple(e, core.MkApp(p, e)),
+			xs,
+		),
+	)
+
+	return &Rule{
+		Name:     "all-scanl-fusion",
+		LHS:      lhs,
+		RHS:      rhs,
+		Citation: `Derived from the definitions of all, scanl, and foldl; Bird-Meertens style fusion`,
+	}
+}
+
 // RewriteWithSupplementalBindings applies a rule at a path, with additional
 // bindings for metavariables not bound by matching (e.g., ?h in foldr-fusion).
 func RewriteWithSupplementalBindings(term core.Term, rule *Rule, path Path, extra Bindings) (*RewriteResult, error) {
@@ -201,6 +272,15 @@ func RewriteWithSupplementalBindings(term core.Term, rule *Rule, path Path, extr
 
 	// Merge supplemental bindings
 	for k, v := range extra {
+		if !IsMetaVar(k) {
+			return nil, fmt.Errorf("rewrite %s: supplemental binding %q is not a metavariable", rule.Name, k)
+		}
+		if _, ok := bindings[k]; ok {
+			return nil, fmt.Errorf("rewrite %s: supplemental binding for %s would override an LHS match", rule.Name, k)
+		}
+		if !ruleMentionsMetaVar(rule, k) {
+			return nil, fmt.Errorf("rewrite %s: supplemental binding %s is not used by the rule", rule.Name, k)
+		}
 		bindings[k] = v
 	}
 
