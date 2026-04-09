@@ -219,6 +219,42 @@ Verify either runtime works with `shen-check.sh`:
 
 To force a specific backend: `SHEN=/path/to/binary ./bin/shen-check.sh`.
 
+## shen-guard vs shen-derive: Per-Function Choice
+
+The project provides two complementary tools. Pick per-function based on what fits:
+
+| | **shen-guard** (existing) | **shen-derive** (new) |
+|---|---|---|
+| **Best for** | I/O, mutation, glue code | Fold-shaped pure computations |
+| **How it works** | Shen spec → shengen → opaque guard types → constructor validation | Naive spec → algebraic rewrites → side conditions discharged by Shen → Go |
+| **Artifact** | Generated Go types with validated constructors | Derivation transcript + generated Go function |
+| **Proof method** | Shen sequent calculus proves type rules; Go compiler enforces them | Named algebraic laws (Bird-Meertens) with side conditions discharged by Shen tc+ |
+| **When to use** | Code that creates, validates, or passes around domain values | Code that folds, scans, maps, or filters sequences |
+
+Both share the same Shen spec format and five-gate pipeline.
+
+### shen-derive quick start
+
+```bash
+cd shen-derive && go build -o shen-derive .
+
+# Interactive evaluator
+./shen-derive repl
+
+# Evaluate an expression
+./shen-derive eval 'foldr (+) 0 [1, 2, 3, 4, 5]'
+# → 15
+
+# List available rewrite laws
+./shen-derive laws
+
+# Type-check
+./shen-derive check '\(x : Int) -> x + 1'
+# → Int -> Int
+```
+
+See `shen-derive/demo/payment-derived/` for a full derivation of the payment processor's balance-checking logic, including the derivation transcript.
+
 ## Design Decisions
 
 - **Why shengen?** Shen proves invariants deductively but doesn't generate Go code. shengen bridges the gap — the formal spec becomes compile-time enforcement via opaque types.
