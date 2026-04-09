@@ -390,6 +390,10 @@ Medium.
 
 Prefer shape recognition such as `map f (filter p xs)` and `filter p (map f xs)` over any attempt at broad optimizer-style normalization.
 
+### Status
+
+Closed. Both target shapes are now supported end-to-end with focused rejection tests for unsupported nearby nested pipelines.
+
 ## Phase 11: Add Flattening Support For `concat-map`
 
 ### Objective

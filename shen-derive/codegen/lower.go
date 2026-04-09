@@ -167,7 +167,10 @@ func (cg *codegen) genFunc(term core.Term, ty core.Type, name string) (string, e
 	retTy := GoType(curTy)
 
 	// Generate body
-	body := cg.body(curTerm, curTy)
+	body, err := cg.body(curTerm, curTy)
+	if err != nil {
+		return "", err
+	}
 
 	// Assemble function
 	var buf strings.Builder
@@ -186,25 +189,31 @@ func (cg *codegen) genFunc(term core.Term, ty core.Type, name string) (string, e
 
 // body generates the statements inside a function body.
 // It tries to recognize combinator patterns and emit efficient loops.
-func (cg *codegen) body(term core.Term, retTy core.Type) string {
+func (cg *codegen) body(term core.Term, retTy core.Type) (string, error) {
 	if s, ok := cg.bodyProjectedFoldl(term); ok {
-		return s
+		return s, nil
 	}
 	// Try combinators that produce clean loop code
+	if s, ok := cg.bodyMapAfterFilter(term, retTy); ok {
+		return s, nil
+	}
+	if s, ok := cg.bodyFilterAfterMap(term, retTy); ok {
+		return s, nil
+	}
 	if s, ok := cg.bodyFoldr(term, retTy); ok {
-		return s
+		return s, nil
 	}
 	if s, ok := cg.bodyFoldl(term, retTy); ok {
-		return s
+		return s, nil
 	}
 	if s, ok := cg.bodyMap(term, retTy); ok {
-		return s
+		return s, nil
 	}
 	if s, ok := cg.bodyFilter(term, retTy); ok {
-		return s
+		return s, nil
 	}
 	if s, ok := cg.bodyScanl(term, retTy); ok {
-		return s
+		return s, nil
 	}
 	// If-then-else at top level
 	if ifE, ok := term.(*core.IfExpr); ok {
@@ -214,8 +223,11 @@ func (cg *codegen) body(term core.Term, retTy core.Type) string {
 	if letE, ok := term.(*core.Let); ok {
 		return cg.bodyLet(letE, retTy)
 	}
+	if isUnsupportedNestedPipeline(term) {
+		return "", fmt.Errorf("lower: unsupported nested pipeline shape %s", core.PrettyPrint(term))
+	}
 	// Default: return expression
-	return "\treturn " + cg.expr(term) + "\n"
+	return "\treturn " + cg.expr(term) + "\n", nil
 }
 
 // --- Combinator body generators ---
@@ -363,6 +375,9 @@ func (cg *codegen) bodyMap(term core.Term, retTy core.Type) (string, bool) {
 	if !ok || !isPrim(head, core.PrimMap) {
 		return "", false
 	}
+	if isNestedListProducer(list) {
+		return "", false
+	}
 
 	xs := cg.fresh("xs")
 	result := cg.fresh("result")
@@ -392,6 +407,9 @@ func (cg *codegen) bodyMap(term core.Term, retTy core.Type) (string, bool) {
 func (cg *codegen) bodyFilter(term core.Term, retTy core.Type) (string, bool) {
 	head, pred, list, ok := matchApp2(term)
 	if !ok || !isPrim(head, core.PrimFilter) {
+		return "", false
+	}
+	if isNestedListProducer(list) {
 		return "", false
 	}
 
@@ -455,21 +473,89 @@ func (cg *codegen) bodyScanl(term core.Term, retTy core.Type) (string, bool) {
 	return buf.String(), true
 }
 
-func (cg *codegen) bodyIf(ifE *core.IfExpr, retTy core.Type) string {
+func (cg *codegen) bodyMapAfterFilter(term core.Term, retTy core.Type) (string, bool) {
+	head, fn, inner, ok := matchApp2(term)
+	if !ok || !isPrim(head, core.PrimMap) {
+		return "", false
+	}
+	innerHead, pred, list, ok := matchApp2(inner)
+	if !ok || !isPrim(innerHead, core.PrimFilter) {
+		return "", false
+	}
+
+	xs := cg.fresh("xs")
+	result := cg.fresh("result")
+	elem := cg.fresh("x")
+	sliceTy := GoType(retTy)
+
 	var buf strings.Builder
-	fmt.Fprintf(&buf, "\tif %s {\n", cg.expr(ifE.Cond))
-	buf.WriteString(cg.body(ifE.Then, retTy))
-	fmt.Fprintf(&buf, "\t} else {\n")
-	buf.WriteString(cg.body(ifE.Else, retTy))
+	fmt.Fprintf(&buf, "\t%s := %s\n", xs, cg.expr(list))
+	fmt.Fprintf(&buf, "\tvar %s %s\n", result, sliceTy)
+	fmt.Fprintf(&buf, "\tfor _, %s := range %s {\n", elem, xs)
+	fmt.Fprintf(&buf, "\t\tif %s {\n", cg.unaryAppliedExpr(pred, elem))
+	fmt.Fprintf(&buf, "\t\t\t%s = append(%s, %s)\n", result, result, cg.unaryAppliedExpr(fn, elem))
+	fmt.Fprintf(&buf, "\t\t}\n")
 	fmt.Fprintf(&buf, "\t}\n")
-	return buf.String()
+	fmt.Fprintf(&buf, "\treturn %s\n", result)
+	return buf.String(), true
 }
 
-func (cg *codegen) bodyLet(letE *core.Let, retTy core.Type) string {
+func (cg *codegen) bodyFilterAfterMap(term core.Term, retTy core.Type) (string, bool) {
+	head, pred, inner, ok := matchApp2(term)
+	if !ok || !isPrim(head, core.PrimFilter) {
+		return "", false
+	}
+	innerHead, fn, list, ok := matchApp2(inner)
+	if !ok || !isPrim(innerHead, core.PrimMap) {
+		return "", false
+	}
+
+	xs := cg.fresh("xs")
+	result := cg.fresh("result")
+	elem := cg.fresh("x")
+	mapped := cg.fresh("mapped")
+	sliceTy := GoType(retTy)
+
+	var buf strings.Builder
+	fmt.Fprintf(&buf, "\t%s := %s\n", xs, cg.expr(list))
+	fmt.Fprintf(&buf, "\tvar %s %s\n", result, sliceTy)
+	fmt.Fprintf(&buf, "\tfor _, %s := range %s {\n", elem, xs)
+	fmt.Fprintf(&buf, "\t\t%s := %s\n", mapped, cg.unaryAppliedExpr(fn, elem))
+	fmt.Fprintf(&buf, "\t\tif %s {\n", cg.unaryAppliedExpr(pred, mapped))
+	fmt.Fprintf(&buf, "\t\t\t%s = append(%s, %s)\n", result, result, mapped)
+	fmt.Fprintf(&buf, "\t\t}\n")
+	fmt.Fprintf(&buf, "\t}\n")
+	fmt.Fprintf(&buf, "\treturn %s\n", result)
+	return buf.String(), true
+}
+
+func (cg *codegen) bodyIf(ifE *core.IfExpr, retTy core.Type) (string, error) {
+	var buf strings.Builder
+	fmt.Fprintf(&buf, "\tif %s {\n", cg.expr(ifE.Cond))
+	thenBody, err := cg.body(ifE.Then, retTy)
+	if err != nil {
+		return "", err
+	}
+	buf.WriteString(thenBody)
+	fmt.Fprintf(&buf, "\t} else {\n")
+	elseBody, err := cg.body(ifE.Else, retTy)
+	if err != nil {
+		return "", err
+	}
+	buf.WriteString(elseBody)
+	fmt.Fprintf(&buf, "\t}\n")
+	return buf.String(), nil
+}
+
+func (cg *codegen) bodyLet(letE *core.Let, retTy core.Type) (string, error) {
 	var buf strings.Builder
 	fmt.Fprintf(&buf, "\t%s := %s\n", goIdent(letE.Name), cg.expr(letE.Bound))
-	buf.WriteString(cg.body(letE.Body, retTy))
-	return buf.String()
+	body, err := cg.body(letE.Body, retTy)
+	if err != nil {
+		return "", err
+	}
+	buf.WriteString(body)
+	return buf.String(), nil
 }
 
 // --- Expression generation ---
@@ -634,6 +720,14 @@ func (cg *codegen) genAssign(buf *strings.Builder, accVar string, bodyTerm core.
 	fmt.Fprintf(buf, "\t\t%s = %s\n", accVar, cg.exprSubst(bodyTerm, subst))
 }
 
+func (cg *codegen) unaryAppliedExpr(fn core.Term, argName string) string {
+	if body, paramVar, ok := uncurryLam1(fn); ok {
+		return cg.exprSubst(body, map[string]string{goIdent(paramVar): argName})
+	}
+	applied := &core.App{Func: fn, Arg: &core.Var{Name: argName}}
+	return cg.expr(applied)
+}
+
 // --- Helpers ---
 
 func uncurryLam2(t core.Term) (body core.Term, param1, param2 string, ok bool) {
@@ -780,4 +874,37 @@ func copySubst(s map[string]string) map[string]string {
 		}
 	}
 	return out
+}
+
+func isUnsupportedNestedPipeline(term core.Term) bool {
+	head, _, inner, ok := matchApp2(term)
+	if !ok {
+		return false
+	}
+	if !isPrim(head, core.PrimMap) && !isPrim(head, core.PrimFilter) {
+		return false
+	}
+	return isNestedListProducer(inner)
+}
+
+func isNestedListProducer(term core.Term) bool {
+	head2, _, _, ok := matchApp2(term)
+	if ok {
+		if p, ok := head2.(*core.Prim); ok {
+			switch p.Op {
+			case core.PrimMap, core.PrimFilter, core.PrimConcat:
+				return true
+			}
+		}
+	}
+	head3, _, _, _, ok := matchApp3(term)
+	if ok {
+		if p, ok := head3.(*core.Prim); ok {
+			switch p.Op {
+			case core.PrimFoldr, core.PrimFoldl, core.PrimScanl:
+				return true
+			}
+		}
+	}
+	return false
 }

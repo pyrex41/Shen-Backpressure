@@ -76,8 +76,8 @@ These are the next targets to add if the goal is to cover the broader 20-30-ish 
 | `prefix-nonzero` | prefix / running-property check | closed in Phase 9 | `none` | yes | `green` | Added as a boolean `scanl` target; confirms running-prefix logic with non-additive accumulators. |
 | `equal-zero-flags` | boolean map/comparison | closed in Phase 9 | `none` | yes | `green` | Added as a direct `map` target over integer equality. |
 | `string-eq-flags` | string equality map | closed in Phase 9 | `none` | yes | `green` | Added as a string-typed `map` target; confirms end-to-end lowering for captured string equality. |
-| `map-after-filter` | nested pipeline | one reusable nested-combinator lowering path | `none` | no | `yellow` | Still waiting on a shared shape-bounded lowering path for nested pipelines. |
-| `filter-after-map` | nested pipeline | same reusable nested-combinator lowering path | `none` | no | `yellow` | Still waiting on the same reusable nested-pipeline lowering extension. |
+| `map-after-filter` | nested pipeline | closed in Phase 10 | `none` | yes | `green` | Added through one bounded nested-pipeline lowering path for `map f (filter p xs)`. Nearby unsupported nested shapes still reject honestly. |
+| `filter-after-map` | nested pipeline | closed in Phase 10 | `none` | yes | `green` | Added through the same shared nested-pipeline lowering extension for `filter p (map f xs)`. |
 
 ### Existing-Language Stretch Target (1)
 This target still fits the current core language, but it likely needs a slightly larger reusable lowering extension than the near-term yellow items.
@@ -102,17 +102,17 @@ Current evidence for the fixed corpus:
 - All core rewrites use named laws from `laws/`.
 - All core targets have checked-in generated Go artifacts and drift checks.
 - The corpus produced one new reusable bug class during execution: lowering generic unary function applications inside `map`/`filter`. It is now covered by the corpus rewrite targets.
-- The main remaining red gap inside the broader current-language universe is still **nested / flattening pipeline lowering** (`map-after-filter`, `filter-after-map`, `concat-map`).
+- The main remaining red gap inside the broader current-language universe is now **flattening / `concat` lowering** (`concat-map`).
 
 ## Expansion Snapshot
 For the broader 32-target universe:
 
 - **20** fixed core targets are `green`
 - **2** appendix targets are already working and honestly proved in the current quantified arithmetic fragment
-- **4** direct expansion targets are now `green`
-- **2** expansion targets remain `yellow`
+- **4** direct expansion targets are `green`
+- **2** nested-pipeline expansion targets are now `green`
 - **1** expansion target is `red` but still within the current core language
 - **3** targets are `red` because they require explicit new primitives
 
 ## Current Read
-For the fixed v1 corpus: **green (engineering-done)**. For the broader planned universe: **26 targets already working**, **2 remaining near-term nested-pipeline additions**, **1 current-language stretch target**, and **3 explicit machinery-growth targets**. **Proof-done** remains limited to the supported arithmetic foldr-fusion fragment plus the newly-added boolean/comparison symbolic slice; unsupported quantified obligations still remain **diagnostic-only**.
+For the fixed v1 corpus: **green (engineering-done)**. For the broader planned universe: **28 targets already working**, **1 current-language stretch target** (`concat-map`), and **3 explicit machinery-growth targets**. **Proof-done** remains limited to the supported arithmetic foldr-fusion fragment plus the newly-added boolean/comparison symbolic slice; unsupported quantified obligations still remain **diagnostic-only**.
