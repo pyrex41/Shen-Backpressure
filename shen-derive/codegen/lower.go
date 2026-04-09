@@ -331,6 +331,8 @@ func (cg *codegen) bodyScanl(term core.Term) (string, bool) {
 
 	if body, accVar, elemVar, ok := uncurryLam2(stepFn); ok {
 		cg.genAssign(&buf, acc, body, goIdent(accVar), acc, goIdent(elemVar), elem)
+	} else if p, ok := stepFn.(*core.Prim); ok && goBinOp(p.Op) != "" {
+		fmt.Fprintf(&buf, "\t\t%s = (%s %s %s)\n", acc, acc, goBinOp(p.Op), elem)
 	} else {
 		fmt.Fprintf(&buf, "\t\t%s = %s(%s)(%s)\n", acc, cg.expr(stepFn), acc, elem)
 	}

@@ -127,6 +127,121 @@ func TestFilterPositive(t *testing.T) {
 `)
 }
 
+// TestLowerScanlRunningSum tests: scanl (+) 0
+func TestLowerScanlRunningSum(t *testing.T) {
+	term := core.MkApps(core.MkPrim(core.PrimScanl),
+		core.MkPrim(core.PrimAdd),
+		core.MkInt(0),
+	)
+	ty := &core.TFun{Param: &core.TList{Elem: &core.TInt{}}, Result: &core.TList{Elem: &core.TInt{}}}
+
+	goCode, err := LowerToGo(term, ty, "RunningSum", "derived")
+	if err != nil {
+		t.Fatalf("LowerToGo: %v", err)
+	}
+	t.Logf("Generated Go:\n%s", goCode)
+
+	compileAndTest(t, goCode, `
+package derived
+
+import (
+	"testing"
+	"reflect"
+)
+
+func TestRunningSum(t *testing.T) {
+	got := RunningSum([]int{1, 2, 3})
+	want := []int{0, 1, 3, 6}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("RunningSum([1,2,3]) = %v, want %v", got, want)
+	}
+	got2 := RunningSum([]int{})
+	want2 := []int{0}
+	if !reflect.DeepEqual(got2, want2) {
+		t.Errorf("RunningSum([]) = %v, want %v", got2, want2)
+	}
+}
+`)
+}
+
+// TestLowerMapSquare tests: map (\x -> x * x)
+func TestLowerMapSquare(t *testing.T) {
+	term := core.MkApp(core.MkPrim(core.PrimMap),
+		core.MkLam("x", &core.TInt{},
+			core.MkApps(core.MkPrim(core.PrimMul), core.MkVar("x"), core.MkVar("x")),
+		),
+	)
+	ty := &core.TFun{Param: &core.TList{Elem: &core.TInt{}}, Result: &core.TList{Elem: &core.TInt{}}}
+
+	goCode, err := LowerToGo(term, ty, "Squares", "derived")
+	if err != nil {
+		t.Fatalf("LowerToGo: %v", err)
+	}
+	t.Logf("Generated Go:\n%s", goCode)
+
+	compileAndTest(t, goCode, `
+package derived
+
+import (
+	"testing"
+	"reflect"
+)
+
+func TestSquares(t *testing.T) {
+	got := Squares([]int{1, 2, 3, 4})
+	want := []int{1, 4, 9, 16}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Squares = %v, want %v", got, want)
+	}
+	got2 := Squares([]int{})
+	if len(got2) != 0 {
+		t.Errorf("Squares([]) = %v, want []", got2)
+	}
+}
+`)
+}
+
+// TestLowerFoldrWithLambdaBody tests a foldr with if-then-else in the step function:
+// foldr (\x acc -> if x > 0 then x + acc else acc) 0  (sum of positives)
+func TestLowerFoldrSumPositives(t *testing.T) {
+	stepFn := core.MkLam("x", &core.TInt{},
+		core.MkLam("acc", &core.TInt{},
+			core.MkIf(
+				core.MkApps(core.MkPrim(core.PrimGt), core.MkVar("x"), core.MkInt(0)),
+				core.MkApps(core.MkPrim(core.PrimAdd), core.MkVar("x"), core.MkVar("acc")),
+				core.MkVar("acc"),
+			),
+		),
+	)
+
+	term := core.MkApps(core.MkPrim(core.PrimFoldr), stepFn, core.MkInt(0))
+	ty := &core.TFun{Param: &core.TList{Elem: &core.TInt{}}, Result: &core.TInt{}}
+
+	goCode, err := LowerToGo(term, ty, "SumPositives", "derived")
+	if err != nil {
+		t.Fatalf("LowerToGo: %v", err)
+	}
+	t.Logf("Generated Go:\n%s", goCode)
+
+	compileAndTest(t, goCode, `
+package derived
+
+import "testing"
+
+func TestSumPositives(t *testing.T) {
+	if got := SumPositives([]int{1, -2, 3, -4, 5}); got != 9 {
+		t.Errorf("SumPositives = %d, want 9", got)
+	}
+	if got := SumPositives([]int{-1, -2}); got != 0 {
+		t.Errorf("SumPositives(all neg) = %d, want 0", got)
+	}
+	if got := SumPositives([]int{}); got != 0 {
+		t.Errorf("SumPositives([]) = %d, want 0", got)
+	}
+}
+`)
+}
+
 // compileAndTest writes Go source + test file to a temp dir, runs go test.
 func compileAndTest(t *testing.T, srcCode, testCode string) {
 	t.Helper()
