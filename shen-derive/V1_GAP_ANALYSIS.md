@@ -72,9 +72,10 @@ This document groups work by **reusable gap** rather than by individual target. 
 **Recommended action**: Treat this as the template for future post-v1 direct targets: real pipeline, checked artifacts, no one-off lowering hacks.
 
 ### 9. Nested-Combinator Lowering (medium risk, 2 unlocks)
-**Why it blocks**: `map-after-filter` and `filter-after-map` are common, valuable next-step examples, but the Go lowerer currently recognizes only top-level `map`, `filter`, `foldr`, `foldl`, projected `foldl`, and `scanl` shapes.
+**Why it blocked**: `map-after-filter` and `filter-after-map` are common, valuable next-step examples, but the Go lowerer originally recognized only top-level `map`, `filter`, `foldr`, `foldl`, projected `foldl`, and `scanl` shapes.
 **Unlocks**: 2 high-value targets and a more honest statement about practical compositional support.
-**Recommended action**: Add one shape-bounded nested lowering path for `map f (filter p xs)` and `filter p (map f xs)`. Do not expand this into a general optimizer.
+**Status**: Closed. One shape-bounded lowering extension now supports `map f (filter p xs)` and `filter p (map f xs)`, with focused tests that nearby unsupported nested shapes still reject honestly.
+**Recommended action**: Use this as the template for future nested support: add one clearly bounded shape at a time, not a general optimizer.
 
 ### 10. Flattening / `concat` Lowering (medium risk, 1 unlock)
 **Why it blocks**: `concat` exists in the core language and evaluator, but flattening is not yet a first-class Go lowering path.
@@ -92,8 +93,7 @@ This document groups work by **reusable gap** rather than by individual target. 
 - **Drop**: Anything that teaches no reusable pattern or requires one-off hacks.
 
 ## Post-v1 Priorities
-- **Near-term**: Expansion harness promotion (7), nested-combinator lowering (9).
-- **Second wave**: Flattening / `concat` lowering (10).
+- **Near-term**: Expansion harness promotion (7), flattening / `concat` lowering (10).
 - **Separate machinery track**: Primitive growth for `zipWith`, `takeWhile`, `dropWhile` (11).
 
 ## Alignment with Core Vision (@PLAN.md / DESIGN.md)

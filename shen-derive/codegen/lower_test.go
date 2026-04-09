@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/core"
@@ -450,6 +451,114 @@ func TestProcessable(t *testing.T) {
 	}
 }
 `)
+}
+
+func TestLowerMapAfterFilter(t *testing.T) {
+	term := core.MkLam("xs", &core.TList{Elem: &core.TInt{}},
+		core.MkApps(core.MkPrim(core.PrimMap),
+			core.MkLam("x", &core.TInt{},
+				core.MkApps(core.MkPrim(core.PrimAdd), core.MkVar("x"), core.MkInt(1)),
+			),
+			core.MkApps(core.MkPrim(core.PrimFilter),
+				core.MkLam("x", &core.TInt{},
+					core.MkApps(core.MkPrim(core.PrimGt), core.MkVar("x"), core.MkInt(0)),
+				),
+				core.MkVar("xs"),
+			),
+		),
+	)
+	ty := &core.TFun{Param: &core.TList{Elem: &core.TInt{}}, Result: &core.TList{Elem: &core.TInt{}}}
+
+	goCode, err := LowerToGo(term, ty, "MapAfterFilter", "derived")
+	if err != nil {
+		t.Fatalf("LowerToGo: %v", err)
+	}
+
+	compileAndTest(t, goCode, `
+package derived
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestMapAfterFilter(t *testing.T) {
+	got := MapAfterFilter([]int{-2, 0, 1, 2, 3})
+	want := []int{2, 3, 4}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if got := MapAfterFilter([]int{-2, 0}); len(got) != 0 {
+		t.Fatalf("expected empty result, got %v", got)
+	}
+}
+`)
+}
+
+func TestLowerFilterAfterMap(t *testing.T) {
+	term := core.MkLam("xs", &core.TList{Elem: &core.TInt{}},
+		core.MkApps(core.MkPrim(core.PrimFilter),
+			core.MkLam("x", &core.TInt{},
+				core.MkApps(core.MkPrim(core.PrimGe), core.MkVar("x"), core.MkInt(0)),
+			),
+			core.MkApps(core.MkPrim(core.PrimMap),
+				core.MkLam("x", &core.TInt{},
+					core.MkApps(core.MkPrim(core.PrimSub), core.MkVar("x"), core.MkInt(1)),
+				),
+				core.MkVar("xs"),
+			),
+		),
+	)
+	ty := &core.TFun{Param: &core.TList{Elem: &core.TInt{}}, Result: &core.TList{Elem: &core.TInt{}}}
+
+	goCode, err := LowerToGo(term, ty, "FilterAfterMap", "derived")
+	if err != nil {
+		t.Fatalf("LowerToGo: %v", err)
+	}
+
+	compileAndTest(t, goCode, `
+package derived
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestFilterAfterMap(t *testing.T) {
+	got := FilterAfterMap([]int{0, 1, 3})
+	want := []int{0, 2}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if got := FilterAfterMap([]int{-2, -1, 0}); len(got) != 0 {
+		t.Fatalf("expected empty result, got %v", got)
+	}
+}
+`)
+}
+
+func TestLowerRejectsUnsupportedNestedPipeline(t *testing.T) {
+	term := core.MkLam("xs", &core.TList{Elem: &core.TInt{}},
+		core.MkApps(core.MkPrim(core.PrimMap),
+			core.MkLam("x", &core.TInt{},
+				core.MkApps(core.MkPrim(core.PrimAdd), core.MkVar("x"), core.MkInt(1)),
+			),
+			core.MkApps(core.MkPrim(core.PrimScanl),
+				core.MkPrim(core.PrimAdd),
+				core.MkInt(0),
+				core.MkVar("xs"),
+			),
+		),
+	)
+	ty := &core.TFun{Param: &core.TList{Elem: &core.TInt{}}, Result: &core.TList{Elem: &core.TInt{}}}
+
+	_, err := LowerToGo(term, ty, "UnsupportedNested", "derived")
+	if err == nil {
+		t.Fatal("expected nested pipeline lowering to be rejected")
+	}
+	if !strings.Contains(err.Error(), "unsupported nested pipeline shape") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 // compileAndTest writes Go source + test file to a temp dir, runs go test.

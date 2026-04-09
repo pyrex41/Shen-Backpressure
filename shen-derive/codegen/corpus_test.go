@@ -67,6 +67,19 @@ func TestPhase9ExpansionTargets(t *testing.T) {
 	}
 }
 
+func TestPhase10ExpansionTargets(t *testing.T) {
+	targets := phase10ExpansionTargets()
+	if got := len(targets); got != 2 {
+		t.Fatalf("phase 10 expansion drift: got %d targets, want 2", got)
+	}
+
+	for _, target := range targets {
+		t.Run(target.name, func(t *testing.T) {
+			runCorpusTarget(t, target)
+		})
+	}
+}
+
 func runCorpusTarget(t *testing.T, target corpusTarget) {
 	t.Helper()
 
@@ -420,6 +433,38 @@ func mkStringEqFlagsSpec() core.Term {
 			core.MkApps(core.MkPrim(core.PrimMap),
 				core.MkLam("s", &core.TString{},
 					core.MkApps(core.MkPrim(core.PrimEq), core.MkVar("s"), core.MkVar("want")),
+				),
+				core.MkVar("xs"),
+			),
+		),
+	)
+}
+
+func mkMapAfterFilterSpec() core.Term {
+	return core.MkLam("xs", &core.TList{Elem: &core.TInt{}},
+		core.MkApps(core.MkPrim(core.PrimMap),
+			core.MkLam("x", &core.TInt{},
+				core.MkApps(core.MkPrim(core.PrimAdd), core.MkVar("x"), core.MkInt(1)),
+			),
+			core.MkApps(core.MkPrim(core.PrimFilter),
+				core.MkLam("x", &core.TInt{},
+					core.MkApps(core.MkPrim(core.PrimGt), core.MkVar("x"), core.MkInt(0)),
+				),
+				core.MkVar("xs"),
+			),
+		),
+	)
+}
+
+func mkFilterAfterMapSpec() core.Term {
+	return core.MkLam("xs", &core.TList{Elem: &core.TInt{}},
+		core.MkApps(core.MkPrim(core.PrimFilter),
+			core.MkLam("x", &core.TInt{},
+				core.MkApps(core.MkPrim(core.PrimGe), core.MkVar("x"), core.MkInt(0)),
+			),
+			core.MkApps(core.MkPrim(core.PrimMap),
+				core.MkLam("x", &core.TInt{},
+					core.MkApps(core.MkPrim(core.PrimSub), core.MkVar("x"), core.MkInt(1)),
 				),
 				core.MkVar("xs"),
 			),
@@ -872,6 +917,33 @@ func phase9ExpansionTargets() []corpusTarget {
 				{name: "mixed", args: []core.Term{core.MkStr("ok"), mkStringList("ok", "no", "ok")}, want: mkBoolList(true, false, true)},
 				{name: "empty-target-and-list", args: []core.Term{core.MkStr(""), mkStringList()}, want: mkBoolList()},
 				{name: "empty-string-matches", args: []core.Term{core.MkStr(""), mkStringList("", "a", "")}, want: mkBoolList(true, false, true)},
+			},
+		},
+	}
+}
+
+func phase10ExpansionTargets() []corpusTarget {
+	return []corpusTarget{
+		{
+			name:     "map-after-filter",
+			funcName: "MapAfterFilter",
+			artifact: "expansion",
+			spec:     mkMapAfterFilterSpec(),
+			cases: []corpusCase{
+				{name: "mixed", args: []core.Term{mkIntList(-2, 0, 1, 2, 3)}, want: mkIntList(2, 3, 4)},
+				{name: "all-filtered", args: []core.Term{mkIntList(-2, 0)}, want: mkIntList()},
+				{name: "empty", args: []core.Term{mkIntList()}, want: mkIntList()},
+			},
+		},
+		{
+			name:     "filter-after-map",
+			funcName: "FilterAfterMap",
+			artifact: "expansion",
+			spec:     mkFilterAfterMapSpec(),
+			cases: []corpusCase{
+				{name: "mixed", args: []core.Term{mkIntList(0, 1, 3)}, want: mkIntList(0, 2)},
+				{name: "all-filtered", args: []core.Term{mkIntList(-2, -1, 0)}, want: mkIntList()},
+				{name: "empty", args: []core.Term{mkIntList()}, want: mkIntList()},
 			},
 		},
 	}
