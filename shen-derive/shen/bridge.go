@@ -7,8 +7,8 @@
 //     both sides are composed of primitives, variables, and lambda applications.
 //   - The emitted Shen encoding is only checked with (tc +), which validates
 //     the structure of the generated spec but does not prove the equality.
-//   - Empirical testing is available as a heuristic check, but quantified
-//     obligations remain undischarged until a sound prover is implemented.
+//   - Quantified obligations outside the supported symbolic proof fragment
+//     still fall back to diagnostic-only validation.
 package shen
 
 import (
@@ -29,10 +29,10 @@ import (
 // the equality at the type level.
 //
 // The encoding strategy:
-//   1. Collect free variables from both sides of the equality.
-//   2. Translate each side to a Shen s-expression.
-//   3. Wrap in a (datatype ...) block with variable premises and the
-//      equality as a verified premise.
+//  1. Collect free variables from both sides of the equality.
+//  2. Translate each side to a Shen s-expression.
+//  3. Wrap in a (datatype ...) block with variable premises and the
+//     equality as a verified premise.
 func EmitObligation(cond laws.InstantiatedCondition) string {
 	var b strings.Builder
 
@@ -413,11 +413,16 @@ func FindShenBinary() string {
 
 // Discharge attempts to discharge a side condition obligation soundly.
 // Ground equalities are discharged by exact evaluation. Quantified
-// obligations remain undischarged; Shen tc+ and empirical testing are
-// retained only as diagnostics.
+// arithmetic equalities in the supported symbolic fragment are discharged
+// by polynomial normalization. Shen tc+ and empirical testing are retained
+// as diagnostics for obligations outside that proof fragment.
 func Discharge(cond laws.InstantiatedCondition) DischargeResult {
 	if len(conditionFreeVars(cond)) == 0 {
 		return dischargeGround(cond)
+	}
+
+	if symbolic, ok := dischargeSymbolic(cond); ok {
+		return symbolic
 	}
 
 	var notes []string
