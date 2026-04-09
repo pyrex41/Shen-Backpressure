@@ -242,6 +242,148 @@ func TestSumPositives(t *testing.T) {
 `)
 }
 
+func TestLowerBoolSingletonList(t *testing.T) {
+	term := core.MkLam("x", &core.TBool{},
+		core.MkList(core.MkVar("x")),
+	)
+	ty := &core.TFun{
+		Param:  &core.TBool{},
+		Result: &core.TList{Elem: &core.TBool{}},
+	}
+
+	goCode, err := LowerToGo(term, ty, "Singleton", "derived")
+	if err != nil {
+		t.Fatalf("LowerToGo: %v", err)
+	}
+
+	compileAndTest(t, goCode, `
+package derived
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestSingleton(t *testing.T) {
+	if got := Singleton(true); !reflect.DeepEqual(got, []bool{true}) {
+		t.Fatalf("Singleton(true) = %v, want [true]", got)
+	}
+	if got := Singleton(false); !reflect.DeepEqual(got, []bool{false}) {
+		t.Fatalf("Singleton(false) = %v, want [false]", got)
+	}
+}
+`)
+}
+
+func TestLowerMapWithLet(t *testing.T) {
+	term := core.MkApp(core.MkPrim(core.PrimMap),
+		core.MkLam("x", &core.TInt{},
+			core.MkLet("y",
+				core.MkApps(core.MkPrim(core.PrimAdd), core.MkVar("x"), core.MkInt(1)),
+				core.MkVar("y"),
+			),
+		),
+	)
+	ty := &core.TFun{
+		Param:  &core.TList{Elem: &core.TInt{}},
+		Result: &core.TList{Elem: &core.TInt{}},
+	}
+
+	goCode, err := LowerToGo(term, ty, "IncAll", "derived")
+	if err != nil {
+		t.Fatalf("LowerToGo: %v", err)
+	}
+
+	compileAndTest(t, goCode, `
+package derived
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestIncAll(t *testing.T) {
+	got := IncAll([]int{1, 2, 3})
+	want := []int{2, 3, 4}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("IncAll = %v, want %v", got, want)
+	}
+}
+`)
+}
+
+func TestLowerFoldrBoolList(t *testing.T) {
+	stepFn := core.MkLam("x", &core.TInt{},
+		core.MkLam("xs", &core.TList{Elem: &core.TBool{}},
+			core.MkApps(core.MkPrim(core.PrimCons),
+				core.MkApps(core.MkPrim(core.PrimGe), core.MkVar("x"), core.MkInt(0)),
+				core.MkVar("xs"),
+			),
+		),
+	)
+	term := core.MkApps(core.MkPrim(core.PrimFoldr), stepFn, core.MkPrim(core.PrimNil))
+	ty := &core.TFun{
+		Param:  &core.TList{Elem: &core.TInt{}},
+		Result: &core.TList{Elem: &core.TBool{}},
+	}
+
+	goCode, err := LowerToGo(term, ty, "NonNegFlags", "derived")
+	if err != nil {
+		t.Fatalf("LowerToGo: %v", err)
+	}
+
+	compileAndTest(t, goCode, `
+package derived
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestNonNegFlags(t *testing.T) {
+	got := NonNegFlags([]int{-1, 0, 2})
+	want := []bool{false, true, true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("NonNegFlags = %v, want %v", got, want)
+	}
+}
+`)
+}
+
+func TestLowerMapBoolIf(t *testing.T) {
+	term := core.MkApp(core.MkPrim(core.PrimMap),
+		core.MkLam("x", &core.TBool{},
+			core.MkIf(core.MkVar("x"), core.MkVar("x"), core.MkBool(false)),
+		),
+	)
+	ty := &core.TFun{
+		Param:  &core.TList{Elem: &core.TBool{}},
+		Result: &core.TList{Elem: &core.TBool{}},
+	}
+
+	goCode, err := LowerToGo(term, ty, "IdentityBools", "derived")
+	if err != nil {
+		t.Fatalf("LowerToGo: %v", err)
+	}
+
+	compileAndTest(t, goCode, `
+package derived
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestIdentityBools(t *testing.T) {
+	got := IdentityBools([]bool{true, false, true})
+	want := []bool{true, false, true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("IdentityBools = %v, want %v", got, want)
+	}
+}
+`)
+}
+
 // compileAndTest writes Go source + test file to a temp dir, runs go test.
 func compileAndTest(t *testing.T, srcCode, testCode string) {
 	t.Helper()

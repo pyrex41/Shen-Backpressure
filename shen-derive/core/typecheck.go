@@ -8,11 +8,15 @@ import "fmt"
 type TypeChecker struct {
 	nextVar int
 	subst   map[string]Type
+	types   map[Term]Type
 }
 
 // NewTypeChecker creates a fresh type checker.
 func NewTypeChecker() *TypeChecker {
-	return &TypeChecker{subst: make(map[string]Type)}
+	return &TypeChecker{
+		subst: make(map[string]Type),
+		types: make(map[Term]Type),
+	}
 }
 
 // TypeEnv maps variable names to their types.
@@ -73,6 +77,19 @@ func (tc *TypeChecker) apply(t Type) Type {
 		return t // unresolved variable
 	}
 	return t
+}
+
+func (tc *TypeChecker) record(term Term, ty Type) Type {
+	tc.types[term] = ty
+	return ty
+}
+
+func (tc *TypeChecker) snapshotTypes() map[Term]Type {
+	out := make(map[Term]Type, len(tc.types))
+	for term, ty := range tc.types {
+		out[term] = tc.apply(ty)
+	}
+	return out
 }
 
 // occurs checks whether type variable tv occurs in type t (for the occurs check).
@@ -154,13 +171,17 @@ func (tc *TypeChecker) unify(t1, t2 Type) error {
 
 // Check infers the type of a term in the given type environment.
 func (tc *TypeChecker) Check(env *TypeEnv, term Term) (Type, error) {
+	record := func(ty Type) (Type, error) {
+		return tc.record(term, ty), nil
+	}
+
 	switch t := term.(type) {
 	case *Var:
 		ty, ok := env.Lookup(t.Name)
 		if !ok {
 			return nil, fmt.Errorf("%s: unbound variable %q", t.P, t.Name)
 		}
-		return ty, nil
+		return record(ty)
 
 	case *Lam:
 		paramTy := t.ParamType
@@ -171,7 +192,7 @@ func (tc *TypeChecker) Check(env *TypeEnv, term Term) (Type, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &TFun{Param: paramTy, Result: bodyTy}, nil
+		return record(&TFun{Param: paramTy, Result: bodyTy})
 
 	case *App:
 		funcTy, err := tc.Check(env, t.Func)
@@ -187,28 +208,32 @@ func (tc *TypeChecker) Check(env *TypeEnv, term Term) (Type, error) {
 		if err := tc.unify(funcTy, expectedFuncTy); err != nil {
 			return nil, fmt.Errorf("%s: in application: %w", t.P, err)
 		}
-		return tc.apply(resultTy), nil
+		return record(tc.apply(resultTy))
 
 	case *Let:
 		boundTy, err := tc.Check(env, t.Bound)
 		if err != nil {
 			return nil, err
 		}
-		return tc.Check(env.Extend(t.Name, boundTy), t.Body)
+		bodyTy, err := tc.Check(env.Extend(t.Name, boundTy), t.Body)
+		if err != nil {
+			return nil, err
+		}
+		return record(bodyTy)
 
 	case *Lit:
 		switch t.Kind {
 		case LitInt:
-			return &TInt{}, nil
+			return record(&TInt{})
 		case LitBool:
-			return &TBool{}, nil
+			return record(&TBool{})
 		case LitString:
-			return &TString{}, nil
+			return record(&TString{})
 		}
 
 	case *ListLit:
 		if len(t.Elems) == 0 {
-			return &TList{Elem: tc.freshVar()}, nil
+			return record(&TList{Elem: tc.freshVar()})
 		}
 		elemTy, err := tc.Check(env, t.Elems[0])
 		if err != nil {
@@ -223,7 +248,7 @@ func (tc *TypeChecker) Check(env *TypeEnv, term Term) (Type, error) {
 				return nil, fmt.Errorf("%s: list element %d: %w", t.Elems[i].Pos(), i, err)
 			}
 		}
-		return &TList{Elem: tc.apply(elemTy)}, nil
+		return record(&TList{Elem: tc.apply(elemTy)})
 
 	case *TupleLit:
 		fstTy, err := tc.Check(env, t.Fst)
@@ -234,7 +259,7 @@ func (tc *TypeChecker) Check(env *TypeEnv, term Term) (Type, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &TTuple{Fst: fstTy, Snd: sndTy}, nil
+		return record(&TTuple{Fst: fstTy, Snd: sndTy})
 
 	case *IfExpr:
 		condTy, err := tc.Check(env, t.Cond)
@@ -255,10 +280,10 @@ func (tc *TypeChecker) Check(env *TypeEnv, term Term) (Type, error) {
 		if err := tc.unify(thenTy, elseTy); err != nil {
 			return nil, fmt.Errorf("%s: if branches have different types: %w", t.P, err)
 		}
-		return tc.apply(thenTy), nil
+		return record(tc.apply(thenTy))
 
 	case *Prim:
-		return tc.primType(t.Op), nil
+		return record(tc.primType(t.Op))
 	}
 
 	return nil, fmt.Errorf("cannot type-check: %T", term)
@@ -272,6 +297,17 @@ func CheckTerm(term Term) (Type, error) {
 		return nil, err
 	}
 	return tc.apply(ty), nil
+}
+
+// InferTermTypes returns the fully resolved type of the root term plus the
+// fully resolved type inferred for every subterm visited during checking.
+func InferTermTypes(term Term) (Type, map[Term]Type, error) {
+	tc := NewTypeChecker()
+	ty, err := tc.Check(EmptyTypeEnv(), term)
+	if err != nil {
+		return nil, nil, err
+	}
+	return tc.apply(ty), tc.snapshotTypes(), nil
 }
 
 // primType returns the (freshly instantiated) type of a primitive operation.

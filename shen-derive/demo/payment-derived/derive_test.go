@@ -250,21 +250,22 @@ func TestPaymentDerivation(t *testing.T) {
 		),
 	}
 
-	// Discharge empirically (commutativity of &&)
+	// Check empirically (commutativity of &&)
 	dr := shen.DischargeEmpirical(empCond)
 	if !dr.Discharged {
 		t.Fatalf("empirical discharge failed: %v", dr.Error)
 	}
 	transcript.WriteString(fmt.Sprintf("  Side condition: %s\n", empCond.Description))
-	transcript.WriteString(fmt.Sprintf("  Discharged: empirical (%s)\n", dr.Output))
+	transcript.WriteString(fmt.Sprintf("  Empirical check: passed (%s)\n", dr.Output))
 
-	// Also try Shen discharge
-	drShen := shen.Discharge(empCond)
-	transcript.WriteString(fmt.Sprintf("  Discharged: %s", drShen.Method))
-	if drShen.Discharged {
-		transcript.WriteString(" ✓\n")
+	// Also validate the emitted Shen encoding
+	drShen := shen.DischargeShenOnly(empCond)
+	if drShen.Error == nil {
+		transcript.WriteString(fmt.Sprintf("  Shen validation: %s\n", drShen.Method))
+	} else if strings.Contains(drShen.Error.Error(), "does not constitute a proof") {
+		transcript.WriteString("  Shen validation: emitted spec accepted by tc+ (validation only; not a proof)\n")
 	} else {
-		transcript.WriteString(fmt.Sprintf(" (failed: %v)\n", drShen.Error))
+		transcript.WriteString(fmt.Sprintf("  Shen validation: unavailable/failed (%v)\n", drShen.Error))
 	}
 	transcript.WriteString("\n")
 
@@ -305,7 +306,7 @@ func TestPaymentDerivation(t *testing.T) {
 //
 // Derived from: processable b0 txs = all (>= 0) (scanl apply b0 txs)
 // Via: scanl-fold fusion (Bird, Algebra of Programming, §3.1)
-// Side conditions discharged by Shen tc+ and empirical testing.
+// Side conditions checked empirically; emitted Shen validated with tc+.
 
 package derived
 
@@ -349,11 +350,11 @@ func Processable(b0 int, txs []int) bool {
 	transcript.WriteString("  1. SPEC:    processable b0 txs = all (>=0) (scanl apply b0 txs)\n")
 	transcript.WriteString("  2. REWRITE: scanl-fold fusion → snd . foldl step (b0, True)\n")
 	transcript.WriteString("     RULE:    fold-fusion (Bird, Algebra of Programming, §3.1)\n")
-	transcript.WriteString("     SIDE:    commutativity of (&&) — discharged empirically + Shen tc+\n")
+	transcript.WriteString("     SIDE:    commutativity of (&&) — empirical check + Shen tc+ validation\n")
 	transcript.WriteString("  3. LOWER:   foldl → forward for-loop, tuple → two variables\n")
 	transcript.WriteString("  4. OUTPUT:  Processable(b0 int, txs []int) bool\n\n")
 	transcript.WriteString("The efficient Go implementation is equivalent to the naive specification.\n")
-	transcript.WriteString("Each step is justified by a named algebraic law with discharged side conditions.\n")
+	transcript.WriteString("Each step is justified by a named algebraic law with recorded side-condition checks.\n")
 
 	// Write transcript and generated Go to temp dir for inspection
 	tmpDir := t.TempDir()

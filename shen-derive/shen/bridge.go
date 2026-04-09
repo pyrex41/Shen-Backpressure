@@ -5,11 +5,10 @@
 // Limitations (v0):
 //   - Side conditions are restricted to first-order term equalities where
 //     both sides are composed of primitives, variables, and lambda applications.
-//   - The Shen encoding declares each free variable as having its inferred type,
-//     then asserts the equality as a verified premise in a datatype rule.
-//   - When the Shen runtime is unavailable, Discharge falls back to empirical
-//     testing: evaluating both sides on a set of sample inputs and checking
-//     they agree. This is not a proof but catches many bugs.
+//   - The emitted Shen encoding is only checked with (tc +), which validates
+//     the structure of the generated spec but does not prove the equality.
+//   - Empirical testing is available as a heuristic check, but quantified
+//     obligations remain undischarged until a sound prover is implemented.
 package shen
 
 import (
@@ -412,21 +411,52 @@ func FindShenBinary() string {
 	return ""
 }
 
-// Discharge attempts to discharge a side condition obligation.
-// It tries the Shen type checker first; if unavailable, falls back to
-// empirical testing via the evaluator.
+// Discharge attempts to discharge a side condition obligation soundly.
+// Ground equalities are discharged by exact evaluation. Quantified
+// obligations remain undischarged; Shen tc+ and empirical testing are
+// retained only as diagnostics.
 func Discharge(cond laws.InstantiatedCondition) DischargeResult {
-	// Try Shen first
-	shenBin := FindShenBinary()
-	if shenBin != "" {
-		return dischargeShen(cond, shenBin)
+	if len(conditionFreeVars(cond)) == 0 {
+		return dischargeGround(cond)
 	}
 
-	// Fall back to empirical testing
-	return dischargeEmpirical(cond)
+	var notes []string
+
+	shenBin := FindShenBinary()
+	if shenBin != "" {
+		validation := validateWithShen(cond, shenBin)
+		if validation.Error != nil {
+			return DischargeResult{
+				Discharged: false,
+				Method:     "shen-tc+ validation",
+				Output:     validation.Output,
+				Error:      validation.Error,
+			}
+		}
+		notes = append(notes, "Shen tc+ validated the emitted spec")
+	} else {
+		notes = append(notes, "Shen tc+ unavailable")
+	}
+
+	empirical := dischargeEmpirical(cond)
+	if empirical.Discharged {
+		notes = append(notes, "empirical check passed: "+empirical.Output)
+	} else if empirical.Output != "" {
+		notes = append(notes, "empirical check failed: "+empirical.Output)
+	} else if empirical.Error != nil {
+		notes = append(notes, "empirical check failed: "+empirical.Error.Error())
+	}
+
+	return DischargeResult{
+		Discharged: false,
+		Method:     "undischarged",
+		Output:     strings.Join(notes, "\n"),
+		Error:      fmt.Errorf("quantified side conditions are not soundly discharged yet; Shen tc+ is validation-only and empirical checks are heuristic"),
+	}
 }
 
-// DischargeShenOnly tries Shen only; returns an error if Shen is unavailable.
+// DischargeShenOnly validates the emitted Shen with tc+ but never treats
+// that validation as a semantic proof of the side condition.
 func DischargeShenOnly(cond laws.InstantiatedCondition) DischargeResult {
 	shenBin := FindShenBinary()
 	if shenBin == "" {
@@ -436,7 +466,16 @@ func DischargeShenOnly(cond laws.InstantiatedCondition) DischargeResult {
 			Error:      fmt.Errorf("no Shen runtime found; install shen-sbcl or set $SHEN"),
 		}
 	}
-	return dischargeShen(cond, shenBin)
+	validation := validateWithShen(cond, shenBin)
+	if validation.Error != nil {
+		return validation
+	}
+	return DischargeResult{
+		Discharged: false,
+		Method:     "shen-tc+ (validation only)",
+		Output:     validation.Output,
+		Error:      fmt.Errorf("Shen tc+ validated the emitted spec, but this encoding does not constitute a proof of the side condition"),
+	}
 }
 
 // DischargeEmpirical tests the side condition by evaluating both sides
@@ -445,7 +484,7 @@ func DischargeEmpirical(cond laws.InstantiatedCondition) DischargeResult {
 	return dischargeEmpirical(cond)
 }
 
-func dischargeShen(cond laws.InstantiatedCondition, shenBin string) DischargeResult {
+func validateWithShen(cond laws.InstantiatedCondition, shenBin string) DischargeResult {
 	// Build the spec file content
 	spec := ShenPreamble() + "\n" + EmitObligation(cond)
 
@@ -480,6 +519,53 @@ func dischargeShen(cond laws.InstantiatedCondition, shenBin string) DischargeRes
 		Discharged: true,
 		Method:     "shen-tc+",
 		Output:     string(out),
+	}
+}
+
+func dischargeGround(cond laws.InstantiatedCondition) DischargeResult {
+	var notes []string
+
+	if shenBin := FindShenBinary(); shenBin != "" {
+		validation := validateWithShen(cond, shenBin)
+		if validation.Error != nil {
+			return DischargeResult{
+				Discharged: false,
+				Method:     "shen-tc+ validation",
+				Output:     validation.Output,
+				Error:      validation.Error,
+			}
+		}
+		notes = append(notes, "Shen tc+ validated the emitted spec")
+	}
+
+	lv, err1 := core.Eval(core.EmptyEnv(), cond.LHS)
+	rv, err2 := core.Eval(core.EmptyEnv(), cond.RHS)
+	if err1 != nil || err2 != nil {
+		return DischargeResult{
+			Discharged: false,
+			Method:     "ground-eval",
+			Output:     strings.Join(notes, "\n"),
+			Error:      fmt.Errorf("ground evaluation error: lhs=%v, rhs=%v", err1, err2),
+		}
+	}
+	if lv.String() != rv.String() {
+		return DischargeResult{
+			Discharged: false,
+			Method:     "ground-eval",
+			Output:     strings.Join(append(notes, fmt.Sprintf("LHS=%s, RHS=%s", lv, rv)), "\n"),
+			Error:      fmt.Errorf("ground equality failed: %s != %s", lv, rv),
+		}
+	}
+
+	notes = append(notes, "ground equality evaluated exactly")
+	method := "ground-eval"
+	if len(notes) > 1 {
+		method = "ground-eval+shen-tc+"
+	}
+	return DischargeResult{
+		Discharged: true,
+		Method:     method,
+		Output:     strings.Join(notes, "\n"),
 	}
 }
 
@@ -601,6 +687,19 @@ func dischargeEmpirical(cond laws.InstantiatedCondition) DischargeResult {
 		Method:     "empirical",
 		Output:     fmt.Sprintf("verified on %d test cases", tested),
 	}
+}
+
+func conditionFreeVars(cond laws.InstantiatedCondition) []string {
+	fvs := collectFreeVars(cond.LHS)
+	for k, v := range collectFreeVars(cond.RHS) {
+		fvs[k] = v
+	}
+
+	names := make([]string, 0, len(fvs))
+	for name := range fvs {
+		names = append(names, name)
+	}
+	return names
 }
 
 func testEquality(env *core.Env, cond laws.InstantiatedCondition) (ok bool, msg string) {

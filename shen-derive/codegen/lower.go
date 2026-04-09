@@ -15,9 +15,25 @@ import (
 // LowerToGo produces a complete Go source file containing one function
 // derived from the given term. The term must have a fully monomorphic type.
 func LowerToGo(term core.Term, ty core.Type, funcName, pkg string) (string, error) {
-	cg := &codegen{counter: 0}
+	inferredTy, types, err := core.InferTermTypes(term)
+	if err != nil {
+		return "", err
+	}
+	if ty != nil && !core.TypesEqual(inferredTy, ty) {
+		return "", fmt.Errorf("lower: provided type %s does not match inferred type %s", ty, inferredTy)
+	}
+	if err := ensureMonomorphic(inferredTy); err != nil {
+		return "", fmt.Errorf("lower: root term is not monomorphic: %w", err)
+	}
+	for subterm, subTy := range types {
+		if err := ensureMonomorphic(subTy); err != nil {
+			return "", fmt.Errorf("lower: subterm %q is not monomorphic: %w", core.PrettyPrint(subterm), err)
+		}
+	}
 
-	funcCode, err := cg.genFunc(term, ty, funcName)
+	cg := &codegen{counter: 0, types: types}
+
+	funcCode, err := cg.genFunc(term, inferredTy, funcName)
 	if err != nil {
 		return "", err
 	}
@@ -33,17 +49,57 @@ func LowerToGo(term core.Term, ty core.Type, funcName, pkg string) (string, erro
 
 // LowerExprToGo produces just a Go expression string (no package wrapper).
 func LowerExprToGo(term core.Term) string {
-	cg := &codegen{}
+	cg := &codegen{types: make(map[core.Term]core.Type)}
+	if _, types, err := core.InferTermTypes(term); err == nil {
+		cg.types = types
+	}
 	return cg.expr(term)
 }
 
 type codegen struct {
 	counter int
+	types   map[core.Term]core.Type
 }
 
 func (cg *codegen) fresh(prefix string) string {
 	cg.counter++
 	return fmt.Sprintf("_%s%d", prefix, cg.counter)
+}
+
+func (cg *codegen) typeOf(term core.Term) core.Type {
+	if term == nil {
+		return nil
+	}
+	return cg.types[term]
+}
+
+func (cg *codegen) goTypeOfTerm(term core.Term) string {
+	return GoType(cg.typeOf(term))
+}
+
+func ensureMonomorphic(t core.Type) error {
+	switch t := t.(type) {
+	case nil:
+		return fmt.Errorf("missing type")
+	case *core.TInt, *core.TBool, *core.TString:
+		return nil
+	case *core.TList:
+		return ensureMonomorphic(t.Elem)
+	case *core.TTuple:
+		if err := ensureMonomorphic(t.Fst); err != nil {
+			return err
+		}
+		return ensureMonomorphic(t.Snd)
+	case *core.TFun:
+		if err := ensureMonomorphic(t.Param); err != nil {
+			return err
+		}
+		return ensureMonomorphic(t.Result)
+	case *core.TVar:
+		return fmt.Errorf("unresolved type variable %s", t.Name)
+	default:
+		return fmt.Errorf("unknown type %T", t)
+	}
 }
 
 // --- Go type rendering ---
@@ -99,7 +155,11 @@ func (cg *codegen) genFunc(term core.Term, ty core.Type, name string) (string, e
 			// Partially applied combinator: synthesize a parameter
 			pname := cg.fresh("arg")
 			params = append(params, param{name: pname, ty: GoType(ft.Param)})
-			curTerm = &core.App{Func: curTerm, Arg: &core.Var{Name: pname}}
+			argTerm := &core.Var{Name: pname}
+			cg.types[argTerm] = ft.Param
+			appTerm := &core.App{Func: curTerm, Arg: argTerm}
+			cg.types[appTerm] = ft.Result
+			curTerm = appTerm
 		}
 		curTy = ft.Result
 	}
@@ -266,9 +326,6 @@ func (cg *codegen) bodyMap(term core.Term, retTy core.Type) (string, bool) {
 	elem := cg.fresh("x")
 
 	sliceTy := GoType(retTy)
-	if sliceTy == "interface{}" {
-		sliceTy = "[]int"
-	}
 
 	var buf strings.Builder
 	fmt.Fprintf(&buf, "\t%s := %s\n", xs, cg.expr(list))
@@ -298,9 +355,6 @@ func (cg *codegen) bodyFilter(term core.Term, retTy core.Type) (string, bool) {
 	elem := cg.fresh("x")
 
 	sliceTy := GoType(retTy)
-	if sliceTy == "interface{}" {
-		sliceTy = "[]int"
-	}
 
 	var buf strings.Builder
 	fmt.Fprintf(&buf, "\t%s := %s\n", xs, cg.expr(list))
@@ -333,9 +387,6 @@ func (cg *codegen) bodyScanl(term core.Term, retTy core.Type) (string, bool) {
 	elem := cg.fresh("x")
 
 	sliceTy := GoType(retTy)
-	if sliceTy == "interface{}" {
-		sliceTy = "[]int"
-	}
 
 	var buf strings.Builder
 	fmt.Fprintf(&buf, "\t%s := %s\n", xs, cg.expr(list))
@@ -406,7 +457,7 @@ func (cg *codegen) exprSubst(t core.Term, subst map[string]string) string {
 		return name
 
 	case *core.Prim:
-		return cg.exprPrim(t.Op)
+		return cg.exprPrim(t)
 
 	case *core.App:
 		// Check for infix binary ops: App(App(Prim(op), lhs), rhs)
@@ -421,8 +472,8 @@ func (cg *codegen) exprSubst(t core.Term, subst map[string]string) string {
 				if p.Op == core.PrimCons {
 					elem := cg.exprSubst(inner.Arg, subst)
 					list := cg.exprSubst(t.Arg, subst)
-					elemTy := cg.guessExprType(inner.Arg)
-					return fmt.Sprintf("append([]%s{%s}, %s...)", elemTy, elem, list)
+					listTy := cg.goTypeOfTerm(t)
+					return fmt.Sprintf("append(%s{%s}, %s...)", listTy, elem, list)
 				}
 			}
 		}
@@ -455,18 +506,10 @@ func (cg *codegen) exprSubst(t core.Term, subst map[string]string) string {
 	case *core.Lam:
 		// Generate a Go closure
 		param := goIdent(t.Param)
-		paramTy := "interface{}"
-		if t.ParamType != nil {
-			paramTy = GoType(t.ParamType)
-		}
+		ft, _ := cg.typeOf(t).(*core.TFun)
+		paramTy := GoType(ft.Param)
 		body := cg.exprSubst(t.Body, subst)
-		// Try to infer return type
-		retTy := "interface{}"
-		if _, ok := t.Body.(*core.Lam); ok {
-			retTy = cg.closureType(t.Body)
-		} else {
-			retTy = cg.guessExprType(t.Body)
-		}
+		retTy := GoType(ft.Result)
 		return fmt.Sprintf("func(%s %s) %s { return %s }", param, paramTy, retTy, body)
 
 	case *core.Let:
@@ -476,13 +519,13 @@ func (cg *codegen) exprSubst(t core.Term, subst map[string]string) string {
 		v := cg.fresh("v")
 		newSubst[goIdent(t.Name)] = v
 		body := cg.exprSubst(t.Body, newSubst)
-		return fmt.Sprintf("func() interface{} { %s := %s; return %s }()", v, val, body)
+		return fmt.Sprintf("func() %s { %s := %s; return %s }()", cg.goTypeOfTerm(t), v, val, body)
 
 	case *core.IfExpr:
 		cond := cg.exprSubst(t.Cond, subst)
 		then := cg.exprSubst(t.Then, subst)
 		els := cg.exprSubst(t.Else, subst)
-		retTy := cg.guessExprType(t.Then)
+		retTy := cg.goTypeOfTerm(t)
 		return fmt.Sprintf("func() %s { if %s { return %s }; return %s }()", retTy, cond, then, els)
 
 	case *core.ListLit:
@@ -490,15 +533,12 @@ func (cg *codegen) exprSubst(t core.Term, subst map[string]string) string {
 		for i, e := range t.Elems {
 			elems[i] = cg.exprSubst(e, subst)
 		}
-		elemTy := cg.guessExprType(t)
-		return "[]" + elemTy + "{" + strings.Join(elems, ", ") + "}"
+		return cg.goTypeOfTerm(t) + "{" + strings.Join(elems, ", ") + "}"
 
 	case *core.TupleLit:
 		fst := cg.exprSubst(t.Fst, subst)
 		snd := cg.exprSubst(t.Snd, subst)
-		fstTy := cg.guessExprType(t.Fst)
-		sndTy := cg.guessExprType(t.Snd)
-		return fmt.Sprintf("struct{ Fst %s; Snd %s }{%s, %s}", fstTy, sndTy, fst, snd)
+		return fmt.Sprintf("%s{%s, %s}", cg.goTypeOfTerm(t), fst, snd)
 	}
 
 	return fmt.Sprintf("/* TODO: %T */", t)
@@ -562,8 +602,8 @@ func uncurryLam1(t core.Term) (body core.Term, param string, ok bool) {
 	return lam.Body, lam.Param, true
 }
 
-func (cg *codegen) exprPrim(op core.PrimOp) string {
-	switch op {
+func (cg *codegen) exprPrim(term *core.Prim) string {
+	switch term.Op {
 	case core.PrimAdd:
 		return "func(a, b int) int { return a + b }"
 	case core.PrimSub:
@@ -571,9 +611,9 @@ func (cg *codegen) exprPrim(op core.PrimOp) string {
 	case core.PrimMul:
 		return "func(a, b int) int { return a * b }"
 	case core.PrimNil:
-		return "[]int{}"
+		return cg.goTypeOfTerm(term) + "{}"
 	default:
-		return fmt.Sprintf("/* prim:%s */", op)
+		return fmt.Sprintf("/* prim:%s */", term.Op)
 	}
 }
 
