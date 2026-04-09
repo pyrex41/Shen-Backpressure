@@ -11,6 +11,8 @@ It intentionally optimizes for:
 
 It does **not** try to make `shen-derive` universally complete.
 
+The fixed 20-target v1 stop rule is already satisfied. The first half of this file preserves that core definition of done; the later sections record the explicit post-v1 expansion roadmap toward a broader, still-bounded target universe.
+
 ## v1 Goal
 
 Ship a stable `shen-derive` v1 that can handle a fixed corpus of **20 target functions** in the intended slice:
@@ -65,16 +67,16 @@ These are in-scope for v1 and should be promoted unless evidence shows they need
 
 ## Explicitly Deferred From Core v1
 
-These are useful, but not required for the fixed v1 core corpus.
+These were useful, but not required for the fixed v1 core corpus.
 
-### Validation-only track
+### Already-working appendix track
 
 - `negate-sum`
 - `double-sum`
 
-These are useful for documenting proof boundaries, but they should not block the main v1 execution path.
+These were useful for documenting proof boundaries, but they did not need to block the main v1 execution path.
 
-### Out-of-scope track
+### Post-v1 expansion track (current language / small reusable extensions)
 
 - `safe-under-limit`
 - `prefix-nonzero`
@@ -83,11 +85,14 @@ These are useful for documenting proof boundaries, but they should not block the
 - `map-after-filter`
 - `filter-after-map`
 - `concat-map`
+
+### Post-v1 new-machinery track
+
 - `zip-with-sum`
 - `take-while-positive`
 - `drop-while-positive`
 
-If one of these becomes necessary to keep the corpus honest, that decision should be made explicitly and documented.
+These are no longer treated as accidental scope creep. They are the next explicit workstreams after the fixed v1 core.
 
 ## Non-Negotiable v1 Rules
 
@@ -298,6 +303,170 @@ Add a small, explicitly labeled appendix for arithmetic `foldr-fusion` witness c
 
 Low if documentation is honest; high if they are allowed to blur the proof boundary.
 
+## Phase 8: Promote The Proved Appendix Into The Tracked Expansion Universe
+
+### Objective
+
+Treat the two already-working appendix examples as first-class tracked expansion targets without pretending they were part of the fixed v1 core corpus.
+
+### Target Set
+
+- `negate-sum`
+- `double-sum`
+
+### Outputs
+
+- explicit expansion-universe rows for both examples
+- focused end-to-end appendix tests kept honest about proof strength
+- optional artifact checks if promoting them into the shared corpus harness becomes worthwhile
+
+### Exit Criteria
+
+- both targets are clearly tracked as working examples
+- proof labeling remains `proved-quantified`
+- no doc implies that broader quantified obligations are solved in general
+
+### Risk
+
+Low.
+
+## Phase 9: Add Direct Current-Semantics Expansion Targets
+
+### Objective
+
+Broaden coverage using examples that should fit the current core language and existing lowerer patterns with little or no semantic work.
+
+### Target Set
+
+- `safe-under-limit`
+- `prefix-nonzero`
+- `equal-zero-flags`
+- `string-eq-flags`
+
+### Outputs
+
+- naive specs for each target
+- focused evaluator / lowerer tests
+- corpus-grade end-to-end tests
+- checked-in generated artifacts and drift checks where appropriate
+
+### Exit Criteria
+
+- these four targets are either green or reclassified with a concrete blocker
+- no one-off hacks are required to make them pass
+
+### Risk
+
+Low to medium.
+
+## Phase 10: Add One Reusable Nested-Combinator Lowering Extension
+
+### Objective
+
+Unlock the most common next step beyond the fixed core corpus without attempting a fully general nested-combinator compiler.
+
+### Target Set
+
+- `map-after-filter`
+- `filter-after-map`
+
+### Outputs
+
+- one shared lowering extension in `codegen/` for the targeted nested-pipeline shapes
+- focused regression tests for both supported shapes and unsupported nearby shapes
+- corpus-grade end-to-end tests and artifacts for both targets
+
+### Exit Criteria
+
+- both targets are green
+- the implementation is clearly reusable and shape-bounded
+- unsupported broader nesting still fails honestly rather than falling through unsafely
+
+### Risk
+
+Medium.
+
+### Notes
+
+Prefer shape recognition such as `map f (filter p xs)` and `filter p (map f xs)` over any attempt at broad optimizer-style normalization.
+
+## Phase 11: Add Flattening Support For `concat-map`
+
+### Objective
+
+Support the smallest useful flattening case inside the current language without committing to general list-monad machinery.
+
+### Target Set
+
+- `concat-map`
+
+### Outputs
+
+- either a dedicated lowering path for `concat (map f xs)` or a clearly bounded reusable flattening helper
+- focused tests for empty, singleton, and multi-element expansion cases
+- end-to-end target coverage with artifact drift check
+
+### Exit Criteria
+
+- `concat-map` is green, or the blocker is documented precisely enough to justify continued deferral
+
+### Risk
+
+Medium.
+
+## Phase 12: New-Machinery Track For Three Additional Sequence Primitives
+
+### Objective
+
+Expand the core language deliberately rather than incidentally, adding exactly the machinery needed for three common sequence operators.
+
+### Target Set
+
+- `zip-with-sum`
+- `take-while-positive`
+- `drop-while-positive`
+
+### Outputs
+
+- new primitives in the core AST / parser / pretty-printer
+- typechecker support
+- evaluator support
+- focused Go lowering support
+- one corpus-grade target per primitive
+- regression tests for boundary behavior
+
+### Exit Criteria
+
+- each primitive has a complete vertical slice: parse -> typecheck -> eval -> lower -> compile/test
+- the implementation remains minimal and does not drag in speculative extra semantics
+
+### Risk
+
+Medium.
+
+### Primitive-by-primitive plan
+
+1. `zipWith`
+   - add `PrimZipWith`
+   - type: `(a -> b -> c) -> [a] -> [b] -> [c]`
+   - eval: iterate to the shorter input
+   - lower: index loop over both slices
+   - first target: `zip-with-sum`
+
+2. `takeWhile`
+   - add `PrimTakeWhile`
+   - type: `(a -> Bool) -> [a] -> [a]`
+   - eval: consume prefix while predicate holds
+   - lower: single loop with early break
+   - first target: `take-while-positive`
+
+3. `dropWhile`
+   - add `PrimDropWhile`
+   - type: `(a -> Bool) -> [a] -> [a]`
+   - eval: skip prefix while predicate holds
+   - lower: locate first failing index, then return suffix
+   - first target: `drop-while-positive`
+
 ## What Not To Do During v1 Execution
 
 Do not spend v1 time on:
@@ -358,3 +527,10 @@ This plan succeeds when:
 - almost all work happened by promoting targets through reusable support,
 - failures stopped being new categories and became ordinary regressions,
 - and the system's proof limits are documented clearly enough that users cannot confuse engineering confidence with formal proof.
+
+For the post-v1 expansion roadmap, success means:
+
+- the repo distinguishes clearly between the finished 20-target core and the broader 32-target universe
+- the next 6 near-term targets land through small reusable changes rather than heroics
+- `concat-map` is either supported honestly or documented as a still-real blocker
+- the 3 new-machinery targets are implemented as deliberate primitive additions, not accidental backend hacks

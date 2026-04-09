@@ -29,6 +29,7 @@ type corpusCase struct {
 type corpusTarget struct {
 	name     string
 	funcName string
+	artifact string
 	spec     core.Term
 	rewrites []corpusRewrite
 	cases    []corpusCase
@@ -44,6 +45,19 @@ func TestV1Corpus(t *testing.T) {
 	targets := v1CorpusTargets()
 	if got := len(targets); got != 20 {
 		t.Fatalf("v1 corpus drift: got %d targets, want 20", got)
+	}
+
+	for _, target := range targets {
+		t.Run(target.name, func(t *testing.T) {
+			runCorpusTarget(t, target)
+		})
+	}
+}
+
+func TestPhase9ExpansionTargets(t *testing.T) {
+	targets := phase9ExpansionTargets()
+	if got := len(targets); got != 4 {
+		t.Fatalf("phase 9 expansion drift: got %d targets, want 4", got)
 	}
 
 	for _, target := range targets {
@@ -114,7 +128,7 @@ func runCorpusTarget(t *testing.T, target corpusTarget) {
 		t.Fatalf("LowerToGo: %v", err)
 	}
 
-	assertCorpusArtifact(t, target.name, goCode)
+	assertArtifact(t, target.artifact, target.name, goCode)
 	compileAndTest(t, goCode, renderCompiledCorpusTest(target.funcName, resultTy, compiledCases))
 }
 
@@ -240,27 +254,30 @@ func needsReflect(ty core.Type) bool {
 	}
 }
 
-func assertCorpusArtifact(t *testing.T, name, actual string) {
+func assertArtifact(t *testing.T, artifactGroup, name, actual string) {
 	t.Helper()
 
-	path := filepath.Join("testdata", "corpus", name+".go")
+	if artifactGroup == "" {
+		artifactGroup = "corpus"
+	}
+	path := filepath.Join("testdata", artifactGroup, name+".go")
 	actual = normalizeCorpusArtifact(actual)
 
 	if os.Getenv(updateCorpusArtifactsEnv) == "1" {
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			t.Fatalf("mkdir corpus artifacts: %v", err)
+			t.Fatalf("mkdir artifact dir: %v", err)
 		}
 		if err := os.WriteFile(path, []byte(actual+"\n"), 0644); err != nil {
-			t.Fatalf("write corpus artifact: %v", err)
+			t.Fatalf("write artifact: %v", err)
 		}
 	}
 
 	wantBytes, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read corpus artifact %s: %v", path, err)
+		t.Fatalf("read artifact %s: %v", path, err)
 	}
 	if want := normalizeCorpusArtifact(string(wantBytes)); want != actual {
-		t.Fatalf("corpus artifact %s is stale\n--- want ---\n%s\n--- actual ---\n%s", path, want, actual)
+		t.Fatalf("artifact %s is stale\n--- want ---\n%s\n--- actual ---\n%s", path, want, actual)
 	}
 }
 
@@ -281,6 +298,14 @@ func mkBoolList(xs ...bool) core.Term {
 	elems := make([]core.Term, len(xs))
 	for i, x := range xs {
 		elems[i] = core.MkBool(x)
+	}
+	return core.MkList(elems...)
+}
+
+func mkStringList(xs ...string) core.Term {
+	elems := make([]core.Term, len(xs))
+	for i, x := range xs {
+		elems[i] = core.MkStr(x)
 	}
 	return core.MkList(elems...)
 }
@@ -339,6 +364,64 @@ func mkProcessableSpec() core.Term {
 					core.MkVar("b0"),
 					core.MkVar("txs"),
 				),
+			),
+		),
+	)
+}
+
+func mkSafeUnderLimitSpec() core.Term {
+	return core.MkLam("limit", &core.TInt{},
+		core.MkLam("xs", &core.TList{Elem: &core.TInt{}},
+			core.MkApps(core.MkPrim(core.PrimFoldr),
+				core.MkLam("x", &core.TInt{},
+					core.MkLam("acc", &core.TBool{},
+						core.MkIf(
+							core.MkApps(core.MkPrim(core.PrimLe), core.MkVar("x"), core.MkVar("limit")),
+							core.MkVar("acc"),
+							core.MkBool(false),
+						),
+					),
+				),
+				core.MkBool(true),
+				core.MkVar("xs"),
+			),
+		),
+	)
+}
+
+func mkPrefixNonzeroSpec() core.Term {
+	return core.MkLam("xs", &core.TList{Elem: &core.TInt{}},
+		core.MkApps(core.MkPrim(core.PrimScanl),
+			core.MkLam("acc", &core.TBool{},
+				core.MkLam("x", &core.TInt{},
+					core.MkApps(core.MkPrim(core.PrimAnd),
+						core.MkVar("acc"),
+						core.MkApps(core.MkPrim(core.PrimNeq), core.MkVar("x"), core.MkInt(0)),
+					),
+				),
+			),
+			core.MkBool(true),
+			core.MkVar("xs"),
+		),
+	)
+}
+
+func mkEqualZeroFlagsSpec() core.Term {
+	return core.MkApp(core.MkPrim(core.PrimMap),
+		core.MkLam("x", &core.TInt{},
+			core.MkApps(core.MkPrim(core.PrimEq), core.MkVar("x"), core.MkInt(0)),
+		),
+	)
+}
+
+func mkStringEqFlagsSpec() core.Term {
+	return core.MkLam("want", &core.TString{},
+		core.MkLam("xs", &core.TList{Elem: &core.TString{}},
+			core.MkApps(core.MkPrim(core.PrimMap),
+				core.MkLam("s", &core.TString{},
+					core.MkApps(core.MkPrim(core.PrimEq), core.MkVar("s"), core.MkVar("want")),
+				),
+				core.MkVar("xs"),
 			),
 		),
 	)
@@ -742,5 +825,54 @@ func v1CorpusTargets() []corpusTarget {
 		mapFusionBasic,
 		mapIncThenSquare,
 		mapFoldrIdentity,
+	}
+}
+
+func phase9ExpansionTargets() []corpusTarget {
+	return []corpusTarget{
+		{
+			name:     "safe-under-limit",
+			funcName: "SafeUnderLimit",
+			artifact: "expansion",
+			spec:     mkSafeUnderLimitSpec(),
+			cases: []corpusCase{
+				{name: "all-safe", args: []core.Term{core.MkInt(5), mkIntList(1, 5, 3)}, want: core.MkBool(true)},
+				{name: "contains-breach", args: []core.Term{core.MkInt(5), mkIntList(1, 7, 3)}, want: core.MkBool(false)},
+				{name: "empty", args: []core.Term{core.MkInt(-1), mkIntList()}, want: core.MkBool(true)},
+			},
+		},
+		{
+			name:     "prefix-nonzero",
+			funcName: "PrefixNonzero",
+			artifact: "expansion",
+			spec:     mkPrefixNonzeroSpec(),
+			cases: []corpusCase{
+				{name: "empty", args: []core.Term{mkIntList()}, want: mkBoolList(true)},
+				{name: "all-nonzero", args: []core.Term{mkIntList(3, -2, 5)}, want: mkBoolList(true, true, true, true)},
+				{name: "zero-breaks-prefix", args: []core.Term{mkIntList(3, 0, 2)}, want: mkBoolList(true, true, false, false)},
+			},
+		},
+		{
+			name:     "equal-zero-flags",
+			funcName: "EqualZeroFlags",
+			artifact: "expansion",
+			spec:     mkEqualZeroFlagsSpec(),
+			cases: []corpusCase{
+				{name: "mixed", args: []core.Term{mkIntList(-1, 0, 2, 0)}, want: mkBoolList(false, true, false, true)},
+				{name: "all-zero", args: []core.Term{mkIntList(0, 0)}, want: mkBoolList(true, true)},
+				{name: "empty", args: []core.Term{mkIntList()}, want: mkBoolList()},
+			},
+		},
+		{
+			name:     "string-eq-flags",
+			funcName: "StringEqFlags",
+			artifact: "expansion",
+			spec:     mkStringEqFlagsSpec(),
+			cases: []corpusCase{
+				{name: "mixed", args: []core.Term{core.MkStr("ok"), mkStringList("ok", "no", "ok")}, want: mkBoolList(true, false, true)},
+				{name: "empty-target-and-list", args: []core.Term{core.MkStr(""), mkStringList()}, want: mkBoolList()},
+				{name: "empty-string-matches", args: []core.Term{core.MkStr(""), mkStringList("", "a", "")}, want: mkBoolList(true, false, true)},
+			},
+		},
 	}
 }

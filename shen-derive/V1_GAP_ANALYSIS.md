@@ -1,12 +1,13 @@
 # shen-derive v1 Gap Analysis
 
-This document groups the remaining work for v1 by **reusable gap** rather than by individual corpus target. This follows the planning handoff directive and supports the core vision of preferring reusable unlocks over one-off fixes.
+This document groups work by **reusable gap** rather than by individual target. It began as the v1 gap analysis; it now also records the post-v1 expansion gaps for the broader tracked target universe.
 
 ## Current Corpus Summary
 - **Fixed v1 corpus**: 20 targets (11 green baseline + 9 yellow to promote)
 - **Strongest existing slice**: `payment-processable` (uses `all-scanl-fusion`, tuple-state foldl, projection)
 - **Green baseline coverage**: Good for direct map/filter/fold/scan, boolean folds, let-bindings, simple list producers.
 - **Yellow coverage goals**: Additional accumulators (`product`, `count-non-negative`), scans, tuple-state (projected and full), and rewrite chains (`map-fusion`, `map-foldr-fusion`).
+- **Post-v1 tracked universe**: 32 total targets = 20 fixed core + 2 already-working appendix targets + 6 near-term expansion targets + 1 existing-language stretch target + 3 new-machinery targets.
 
 ## Reusable Gaps
 
@@ -57,20 +58,53 @@ This document groups the remaining work for v1 by **reusable gap** rather than b
 **Unlocks**: Stability signal ("failures are now ordinary regressions, not new categories").
 **Recommended action**: Per stop rule in DONE_CHECKLIST. Extend `laws_test.go`, `lower_test.go`, corpus tests with negative cases, boundary cases.
 
+## Post-v1 Expansion Gaps
+
+### 7. Expansion Harness Promotion (high unlock count)
+**Why it blocks**: The current shared harness enforces `20` fixed core targets. The broader 32-target universe is documented, but not yet represented as a tracked execution set.
+**Unlocks**: All 12 post-v1 targets.
+**Recommended action**: Keep the fixed 20-target core intact for the v1 done checklist, but add an explicit expansion-target layer or second harness rather than pretending the broader universe is still "out of scope."
+
+### 8. Direct Current-Semantics Coverage (low risk, 4 unlocks)
+**Why it blocked**: `safe-under-limit`, `prefix-nonzero`, `equal-zero-flags`, and `string-eq-flags` were planned but not yet captured as real end-to-end targets.
+**Unlocks**: 4 additional targets with little or no semantic growth.
+**Status**: Closed. A separate expansion harness now covers all four, with checked-in generated artifacts under `codegen/testdata/expansion/`.
+**Recommended action**: Treat this as the template for future post-v1 direct targets: real pipeline, checked artifacts, no one-off lowering hacks.
+
+### 9. Nested-Combinator Lowering (medium risk, 2 unlocks)
+**Why it blocks**: `map-after-filter` and `filter-after-map` are common, valuable next-step examples, but the Go lowerer currently recognizes only top-level `map`, `filter`, `foldr`, `foldl`, projected `foldl`, and `scanl` shapes.
+**Unlocks**: 2 high-value targets and a more honest statement about practical compositional support.
+**Recommended action**: Add one shape-bounded nested lowering path for `map f (filter p xs)` and `filter p (map f xs)`. Do not expand this into a general optimizer.
+
+### 10. Flattening / `concat` Lowering (medium risk, 1 unlock)
+**Why it blocks**: `concat` exists in the core language and evaluator, but flattening is not yet a first-class Go lowering path.
+**Unlocks**: `concat-map`.
+**Recommended action**: Support the smallest useful flattening case, ideally `concat (map f xs)`, with explicit tests. Avoid introducing monadic/generalized flattening semantics unless more than one target requires it.
+
+### 11. Primitive Growth Track (medium risk, 3 unlocks)
+**Why it blocks**: `zip-with-sum`, `take-while-positive`, and `drop-while-positive` require new language primitives, parser support, typechecker rules, evaluator behavior, and Go lowering.
+**Unlocks**: 3 additional targets and a cleaner path for common sequence operations.
+**Recommended action**: Add each primitive as a full vertical slice (`AST -> parse -> print -> typecheck -> eval -> lower -> tests`) and keep the implementations minimal. Do not bundle them into a general sequence-library expansion.
+
 ## v1-Critical vs Optional
 - **Must close for v1**: Harness (1), law coverage for chosen corpus (2), lowering for chosen corpus (3), docs/conventions (5), regression tests.
 - **Explicitly optional/deferred**: General nested lowering, proof-complete discharge, additional yellows, beautification.
 - **Drop**: Anything that teaches no reusable pattern or requires one-off hacks.
 
+## Post-v1 Priorities
+- **Near-term**: Expansion harness promotion (7), nested-combinator lowering (9).
+- **Second wave**: Flattening / `concat` lowering (10).
+- **Separate machinery track**: Primitive growth for `zipWith`, `takeWhile`, `dropWhile` (11).
+
 ## Alignment with Core Vision (@PLAN.md / DESIGN.md)
 This analysis reinforces:
-- **Fixed corpus over open-ended**: 20 targets only.
-- **Reusable over heroic**: Every task phrased in terms of gaps that unlock *multiple* targets.
-- **Honest boundaries**: the proved arithmetic fragment is separated clearly from the remaining diagnostic-only quantified cases.
-- **Engineering-done first**: Pipeline + artifacts + tests before perfect proofs.
-- **No scope creep**: Red candidates like `map-after-filter`, `concat-map`, `takeWhile` explicitly out unless forced.
+- **Fixed core first, explicit expansion second**: the 20-target core remains the v1 done contract, but the broader universe is now planned explicitly rather than hand-waved.
+- **Reusable over heroic**: every task should still be phrased in terms of gaps that unlock *multiple* targets.
+- **Honest boundaries**: the proved symbolic fragment is still separated clearly from the remaining diagnostic-only quantified cases.
+- **Engineering-done first**: pipeline + artifacts + tests before perfect proofs.
+- **Deliberate language growth**: new primitives are acceptable when planned as narrow, explicit vertical slices rather than sneaking in through one-off demos.
 
-If during execution we find a gap that blocks >3 corpus items and is small/reusable, it may be promoted into v1. Otherwise, reclassify the affected targets.
+If during expansion we find a gap that unlocks multiple targets and stays small/reusable, promote it. If it turns into speculative semantics or one-off handling, document and defer it.
 
 This gap analysis should be kept up-to-date alongside `V1_CORPUS_STATUS.md` and `V1_EXECUTION_PLAN.md`. It makes "done" falsifiable.
 

@@ -35,6 +35,11 @@ type proofSupportError struct {
 	msg string
 }
 
+const (
+	symbolicPolynomialMethod = "symbolic-polynomial"
+	symbolicFragmentMethod   = "symbolic-fragment"
+)
+
 func (e *proofSupportError) Error() string {
 	return e.msg
 }
@@ -49,11 +54,11 @@ func dischargeSymbolic(cond laws.InstantiatedCondition) (DischargeResult, bool) 
 
 	freeVarTypes, err := inferConditionFreeVarTypes(cond, freeVars)
 	if err != nil {
-		return unsupportedProofResult("symbolic-polynomial", err), false
+		return unsupportedProofResult(symbolicFragmentMethod, err), false
 	}
 	for _, name := range freeVars {
 		if _, ok := freeVarTypes[name].(*core.TInt); !ok {
-			return unsupportedProofResult("symbolic-polynomial",
+			return unsupportedProofResult(symbolicFragmentMethod,
 				fmt.Errorf("free variable %s has non-integer type %s", name, freeVarTypes[name])), false
 		}
 	}
@@ -65,41 +70,60 @@ func dischargeSymbolic(cond laws.InstantiatedCondition) (DischargeResult, bool) 
 
 	lhs, err := symbolicEval(cond.LHS, env)
 	if err != nil {
-		return unsupportedProofResult("symbolic-polynomial", err), false
+		return unsupportedProofResult(symbolicFragmentMethod, err), false
 	}
 	rhs, err := symbolicEval(cond.RHS, env)
 	if err != nil {
-		return unsupportedProofResult("symbolic-polynomial", err), false
+		return unsupportedProofResult(symbolicFragmentMethod, err), false
 	}
 
-	lhsPoly, ok := lhs.(symPoly)
-	if !ok {
-		return unsupportedProofResult("symbolic-polynomial",
-			fmt.Errorf("lhs does not normalize to an integer polynomial")), false
-	}
-	rhsPoly, ok := rhs.(symPoly)
-	if !ok {
-		return unsupportedProofResult("symbolic-polynomial",
-			fmt.Errorf("rhs does not normalize to an integer polynomial")), false
+	// Extended symbolic fragment: polynomial equalities OR boolean combinations
+	// (conj/disj/not) of comparisons (=,!=,<,<=,>,>=) over normalized integer
+	// polynomial terms. Only soundly proves when normalization yields a
+	// constant boolean truth value independent of free integer variables.
+	if p1, ok := lhs.(symPoly); ok {
+		if p2, ok := rhs.(symPoly); ok {
+			if p1.poly.equal(p2.poly) {
+				return DischargeResult{
+					Discharged: true,
+					Method:     symbolicPolynomialMethod,
+					Output: fmt.Sprintf("proved normalized polynomial equality:\n  lhs = %s\n  rhs = %s",
+						p1.poly.String(), p2.poly.String()),
+				}, true
+			}
+
+			diff := p1.poly.sub(p2.poly)
+			return DischargeResult{
+				Discharged: false,
+				Method:     symbolicPolynomialMethod,
+				Output: fmt.Sprintf("lhs = %s\nrhs = %s\ndiff = %s",
+					p1.poly.String(), p2.poly.String(), diff.String()),
+				Error: fmt.Errorf("symbolic polynomial proof failed: normalized forms differ"),
+			}, true
+		}
 	}
 
-	if lhsPoly.poly.equal(rhsPoly.poly) {
-		return DischargeResult{
-			Discharged: true,
-			Method:     "symbolic-polynomial",
-			Output: fmt.Sprintf("proved normalized polynomial equality:\n  lhs = %s\n  rhs = %s",
-				lhsPoly.poly.String(), rhsPoly.poly.String()),
-		}, true
+	if b1, ok := lhs.(symBool); ok {
+		if b2, ok := rhs.(symBool); ok {
+			if b1.value == b2.value {
+				return DischargeResult{
+					Discharged: true,
+					Method:     symbolicFragmentMethod,
+					Output: fmt.Sprintf("proved normalized boolean/comparison formula evaluates identically to %t\n(supported: and/or/not of arithmetic comparisons on integer polynomials)",
+						b1.value),
+				}, true
+			}
+			return DischargeResult{
+				Discharged: false,
+				Method:     symbolicFragmentMethod,
+				Output:     fmt.Sprintf("lhs=%t rhs=%t", b1.value, b2.value),
+				Error:      fmt.Errorf("boolean expressions normalize to different constants"),
+			}, true
+		}
 	}
 
-	diff := lhsPoly.poly.sub(rhsPoly.poly)
-	return DischargeResult{
-		Discharged: false,
-		Method:     "symbolic-polynomial",
-		Output: fmt.Sprintf("lhs = %s\nrhs = %s\ndiff = %s",
-			lhsPoly.poly.String(), rhsPoly.poly.String(), diff.String()),
-		Error: fmt.Errorf("symbolic polynomial proof failed: normalized forms differ"),
-	}, true
+	return unsupportedProofResult(symbolicFragmentMethod,
+		fmt.Errorf("lhs/rhs normalized to unsupported types in fragment: %T vs %T (only polys or constant-bool from supported arith comparisons)", lhs, rhs)), false
 }
 
 func unsupportedProofResult(method string, err error) DischargeResult {
@@ -250,25 +274,17 @@ func symbolicExecPrim(op core.PrimOp, args []symValue) (symValue, error) {
 		}
 		return symPoly{poly: a.neg()}, nil
 	case core.PrimEq:
-		a, b, err := asGroundPolys(args)
-		if err != nil {
-			return nil, err
-		}
-		return symBool{value: a.equal(b)}, nil
+		return compareSymPolys(args, func(c int) bool { return c == 0 }, "=")
 	case core.PrimNeq:
-		a, b, err := asGroundPolys(args)
-		if err != nil {
-			return nil, err
-		}
-		return symBool{value: !a.equal(b)}, nil
+		return compareSymPolys(args, func(c int) bool { return c != 0 }, "!=")
 	case core.PrimLt:
-		return compareGroundPolys(args, func(c int) bool { return c < 0 })
+		return compareSymPolys(args, func(c int) bool { return c < 0 }, "<")
 	case core.PrimLe:
-		return compareGroundPolys(args, func(c int) bool { return c <= 0 })
+		return compareSymPolys(args, func(c int) bool { return c <= 0 }, "<=")
 	case core.PrimGt:
-		return compareGroundPolys(args, func(c int) bool { return c > 0 })
+		return compareSymPolys(args, func(c int) bool { return c > 0 }, ">")
 	case core.PrimGe:
-		return compareGroundPolys(args, func(c int) bool { return c >= 0 })
+		return compareSymPolys(args, func(c int) bool { return c >= 0 }, ">=")
 	case core.PrimAnd:
 		a, err := asSymBool(args[0])
 		if err != nil {
@@ -316,7 +332,9 @@ func asSymBool(v symValue) (bool, error) {
 	return b.value, nil
 }
 
-func asGroundPolys(args []symValue) (polynomial, polynomial, error) {
+// asSymPolys extracts two polynomials; does NOT require them to be constant
+// (constant check is done only for ordering comparisons).
+func asSymPolys(args []symValue) (polynomial, polynomial, error) {
 	a, err := asSymPoly(args[0])
 	if err != nil {
 		return polynomial{}, polynomial{}, err
@@ -325,18 +343,22 @@ func asGroundPolys(args []symValue) (polynomial, polynomial, error) {
 	if err != nil {
 		return polynomial{}, polynomial{}, err
 	}
-	if !a.isConstant() || !b.isConstant() {
-		return polynomial{}, polynomial{}, &proofSupportError{msg: "symbolic prover only supports ground integer comparisons"}
-	}
 	return a, b, nil
 }
 
-func compareGroundPolys(args []symValue, pred func(int) bool) (symValue, error) {
-	a, b, err := asGroundPolys(args)
+// compareSymPolys decides arithmetic comparisons soundly only when the
+// normalized difference polynomial is a constant (i.e. the comparison truth
+// does not depend on the values of free integer variables).
+func compareSymPolys(args []symValue, pred func(int) bool, opName string) (symValue, error) {
+	a, b, err := asSymPolys(args)
 	if err != nil {
 		return nil, err
 	}
-	return symBool{value: pred(a.constant().Cmp(b.constant()))}, nil
+	diff := a.sub(b)
+	if !diff.isConstant() {
+		return nil, &proofSupportError{msg: fmt.Sprintf("symbolic prover only supports %s comparisons of normalized integer polynomials whose difference is constant (truth value independent of free variables)", opName)}
+	}
+	return symBool{value: pred(diff.constant().Cmp(big.NewInt(0)))}, nil
 }
 
 func copySymEnv(env map[string]symValue) map[string]symValue {
