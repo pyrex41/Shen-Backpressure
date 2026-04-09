@@ -1,29 +1,18 @@
-// Package payment_derived demonstrates shen-derive's end-to-end pipeline
-// on the payment domain: spec → derive → discharge → lower → test.
-//
-// The naive spec:
-//   processable b0 txs = all (>= 0) (scanl apply b0 txs)
-//
-// where apply b tx = b - tx (apply a transaction amount to a balance).
-//
-// This checks that running balances never go negative. The naive version
-// computes the full scan (O(n) space) then checks all elements. The derived
-// version fuses scanl+all into a single fold with early-termination potential.
 package payment_derived
 
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/pyrex41/Shen-Backpressure/shen-derive/codegen"
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/core"
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/laws"
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/shen"
 )
-
-// --- Spec definitions ---
 
 // apply b tx = b - tx
 func mkApply() core.Term {
@@ -56,317 +45,187 @@ func mkAll(p core.Term) core.Term {
 	)
 }
 
-// The naive spec: processable b0 txs = all (>= 0) (scanl apply b0 txs)
-//
-// In our AST, this is a function of b0 and txs.
-// We can express "all p . scanl f e" as a composition:
-//   all (>=0) . scanl apply b0
-// applied to txs.
-//
-// For the derivation, we work with the composition form:
-//   all_geq0 . scanl_apply_b0
-// where all_geq0 = all (>=0) = foldr (\x acc -> x>=0 && acc) True
-// and scanl_apply_b0 = scanl apply b0
-
-func TestPaymentDerivation(t *testing.T) {
-	var transcript strings.Builder
-	transcript.WriteString("=== shen-derive: Payment Demo Derivation Transcript ===\n\n")
-
-	// ----- Step 0: Define the naive specification -----
-	transcript.WriteString("--- Step 0: Naive specification ---\n\n")
-	transcript.WriteString("  processable b0 txs = all (>= 0) (scanl apply b0 txs)\n")
-	transcript.WriteString("  where apply b tx = b - tx\n")
-	transcript.WriteString("        all p xs = foldr (\\x acc -> p x && acc) True xs\n\n")
-
-	// Verify the naive spec works
-	apply := mkApply()
-	geq0 := mkGeq0()
-	allGeq0 := mkAll(geq0) // foldr (\x acc -> x>=0 && acc) True
-
-	// naive: all_geq0 (scanl apply b0 txs)
-	// For testing, use b0=100, txs=[30, 50, 40]
-	// Running balances: [100, 70, 20, -20] → has negative → not processable
-	naiveTerm := core.MkApps(allGeq0,
-		core.MkApps(core.MkPrim(core.PrimScanl),
-			apply,
-			core.MkInt(100),
-			core.MkList(core.MkInt(30), core.MkInt(50), core.MkInt(40)),
-		),
-	)
-
-	naiveVal, err := core.Eval(core.EmptyEnv(), naiveTerm)
-	if err != nil {
-		t.Fatalf("naive eval: %v", err)
-	}
-	if naiveVal.String() != "false" {
-		t.Fatalf("naive spec should be false for b0=100, txs=[30,50,40], got %s", naiveVal)
-	}
-	transcript.WriteString("  Verification: processable 100 [30,50,40] = false ✓\n")
-
-	// Positive case: b0=100, txs=[30, 20, 10]
-	// Running balances: [100, 70, 50, 40] → all non-negative → processable
-	naiveTerm2 := core.MkApps(allGeq0,
-		core.MkApps(core.MkPrim(core.PrimScanl),
-			apply,
-			core.MkInt(100),
-			core.MkList(core.MkInt(30), core.MkInt(20), core.MkInt(10)),
-		),
-	)
-	naiveVal2, err := core.Eval(core.EmptyEnv(), naiveTerm2)
-	if err != nil {
-		t.Fatalf("naive eval 2: %v", err)
-	}
-	if naiveVal2.String() != "true" {
-		t.Fatalf("naive spec should be true for b0=100, txs=[30,20,10], got %s", naiveVal2)
-	}
-	transcript.WriteString("  Verification: processable 100 [30,20,10] = true ✓\n\n")
-
-	// ----- Step 1: Express as a composition -----
-	transcript.WriteString("--- Step 1: Express as composition ---\n\n")
-	transcript.WriteString("  processable b0 txs = (all_geq0 . scanl_apply b0) txs\n")
-	transcript.WriteString("  where all_geq0 = foldr (\\x acc -> x>=0 && acc) True\n")
-	transcript.WriteString("        scanl_apply b0 = scanl apply b0\n\n")
-
-	// Composition form: compose all_geq0 (scanl apply b0)
-	// This is partially applied — waiting for txs
-	compTerm := core.MkApps(core.MkPrim(core.PrimCompose),
-		allGeq0,
-		core.MkApps(core.MkPrim(core.PrimScanl), apply, core.MkVar("b0")),
-	)
-
-	transcript.WriteString("  AST: " + core.PrettyPrint(compTerm) + "\n\n")
-
-	// ----- Step 2: Scanl-to-foldr conversion -----
-	// scanl f e xs = snd (foldr (\x (acc, rs) -> (f acc x, rs ++ [f acc x])) (e, [e]) xs)
-	// Actually, this is complex. For the demo, let's take a more direct approach.
-	//
-	// The key insight: all p (scanl f e xs) can be fused into a single foldr.
-	// Specifically:
-	//   all (>=0) . scanl apply b0
-	// = foldr (\tx acc -> let b' = apply (fst acc) tx in (b', snd acc && b' >= 0)) (b0, True)
-	//   ... then take snd of the result
-	//
-	// But this is foldr-fusion applied to:
-	//   f = all_geq0 (the outer function)
-	//   g, e from the scanl
-	//
-	// For the payment demo, let's directly derive the fused form.
-	// The fused step function checks the balance at each step:
-	//
-	//   processable b0 txs = foldl (\(bal, ok) tx ->
-	//       let bal' = bal - tx in (bal', ok && bal' >= 0)) (b0, True) txs
-	//   ... then take snd
-	//
-	// This is equivalent to the naive spec but uses O(1) space.
-
-	transcript.WriteString("--- Step 2: Fuse all + scanl into single fold ---\n\n")
-	transcript.WriteString("  By fold-fusion (Bird, Algebra of Programming, §3.1):\n")
-	transcript.WriteString("  all (>=0) . scanl apply b0\n")
-	transcript.WriteString("  = snd . foldl step (b0, True)\n")
-	transcript.WriteString("  where step (bal, ok) tx = let bal' = bal - tx\n")
-	transcript.WriteString("                            in (bal', ok && bal' >= 0)\n\n")
-
-	// Build the fused term for verification
-	// foldl step (b0, True) txs where step is as above
-	fusedStep := core.MkLam("state", nil,
-		core.MkLam("tx", nil,
-			core.MkLet("bal",
-				core.MkApps(core.MkPrim(core.PrimSub),
-					core.MkApp(core.MkPrim(core.PrimFst), core.MkVar("state")),
-					core.MkVar("tx"),
-				),
-				core.MkTuple(
-					core.MkVar("bal"),
-					core.MkApps(core.MkPrim(core.PrimAnd),
-						core.MkApp(core.MkPrim(core.PrimSnd), core.MkVar("state")),
-						core.MkApps(core.MkPrim(core.PrimGe), core.MkVar("bal"), core.MkInt(0)),
-					),
+func mkProcessableSpec() core.Term {
+	return core.MkLam("b0", &core.TInt{},
+		core.MkLam("txs", &core.TList{Elem: &core.TInt{}},
+			core.MkApp(mkAll(mkGeq0()),
+				core.MkApps(core.MkPrim(core.PrimScanl),
+					mkApply(),
+					core.MkVar("b0"),
+					core.MkVar("txs"),
 				),
 			),
 		),
 	)
-
-	// Test the fused version
-	fusedTerm := core.MkApp(core.MkPrim(core.PrimSnd),
-		core.MkApps(core.MkPrim(core.PrimFoldl),
-			fusedStep,
-			core.MkTuple(core.MkInt(100), core.MkBool(true)),
-			core.MkList(core.MkInt(30), core.MkInt(50), core.MkInt(40)),
-		),
-	)
-	fusedVal, err := core.Eval(core.EmptyEnv(), fusedTerm)
-	if err != nil {
-		t.Fatalf("fused eval: %v", err)
-	}
-	if fusedVal.String() != "false" {
-		t.Fatalf("fused spec should be false, got %s", fusedVal)
-	}
-	transcript.WriteString("  Verification: processable_fused 100 [30,50,40] = false ✓\n")
-
-	fusedTerm2 := core.MkApp(core.MkPrim(core.PrimSnd),
-		core.MkApps(core.MkPrim(core.PrimFoldl),
-			fusedStep,
-			core.MkTuple(core.MkInt(100), core.MkBool(true)),
-			core.MkList(core.MkInt(30), core.MkInt(20), core.MkInt(10)),
-		),
-	)
-	fusedVal2, err := core.Eval(core.EmptyEnv(), fusedTerm2)
-	if err != nil {
-		t.Fatalf("fused eval 2: %v", err)
-	}
-	if fusedVal2.String() != "true" {
-		t.Fatalf("fused spec should be true, got %s", fusedVal2)
-	}
-	transcript.WriteString("  Verification: processable_fused 100 [30,20,10] = true ✓\n\n")
-
-	// ----- Step 3: Discharge side conditions -----
-	transcript.WriteString("--- Step 3: Discharge side conditions ---\n\n")
-
-	// The fusion side condition for this specific case:
-	// For all_geq0 . scanl apply b0 = snd . foldl step (b0, True):
-	// We need: all_geq0 (scanl_step x rest) = step_combined x (all_geq0 rest)
-	// This is the standard scanl-fold fusion condition.
-	//
-	// For the demo, we verify the equivalence empirically:
-	// The condition is that for any intermediate state (bal, ok) and tx:
-	//   "check(apply(bal,tx)) && ok" = "snd(step((bal,ok), tx))"
-	// where check = (>=0)
-
-	empCond := laws.InstantiatedCondition{
-		Description: "all_geq0 distributes over scanl_apply step: check(bal-tx) && ok = snd(step((bal,ok),tx))",
-		// LHS: (bal - tx >= 0) && ok
-		LHS: core.MkApps(core.MkPrim(core.PrimAnd),
-			core.MkApps(core.MkPrim(core.PrimGe),
-				core.MkApps(core.MkPrim(core.PrimSub), core.MkVar("bal"), core.MkVar("tx")),
-				core.MkInt(0)),
-			core.MkVar("ok"),
-		),
-		// RHS: ok && (bal - tx >= 0)
-		RHS: core.MkApps(core.MkPrim(core.PrimAnd),
-			core.MkVar("ok"),
-			core.MkApps(core.MkPrim(core.PrimGe),
-				core.MkApps(core.MkPrim(core.PrimSub), core.MkVar("bal"), core.MkVar("tx")),
-				core.MkInt(0)),
-		),
-	}
-
-	// Check empirically (commutativity of &&)
-	dr := shen.DischargeEmpirical(empCond)
-	if !dr.Discharged {
-		t.Fatalf("empirical discharge failed: %v", dr.Error)
-	}
-	transcript.WriteString(fmt.Sprintf("  Side condition: %s\n", empCond.Description))
-	transcript.WriteString(fmt.Sprintf("  Empirical check: passed (%s)\n", dr.Output))
-
-	// Also validate the emitted Shen encoding
-	drShen := shen.DischargeShenOnly(empCond)
-	if drShen.Error == nil {
-		transcript.WriteString(fmt.Sprintf("  Shen validation: %s\n", drShen.Method))
-	} else if strings.Contains(drShen.Error.Error(), "does not constitute a proof") {
-		transcript.WriteString("  Shen validation: emitted spec accepted by tc+ (validation only; not a proof)\n")
-	} else {
-		transcript.WriteString(fmt.Sprintf("  Shen validation: unavailable/failed (%v)\n", drShen.Error))
-	}
-	transcript.WriteString("\n")
-
-	// ----- Step 4: Lower to Go -----
-	transcript.WriteString("--- Step 4: Lower to Go ---\n\n")
-
-	// The final derived term for lowering:
-	// Processable takes b0 and txs, returns bool
-	// It's: foldl step (b0, True) txs |> snd
-	//
-	// For clean Go, we directly generate a function that folds
-	// maintaining (balance, allOk) state:
-	//
-	// func Processable(b0 int, txs []int) bool {
-	//     bal := b0
-	//     ok := true
-	//     for _, tx := range txs {
-	//         bal = bal - tx
-	//         ok = ok && bal >= 0
-	//     }
-	//     return ok
-	// }
-	//
-	// This is the hand-optimized form. For the lowering, we generate
-	// from the foldr-based form:
-	// foldr (\tx acc -> if bal-tx >= 0 then acc else False) True
-	// after inlining the balance threading.
-
-	// For a clean demo, lower the fold-based allNonNeg on running balances:
-	// processable b0 txs = foldr (\tx acc -> if b0 - tx >= 0 then acc else False) True
-	// But this doesn't thread the balance... We need the foldl version.
-	//
-	// Let's lower a simplified but correct version: the foldl that checks
-	// running balances.
-
-	// Generate Go manually for the optimized form (the derivation justifies it)
-	goCode := `// Code generated by shen-derive. DO NOT EDIT.
-//
-// Derived from: processable b0 txs = all (>= 0) (scanl apply b0 txs)
-// Via: scanl-fold fusion (Bird, Algebra of Programming, §3.1)
-// Side conditions checked empirically; emitted Shen validated with tc+.
-
-package derived
-
-// Processable checks whether all running balances remain non-negative
-// when applying a sequence of transaction amounts to an initial balance.
-//
-// Derived from the naive specification:
-//   processable b0 txs = all (>= 0) (scanl (\b tx -> b - tx) b0 txs)
-//
-// Fused into a single-pass fold with O(1) space:
-//   processable b0 txs = snd (foldl step (b0, True) txs)
-//   where step (bal, ok) tx = let bal' = bal - tx in (bal', ok && bal' >= 0)
-func Processable(b0 int, txs []int) bool {
-	bal := b0
-	ok := true
-	for _, tx := range txs {
-		bal = bal - tx
-		ok = ok && bal >= 0
-	}
-	return ok
 }
-`
 
-	transcript.WriteString("  Generated Go function:\n\n")
-	for _, line := range strings.Split(goCode, "\n") {
-		transcript.WriteString("    " + line + "\n")
+type paymentCase struct {
+	name string
+	b0   int64
+	txs  []int64
+	want string
+}
+
+func evalProcessable(t *testing.T, fn core.Term, b0 int64, txs []int64) string {
+	t.Helper()
+
+	terms := make([]core.Term, len(txs))
+	for i, tx := range txs {
+		terms[i] = core.MkInt(tx)
 	}
-	transcript.WriteString("\n")
 
-	// ----- Step 5: Verify the generated Go is equivalent -----
-	transcript.WriteString("--- Step 5: Verify equivalence ---\n\n")
-
-	// We can't literally compile and run Go from within this test,
-	// but we can verify the algorithm by running it in the evaluator.
-	// The fused foldl form was already verified in Step 2.
-	transcript.WriteString("  Naive vs fused equivalence verified on test cases ✓\n")
-	transcript.WriteString("  Generated Go compiles and matches fused algorithm ✓\n\n")
-
-	// ----- Write the transcript -----
-	transcript.WriteString("=== Derivation chain summary ===\n\n")
-	transcript.WriteString("  1. SPEC:    processable b0 txs = all (>=0) (scanl apply b0 txs)\n")
-	transcript.WriteString("  2. REWRITE: scanl-fold fusion → snd . foldl step (b0, True)\n")
-	transcript.WriteString("     RULE:    fold-fusion (Bird, Algebra of Programming, §3.1)\n")
-	transcript.WriteString("     SIDE:    commutativity of (&&) — empirical check + Shen tc+ validation\n")
-	transcript.WriteString("  3. LOWER:   foldl → forward for-loop, tuple → two variables\n")
-	transcript.WriteString("  4. OUTPUT:  Processable(b0 int, txs []int) bool\n\n")
-	transcript.WriteString("The efficient Go implementation is equivalent to the naive specification.\n")
-	transcript.WriteString("Each step is justified by a named algebraic law with recorded side-condition checks.\n")
-
-	// Write transcript and generated Go to temp dir for inspection
-	tmpDir := t.TempDir()
-	transcriptPath := filepath.Join(tmpDir, "derivation.txt")
-	if err := os.WriteFile(transcriptPath, []byte(transcript.String()), 0644); err != nil {
-		t.Fatalf("write transcript: %v", err)
+	val, err := core.Eval(core.EmptyEnv(),
+		core.MkApps(fn, core.MkInt(b0), core.MkList(terms...)),
+	)
+	if err != nil {
+		t.Fatalf("eval processable(%d, %v): %v", b0, txs, err)
 	}
-	t.Logf("Derivation transcript written to %s", transcriptPath)
-	t.Logf("\n%s", transcript.String())
+	return val.String()
+}
 
-	goPath := filepath.Join(tmpDir, "processable.go")
-	if err := os.WriteFile(goPath, []byte(goCode), 0644); err != nil {
-		t.Fatalf("write go: %v", err)
+func formatIntList(xs []int64) string {
+	parts := make([]string, len(xs))
+	for i, x := range xs {
+		parts[i] = fmt.Sprintf("%d", x)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+func renderTranscript(original, rewritten core.Term, goCode string, cases []paymentCase) string {
+	var b strings.Builder
+
+	b.WriteString("=== shen-derive: Payment Demo Derivation Transcript ===\n\n")
+	b.WriteString("--- Step 0: Naive specification ---\n\n")
+	b.WriteString("processable b0 txs = all (>= 0) (scanl apply b0 txs)\n")
+	b.WriteString("where apply b tx = b - tx\n")
+	b.WriteString("      all p xs = foldr (\\x acc -> p x && acc) True xs\n\n")
+	b.WriteString("AST:\n")
+	b.WriteString("  " + core.PrettyPrint(original) + "\n\n")
+
+	b.WriteString("--- Step 1: Apply named rewrite ---\n\n")
+	b.WriteString("Rule: all-scanl-fusion\n")
+	b.WriteString("Before:\n")
+	b.WriteString("  " + core.PrettyPrint(original) + "\n")
+	b.WriteString("After:\n")
+	b.WriteString("  " + core.PrettyPrint(rewritten) + "\n")
+	b.WriteString("Obligations: none\n\n")
+
+	b.WriteString("--- Step 2: Verify evaluator equivalence ---\n\n")
+	for _, tc := range cases {
+		b.WriteString(fmt.Sprintf("%s: processable %d %s = %s\n", tc.name, tc.b0, formatIntList(tc.txs), tc.want))
+	}
+	b.WriteString("\n")
+
+	b.WriteString("--- Step 3: Lower rewritten term to Go ---\n\n")
+	for _, line := range strings.Split(strings.TrimRight(goCode, "\n"), "\n") {
+		b.WriteString("  " + line + "\n")
+	}
+	b.WriteString("\n")
+
+	b.WriteString("--- Step 4: Artifact checks ---\n\n")
+	b.WriteString("Generated Go matches checked-in artifact.\n")
+	b.WriteString("Transcript matches checked-in artifact.\n")
+	b.WriteString("Generated Go compiles and passes focused tests.\n")
+
+	return b.String()
+}
+
+func normalizeArtifact(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.TrimRight(s, "\n")
+}
+
+func compileGeneratedProcessable(t *testing.T, goCode string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module paymenttest\n\ngo 1.24\n"), 0644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "processable.go"), []byte(goCode), 0644); err != nil {
+		t.Fatalf("write processable.go: %v", err)
+	}
+
+	testCode := `package payment_derived
+
+import "testing"
+
+func TestGeneratedProcessable(t *testing.T) {
+	if Processable(100, []int{30, 50, 40}) {
+		t.Fatal("expected overspend case to fail")
+	}
+	if !Processable(100, []int{30, 20, 10}) {
+		t.Fatal("expected safe transactions to pass")
+	}
+	if Processable(-1, []int{}) {
+		t.Fatal("expected negative initial balance to fail")
+	}
+}`
+	if err := os.WriteFile(filepath.Join(dir, "processable_test.go"), []byte(testCode), 0644); err != nil {
+		t.Fatalf("write processable_test.go: %v", err)
+	}
+
+	cmd := exec.Command("go", "test", "./...")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go test failed: %v\n%s\nGenerated source:\n%s", err, out, goCode)
+	}
+}
+
+func TestPaymentDerivation(t *testing.T) {
+	spec := mkProcessableSpec()
+
+	rewrittenResult, err := shen.RewriteStrict(spec, laws.AllScanlFusion(), laws.Path{0, 0}, nil)
+	if err != nil {
+		t.Fatalf("RewriteStrict: %v", err)
+	}
+	if len(rewrittenResult.Obligations) != 0 {
+		t.Fatalf("expected unconditional rewrite, got %d obligations", len(rewrittenResult.Obligations))
+	}
+
+	cases := []paymentCase{
+		{name: "overspend", b0: 100, txs: []int64{30, 50, 40}, want: "false"},
+		{name: "safe", b0: 100, txs: []int64{30, 20, 10}, want: "true"},
+		{name: "negative-initial", b0: -1, txs: nil, want: "false"},
+	}
+	for _, tc := range cases {
+		specVal := evalProcessable(t, spec, tc.b0, tc.txs)
+		rewrittenVal := evalProcessable(t, rewrittenResult.Rewritten, tc.b0, tc.txs)
+		if specVal != tc.want {
+			t.Fatalf("%s: spec = %s, want %s", tc.name, specVal, tc.want)
+		}
+		if rewrittenVal != tc.want {
+			t.Fatalf("%s: rewritten = %s, want %s", tc.name, rewrittenVal, tc.want)
+		}
+	}
+
+	ty, err := core.CheckTerm(rewrittenResult.Rewritten)
+	if err != nil {
+		t.Fatalf("CheckTerm rewritten: %v", err)
+	}
+	goCode, err := codegen.LowerToGo(rewrittenResult.Rewritten, ty, "Processable", "payment_derived")
+	if err != nil {
+		t.Fatalf("LowerToGo: %v", err)
+	}
+
+	compileGeneratedProcessable(t, goCode)
+
+	transcript := renderTranscript(spec, rewrittenResult.Rewritten, goCode, cases)
+
+	expectedGo, err := os.ReadFile("processable.go")
+	if err != nil {
+		t.Fatalf("read processable.go: %v", err)
+	}
+	if normalizeArtifact(string(expectedGo)) != normalizeArtifact(goCode) {
+		t.Fatalf("checked-in processable.go is stale\n--- expected ---\n%s\n--- actual ---\n%s", expectedGo, goCode)
+	}
+
+	expectedTranscript, err := os.ReadFile("derivation.txt")
+	if err != nil {
+		t.Fatalf("read derivation.txt: %v", err)
+	}
+	if normalizeArtifact(string(expectedTranscript)) != normalizeArtifact(transcript) {
+		t.Fatalf("checked-in derivation.txt is stale\n--- expected ---\n%s\n--- actual ---\n%s", expectedTranscript, transcript)
 	}
 }

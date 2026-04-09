@@ -1,0 +1,149 @@
+# SCUD Graph v1
+# Phase: derive
+
+@meta {
+  name derive
+  updated 2026-04-09T23:05:00Z
+
+}
+
+@nodes
+# id | title | status | complexity | priority
+1 | Finalize V1_CORPUS_STATUS.md with fixed 20-target corpus | X | 2 | H
+2 | Define standard per-target test pattern for corpus | X | 3 | H
+3 | Implement corpus tests for green baseline targets (sum, running-sum, squares) | X | 5 | H
+3.1 | Identify and prepare corpus data for green baseline targets | X | 0 | H
+3.2 | Implement corpus tests for sum, running-sum, and squares | X | 0 | H
+4 | Implement corpus tests for green baseline targets (filter-positive, all-non-negative, sum-positives) | X | 5 | H
+4.1 | Add shared helper utilities for corpus tests | X | 0 | H
+4.2 | Convert green baseline targets to explicit corpus tests | X | 0 | H
+5 | Implement corpus tests for remaining green baseline targets (singleton-bool to payment-processable) | X | 5 | H
+5.1 | Consolidate and improve corpus test harness quality | X | 0 | H
+5.2 | Implement corpus tests for remaining green targets | X | 0 | H
+6 | Promote low-risk yellow targets (product, running-product, any-negative, count-non-negative) | X | 8 | H
+6.1 | Implement focused lower/evaluator tests for product, running-product, any-negative, count-non-negative targets | X | 0 | H
+6.2 | Implement corpus end-to-end tests and promote targets to green or document blockers | X | 0 | H
+7 | Promote remaining low-risk yellow targets (balance-final, balance-state-pair) | X | 5 | H
+7.1 | Implement corpus tests for balance-final target | X | 0 | H
+7.2 | Implement corpus tests for balance-state-pair target | X | 0 | H
+8 | Promote rewrite-derived yellow targets (map-fusion-basic, map-inc-then-square, map-foldr-identity) | X | 8 | H
+8.1 | Implement tests and checks for rewrite-derived targets | X | 0 | H
+8.2 | Document reusable blockers | X | 0 | H
+9 | Update documentation for conventions and proof boundaries | X | 3 | H
+10 | Perform final verification and decide v1 completion | X | 5 | H
+10.1 | Conduct final reviews and analysis | X | 0 | H
+10.2 | Make v1 completion decision and implement fixes | X | 0 | H
+
+@edges
+# dependent -> dependency
+2 -> 1
+3 -> 2
+3.1 -> 1
+3.1 -> 2
+3.2 -> 3.1
+4 -> 3
+4.1 -> 3
+4.2 -> 4.1
+5 -> 4
+5.1 -> 4
+5.2 -> 5.1
+6 -> 5
+6.1 -> 5
+6.2 -> 6.1
+7 -> 6
+7.1 -> 6
+7.2 -> 6
+8 -> 7
+8.1 -> 7
+8.2 -> 8.1
+9 -> 8
+10 -> 9
+10.1 -> 9
+10.2 -> 10.1
+
+@parents
+# parent: child1, child2
+3: 3.1, 3.2
+4: 4.1, 4.2
+5: 5.1, 5.2
+6: 6.1, 6.2
+7: 7.1, 7.2
+8: 8.1, 8.2
+10: 10.1, 10.2
+
+@agents
+# id | agent_type | model_tier
+1 | fast-builder | fast
+2 | planner | standard
+3 | builder | standard
+3.1 | builder | standard
+3.2 | builder | standard
+4 | builder | standard
+4.1 | builder | standard
+4.2 | builder | standard
+5 | builder | standard
+5.1 | builder | standard
+5.2 | builder | standard
+6 | builder | smart
+6.1 | builder | smart
+6.2 | builder | smart
+7 | builder | standard
+7.1 | builder | standard
+7.2 | builder | standard
+8 | builder | smart
+8.1 | builder | smart
+8.2 | builder | smart
+9 | planner | standard
+10 | tester | standard
+10.1 | tester | standard
+10.2 | tester | standard
+
+@details
+1 | description |
+  Update V1_CORPUS_STATUS.md to remove "Draft 0", align exactly with the 20-target fixed corpus from V1_EXECUTION_PLAN.md (11 green + 9 yellow), update artifact test column for any completed targets, add reference to new V1_GAP_ANALYSIS.md. Create V1_GAP_ANALYSIS.md grouping work by reusable gaps (harness, laws, lowering patterns, proof boundaries, docs). Ensure no ambiguous statuses and clear owner categories (map/fold/scan/tuple-state etc.).
+2 | description |
+  Create a uniform test harness template that includes naive spec, optional rewrite chain, evaluator equivalence checks, Go lowering, compile/run generated Go, and artifact drift checks for each corpus target.
+3 | description |
+  Convert the first three green targets into explicit end-to-end corpus tests using the standard pattern, including generated artifacts and drift checks. Ensure they pass without handwritten code.
+3.1 | description |
+  Research the existing green baseline targets (sum, running-sum, squares) to understand their current implementation and generate or extract the necessary corpus data and artifacts required for end-to-end corpus tests.
+3.2 | description |
+  Create explicit end-to-end corpus tests for the three targets using the standard pattern, incorporating generated artifacts and drift checks, ensuring they pass without any handwritten code changes.
+4 | description |
+  Convert the next three green targets into explicit corpus tests, adding shared helper utilities to avoid duplication. Verify no dependency on handwritten generated code.
+4.1 | description |
+  Implement shared utility functions and helpers to support corpus testing of baseline targets, ensuring reusability and avoiding code duplication across tests.
+4.2 | description |
+  Create explicit corpus tests for the filter-positive, all-non-negative, and sum-positives targets using the shared helpers, and verify that these tests have no dependency on handwritten generated code.
+5 | description |
+  Convert the last five green targets (singleton-bool, inc-all-let, non-neg-flags, identity-bools, payment-processable) into corpus tests, consolidating harness quality and ensuring consistency.
+5.1 | description |
+  Review and enhance the existing corpus test harness to ensure high quality, consistency, and reusability for the remaining green baseline targets.
+5.2 | description |
+  Create corpus tests for singleton-bool, inc-all-let, non-neg-flags, identity-bools, and payment-processable targets using the consolidated harness.
+6 | description |
+  Implement focused lower/evaluator tests and corpus end-to-end tests for the first four low-risk yellow targets. Promote them to green or document concrete blockers if they require new semantics.
+6.1 | description |
+  Create and run focused unit tests for the lower/evaluator components specifically targeting the product, running-product, any-negative, and count-non-negative functions to verify their behavior in isolation.
+6.2 | description |
+  Develop and execute corpus-based end-to-end tests for the four targets, then promote them to green status if tests pass, or document specific concrete blockers if new semantics are required.
+7 | description |
+  Implement corpus tests for the last two low-risk yellow targets, including artifact checks. Reclassify as blockers if major new machinery is needed.
+7.1 | description |
+  Create corpus tests for the balance-final target, including necessary artifact checks. Evaluate if major new machinery is required and reclassify as a blocker if so.
+7.2 | description |
+  Create corpus tests for the balance-state-pair target, including necessary artifact checks. Evaluate if major new machinery is required and reclassify as a blocker if so.
+8 | description |
+  Add per-target rewrite chain tests, semantic equivalence checks, lowered Go compilation tests, and artifact drift checks for the three rewrite-dependent targets. Document any reusable blockers.
+8.1 | description |
+  Add per-target rewrite chain tests, semantic equivalence checks, lowered Go compilation tests, and artifact drift checks for the three targets: map-fusion-basic, map-inc-then-square, and map-foldr-identity.
+8.2 | description |
+  Identify and document any reusable blockers encountered during the implementation of tests and checks for the rewrite-derived targets.
+9 | description |
+  Tighten docs to distinguish engineering-done from proof-done, document validation-only obligations, corpus conventions, artifact regeneration, and ensure demos are honest about proof strength.
+10 | description |
+  Run final corpus status review, gap review, test/race logs, and make explicit decision on v1 status. Add regression tests for any bugs found during execution. Optionally add validation-only appendix targets.
+10.1 | description |
+  Run final corpus status review, gap review, and review test/race logs to identify any issues, gaps, or bugs.
+10.2 | description |
+  Based on the reviews, make an explicit decision on v1 status. Add regression tests for any bugs found during execution. Optionally add validation-only appendix targets if needed.

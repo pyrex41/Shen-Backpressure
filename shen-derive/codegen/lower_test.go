@@ -384,6 +384,74 @@ func TestIdentityBools(t *testing.T) {
 `)
 }
 
+func TestLowerProjectedFoldlPayment(t *testing.T) {
+	step := core.MkLam("state", nil,
+		core.MkLam("tx", &core.TInt{},
+			core.MkLet("next",
+				core.MkApps(core.MkPrim(core.PrimSub),
+					core.MkApp(core.MkPrim(core.PrimFst), core.MkVar("state")),
+					core.MkVar("tx"),
+				),
+				core.MkTuple(
+					core.MkVar("next"),
+					core.MkApps(core.MkPrim(core.PrimAnd),
+						core.MkApp(core.MkPrim(core.PrimSnd), core.MkVar("state")),
+						core.MkApps(core.MkPrim(core.PrimGe), core.MkVar("next"), core.MkInt(0)),
+					),
+				),
+			),
+		),
+	)
+
+	term := core.MkLam("b0", &core.TInt{},
+		core.MkLam("txs", &core.TList{Elem: &core.TInt{}},
+			core.MkApp(core.MkPrim(core.PrimSnd),
+				core.MkApps(core.MkPrim(core.PrimFoldl),
+					step,
+					core.MkTuple(
+						core.MkVar("b0"),
+						core.MkApps(core.MkPrim(core.PrimGe), core.MkVar("b0"), core.MkInt(0)),
+					),
+					core.MkVar("txs"),
+				),
+			),
+		),
+	)
+	ty := &core.TFun{
+		Param: &core.TInt{},
+		Result: &core.TFun{
+			Param:  &core.TList{Elem: &core.TInt{}},
+			Result: &core.TBool{},
+		},
+	}
+
+	goCode, err := LowerToGo(term, ty, "Processable", "derived")
+	if err != nil {
+		t.Fatalf("LowerToGo: %v", err)
+	}
+
+	compileAndTest(t, goCode, `
+package derived
+
+import "testing"
+
+func TestProcessable(t *testing.T) {
+	if Processable(100, []int{30, 50, 40}) {
+		t.Fatal("expected overspend case to fail")
+	}
+	if !Processable(100, []int{30, 20, 10}) {
+		t.Fatal("expected non-negative balances to pass")
+	}
+	if Processable(-1, []int{}) {
+		t.Fatal("expected negative initial balance to fail")
+	}
+	if Processable(5, []int{3, 2}) != true {
+		t.Fatal("expected exact depletion without going negative to pass")
+	}
+}
+`)
+}
+
 // compileAndTest writes Go source + test file to a temp dir, runs go test.
 func compileAndTest(t *testing.T, srcCode, testCode string) {
 	t.Helper()

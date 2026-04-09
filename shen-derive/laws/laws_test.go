@@ -337,6 +337,140 @@ func TestRewriteRejectsSupplementalBindingWithMetaVars(t *testing.T) {
 	}
 }
 
+func TestRewriteRejectsSupplementalBindingOverride(t *testing.T) {
+	term := core.MkApps(core.MkPrim(core.PrimCompose),
+		core.MkApp(core.MkPrim(core.PrimMap),
+			core.MkLam("x", nil, core.MkApps(core.MkPrim(core.PrimAdd), core.MkVar("x"), core.MkInt(1))),
+		),
+		core.MkApp(core.MkPrim(core.PrimMap),
+			core.MkLam("x", nil, core.MkApps(core.MkPrim(core.PrimMul), core.MkVar("x"), core.MkInt(2))),
+		),
+	)
+
+	_, err := RewriteWithSupplementalBindings(term, MapFusion(), RootPath, Bindings{
+		"?f": core.MkLam("x", nil, core.MkVar("x")),
+	})
+	if err == nil {
+		t.Fatal("expected supplemental binding override to be rejected")
+	}
+	if got := err.Error(); !strings.Contains(got, "would override an LHS match") {
+		t.Fatalf("expected override error, got: %v", err)
+	}
+}
+
+func TestRewriteRejectsUnknownSupplementalBinding(t *testing.T) {
+	term := core.MkApps(core.MkPrim(core.PrimCompose),
+		core.MkPrim(core.PrimNeg),
+		core.MkApps(core.MkPrim(core.PrimFoldr), core.MkPrim(core.PrimAdd), core.MkInt(0)),
+	)
+
+	_, err := RewriteWithSupplementalBindings(term, FoldrFusion(), RootPath, Bindings{
+		"?unused": core.MkInt(0),
+	})
+	if err == nil {
+		t.Fatal("expected unknown supplemental binding to be rejected")
+	}
+	if got := err.Error(); !strings.Contains(got, "is not used by the rule") {
+		t.Fatalf("expected unknown-binding error, got: %v", err)
+	}
+}
+
+func TestAllScanlFusionPaymentShape(t *testing.T) {
+	check := core.MkLam("x", nil,
+		core.MkApps(core.MkPrim(core.PrimGe), core.MkVar("x"), core.MkInt(0)),
+	)
+	allCheck := core.MkApps(core.MkPrim(core.PrimFoldr),
+		core.MkLam("x", nil,
+			core.MkLam("acc", nil,
+				core.MkApps(core.MkPrim(core.PrimAnd),
+					core.MkApp(check, core.MkVar("x")),
+					core.MkVar("acc"),
+				),
+			),
+		),
+		core.MkBool(true),
+	)
+	apply := core.MkLam("bal", nil,
+		core.MkLam("tx", nil,
+			core.MkApps(core.MkPrim(core.PrimSub), core.MkVar("bal"), core.MkVar("tx")),
+		),
+	)
+
+	term := core.MkApp(allCheck,
+		core.MkApps(core.MkPrim(core.PrimScanl),
+			apply,
+			core.MkInt(100),
+			core.MkList(core.MkInt(30), core.MkInt(50), core.MkInt(40)),
+		),
+	)
+
+	result, err := Rewrite(term, AllScanlFusion(), RootPath)
+	if err != nil {
+		t.Fatalf("Rewrite failed: %v", err)
+	}
+	if len(result.Obligations) != 0 {
+		t.Fatalf("expected unconditional rewrite, got %d obligations", len(result.Obligations))
+	}
+
+	origVal, err := core.Eval(core.EmptyEnv(), term)
+	if err != nil {
+		t.Fatalf("eval original: %v", err)
+	}
+	rewrittenVal, err := core.Eval(core.EmptyEnv(), result.Rewritten)
+	if err != nil {
+		t.Fatalf("eval rewritten: %v", err)
+	}
+	if origVal.String() != rewrittenVal.String() {
+		t.Fatalf("semantic mismatch: original=%s rewritten=%s", origVal, rewrittenVal)
+	}
+	if rewrittenVal.String() != "false" {
+		t.Fatalf("expected false, got %s", rewrittenVal)
+	}
+}
+
+func TestAllScanlFusionPreservesInitialCheck(t *testing.T) {
+	check := core.MkLam("x", nil,
+		core.MkApps(core.MkPrim(core.PrimGe), core.MkVar("x"), core.MkInt(0)),
+	)
+	allCheck := core.MkApps(core.MkPrim(core.PrimFoldr),
+		core.MkLam("x", nil,
+			core.MkLam("acc", nil,
+				core.MkApps(core.MkPrim(core.PrimAnd),
+					core.MkApp(check, core.MkVar("x")),
+					core.MkVar("acc"),
+				),
+			),
+		),
+		core.MkBool(true),
+	)
+	apply := core.MkLam("bal", nil,
+		core.MkLam("tx", nil,
+			core.MkApps(core.MkPrim(core.PrimSub), core.MkVar("bal"), core.MkVar("tx")),
+		),
+	)
+
+	term := core.MkApp(allCheck,
+		core.MkApps(core.MkPrim(core.PrimScanl),
+			apply,
+			core.MkInt(-1),
+			core.MkList(),
+		),
+	)
+
+	result, err := Rewrite(term, AllScanlFusion(), RootPath)
+	if err != nil {
+		t.Fatalf("Rewrite failed: %v", err)
+	}
+
+	rewrittenVal, err := core.Eval(core.EmptyEnv(), result.Rewritten)
+	if err != nil {
+		t.Fatalf("eval rewritten: %v", err)
+	}
+	if rewrittenVal.String() != "false" {
+		t.Fatalf("expected initial negative balance to fail, got %s", rewrittenVal)
+	}
+}
+
 // --- Pattern matching tests ---
 
 func TestMatchMetaVar(t *testing.T) {

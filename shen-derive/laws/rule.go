@@ -353,6 +353,17 @@ func unresolvedMetaVarsInTerm(term core.Term, acc map[string]bool) {
 	}
 }
 
+func ruleMentionsMetaVar(rule *Rule, name string) bool {
+	acc := make(map[string]bool)
+	unresolvedMetaVarsInTerm(rule.LHS, acc)
+	unresolvedMetaVarsInTerm(rule.RHS, acc)
+	for _, sc := range rule.SideConditions {
+		unresolvedMetaVarsInTerm(sc.LHS, acc)
+		unresolvedMetaVarsInTerm(sc.RHS, acc)
+	}
+	return acc[name]
+}
+
 func unresolvedMetaVarsInResult(result *RewriteResult) []string {
 	acc := make(map[string]bool)
 	unresolvedMetaVarsInTerm(result.Rewritten, acc)
@@ -383,8 +394,8 @@ func validateRewriteResult(ruleName string, result *RewriteResult) error {
 // --- Location-based rewriting ---
 
 // Path identifies a position in a term tree. Each element selects a child:
-//   0 = Func of App, Cond of If, Fst of Tuple, Bound of Let
-//   1 = Arg of App, Then of If, Snd of Tuple, Body of Let/Lam
+//   0 = Func of App, Body of Lam, Cond of If, Fst of Tuple, Bound of Let
+//   1 = Arg of App, Then of If, Snd of Tuple, Body of Let
 //   2 = Else of If
 //   For ListLit: index of element
 type Path []int

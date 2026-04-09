@@ -187,6 +187,9 @@ func (cg *codegen) genFunc(term core.Term, ty core.Type, name string) (string, e
 // body generates the statements inside a function body.
 // It tries to recognize combinator patterns and emit efficient loops.
 func (cg *codegen) body(term core.Term, retTy core.Type) string {
+	if s, ok := cg.bodyProjectedFoldl(term); ok {
+		return s
+	}
 	// Try combinators that produce clean loop code
 	if s, ok := cg.bodyFoldr(term, retTy); ok {
 		return s
@@ -314,6 +317,47 @@ func (cg *codegen) bodyFoldl(term core.Term, retTy core.Type) (string, bool) {
 	return buf.String(), true
 }
 
+func (cg *codegen) bodyProjectedFoldl(term core.Term) (string, bool) {
+	app, ok := term.(*core.App)
+	if !ok {
+		return "", false
+	}
+	proj, ok := app.Func.(*core.Prim)
+	if !ok || (proj.Op != core.PrimFst && proj.Op != core.PrimSnd) {
+		return "", false
+	}
+	head, stepFn, initVal, list, ok := matchApp3(app.Arg)
+	if !ok || !isPrim(head, core.PrimFoldl) {
+		return "", false
+	}
+
+	xs := cg.fresh("xs")
+	acc := cg.fresh("acc")
+	elem := cg.fresh("x")
+
+	var buf strings.Builder
+	fmt.Fprintf(&buf, "\t%s := %s\n", xs, cg.expr(list))
+	fmt.Fprintf(&buf, "\t%s := %s\n", acc, cg.expr(initVal))
+	fmt.Fprintf(&buf, "\tfor _, %s := range %s {\n", elem, xs)
+
+	if body, accVar, elemVar, ok := uncurryLam2(stepFn); ok {
+		cg.genAssign(&buf, acc, body, goIdent(accVar), acc, goIdent(elemVar), elem)
+	} else if p, ok := stepFn.(*core.Prim); ok && goBinOp(p.Op) != "" {
+		fmt.Fprintf(&buf, "\t\t%s = (%s %s %s)\n", acc, acc, goBinOp(p.Op), elem)
+	} else {
+		fmt.Fprintf(&buf, "\t\t%s = %s(%s)(%s)\n", acc, cg.expr(stepFn), acc, elem)
+	}
+
+	fmt.Fprintf(&buf, "\t}\n")
+	switch proj.Op {
+	case core.PrimFst:
+		fmt.Fprintf(&buf, "\treturn %s.Fst\n", acc)
+	default:
+		fmt.Fprintf(&buf, "\treturn %s.Snd\n", acc)
+	}
+	return buf.String(), true
+}
+
 func (cg *codegen) bodyMap(term core.Term, retTy core.Type) (string, bool) {
 	head, fn, list, ok := matchApp2(term)
 	if !ok || !isPrim(head, core.PrimMap) {
@@ -336,7 +380,8 @@ func (cg *codegen) bodyMap(term core.Term, retTy core.Type) (string, bool) {
 		fmt.Fprintf(&buf, "\t\t%s[%s] = %s\n", result, idx,
 			cg.exprSubst(body, map[string]string{goIdent(paramVar): elem}))
 	} else {
-		fmt.Fprintf(&buf, "\t\t%s[%s] = %s(%s)\n", result, idx, cg.expr(fn), elem)
+		applied := &core.App{Func: fn, Arg: &core.Var{Name: elem}}
+		fmt.Fprintf(&buf, "\t\t%s[%s] = %s\n", result, idx, cg.expr(applied))
 	}
 
 	fmt.Fprintf(&buf, "\t}\n")
@@ -365,7 +410,8 @@ func (cg *codegen) bodyFilter(term core.Term, retTy core.Type) (string, bool) {
 		fmt.Fprintf(&buf, "\t\tif %s {\n",
 			cg.exprSubst(body, map[string]string{goIdent(paramVar): elem}))
 	} else {
-		fmt.Fprintf(&buf, "\t\tif %s(%s) {\n", cg.expr(pred), elem)
+		applied := &core.App{Func: pred, Arg: &core.Var{Name: elem}}
+		fmt.Fprintf(&buf, "\t\tif %s {\n", cg.expr(applied))
 	}
 
 	fmt.Fprintf(&buf, "\t\t\t%s = append(%s, %s)\n", result, result, elem)
@@ -498,6 +544,12 @@ func (cg *codegen) exprSubst(t core.Term, subst map[string]string) string {
 				return fmt.Sprintf("%s.Snd", arg)
 			}
 		}
+		// Beta-reduce immediate lambda application to keep generated code simple.
+		if lam, ok := t.Func.(*core.Lam); ok {
+			bodySubst := copySubst(subst)
+			bodySubst[goIdent(lam.Param)] = cg.exprSubst(t.Arg, subst)
+			return cg.exprSubst(lam.Body, bodySubst)
+		}
 		// Generic application
 		fn := cg.exprSubst(t.Func, subst)
 		arg := cg.exprSubst(t.Arg, subst)
@@ -508,7 +560,9 @@ func (cg *codegen) exprSubst(t core.Term, subst map[string]string) string {
 		param := goIdent(t.Param)
 		ft, _ := cg.typeOf(t).(*core.TFun)
 		paramTy := GoType(ft.Param)
-		body := cg.exprSubst(t.Body, subst)
+		bodySubst := copySubst(subst)
+		delete(bodySubst, param)
+		body := cg.exprSubst(t.Body, bodySubst)
 		retTy := GoType(ft.Result)
 		return fmt.Sprintf("func(%s %s) %s { return %s }", param, paramTy, retTy, body)
 
