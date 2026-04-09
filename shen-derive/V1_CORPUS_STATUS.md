@@ -13,7 +13,8 @@ Status meanings:
 Obligation meanings:
 - `none`: unconditional rewrite or direct lowering
 - `ground`: can be discharged exactly on closed terms
-- `validation-only`: quantified obligation; useful for documentation, but not part of the core v1 stop rule
+- `proved-quantified`: soundly discharged via symbolic proof for quantified integer polynomial obligations in foldr-fusion witnesses (e.g. negate-sum, double-sum)
+- `validation-only`: other quantified obligations (heuristic/diagnostic only); useful for documentation, but not part of the core v1 stop rule
 
 ## Fixed v1 Target Set
 The core corpus is frozen at **20 targets**. No further additions without explicit replanning.
@@ -46,15 +47,15 @@ The core corpus is frozen at **20 targets**. No further additions without explic
 | `map-inc-then-square` | rewrite + lower | `map-fusion` | `none` | yes | `green` | Same reusable lowering fix as `map-fusion-basic`. |
 | `map-foldr-identity` | rewrite + lower | `map-foldr-fusion` | `none` | yes | `green` | Bridge from rewrite law to list-building codegen. |
 
-## Explicitly Deferred From Core v1
+## Outside The Core v1 Corpus
 
-### Validation-only appendix candidates
+### Proved Appendix Examples (Arithmetic Witness Fragment)
 These remain outside the fixed core corpus.
 
-| Name | Rewrite chain | Obligation | Status | Notes |
+| Name | Rewrite chain | Obligation | Placement | Notes |
 |---|---|---|---|---|
-| `negate-sum` | `foldr-fusion` with `?h` | `validation-only` | `deferred` | Useful for documenting proof boundaries, not for the core stop rule. |
-| `double-sum` | `foldr-fusion` with `?h` | `validation-only` | `deferred` | Same rationale as `negate-sum`. |
+| `negate-sum` | `foldr-fusion` with `?h` | `proved-quantified` | `appendix` | Promoted via `ec6ba79`: the symbolic proof path certifies these integer-polynomial witnesses soundly. Non-arithmetic quantified obligations remain diagnostic-only. |
+| `double-sum` | `foldr-fusion` with `?h` | `proved-quantified` | `appendix` | Same as `negate-sum`: an honest proved example within the supported arithmetic fragment. |
 
 ### Out-of-scope / red candidates
 | Name | Blocking gap | Status | Notes |
@@ -76,4 +77,4 @@ Current evidence for the fixed corpus:
 - The main remaining red gap is still **general nested combinator lowering**, which stays deferred because the fixed corpus no longer requires it.
 
 ## Current Read
-For the fixed v1 corpus, the system is now **green on engineering-done** and still **not proof-done** in the quantified-obligation sense.
+For the fixed v1 corpus: **green (engineering-done)**. **Proof-done** only for the supported arithmetic foldr-fusion fragment (quantified integer polynomial obligations, e.g. negate-sum, double-sum witnesses). Unsupported quantified obligations remain **diagnostic-only**.

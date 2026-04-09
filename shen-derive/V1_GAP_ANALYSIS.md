@@ -36,10 +36,10 @@ This document groups the remaining work for v1 by **reusable gap** rather than b
 **Alternative hypothesis (contrarian)**: Nested combinators like `map (filter ...)` are extremely common in practice. If the pattern-based approach proves too limiting even for the fixed corpus, reconsider a small extension to lowering for common nesting (e.g. recognize `map f (filter p xs)` shape). However, this risks scope creep; only do if corpus forces it. Current plan correctly defers it.
 
 ### 4. Obligation & Proof Boundary Handling (acceptable for engineering-done)
-**Why it blocks**: Validation-only cases (`negate-sum`, `double-sum` using witness `?h` in foldr-fusion).
+**Why it blocks**: Quantified obligations outside the arithmetic polynomial fragment (e.g., non-polynomial ?h witnesses remain diagnostic-only).
 **Unlocks**: Clear documentation of engineering vs proof confidence.
-**Status**: Explicitly deferred to optional appendix. Quantified obligations remain validation-only in general (heuristic via shen/ bridge?).
-**Recommended action**: Keep out of main corpus. In docs and any appendix, **explicitly label as "validation-only / engineering confidence only — not a formal proof"**. This is non-negotiable per DONE_CHECKLIST and all handoffs to prevent misleading users about soundness.
+**Status**: Closed for arithmetic polynomial witnesses via symbolic proof path (ec6ba79). General quantified obligations outside this fragment remain diagnostic-only.
+**Recommended action**: `negate-sum`/`double-sum` promoted to proved appendix examples in `V1_CORPUS_STATUS.md`. Keep explicit boundaries: arithmetic fragment proved, others diagnostic-only (no formal proof claim).
 **Core vision alignment**: Separating these two definitions of done is one of the strongest aspects of the planning. Do not blur them.
 
 ### 5. Documentation, Conventions & Observability (v1-critical)
@@ -66,7 +66,7 @@ This document groups the remaining work for v1 by **reusable gap** rather than b
 This analysis reinforces:
 - **Fixed corpus over open-ended**: 20 targets only.
 - **Reusable over heroic**: Every task phrased in terms of gaps that unlock *multiple* targets.
-- **Honest boundaries**: Validation-only clearly separated.
+- **Honest boundaries**: the proved arithmetic fragment is separated clearly from the remaining diagnostic-only quantified cases.
 - **Engineering-done first**: Pipeline + artifacts + tests before perfect proofs.
 - **No scope creep**: Red candidates like `map-after-filter`, `concat-map`, `takeWhile` explicitly out unless forced.
 

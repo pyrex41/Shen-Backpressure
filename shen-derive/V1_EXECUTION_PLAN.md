@@ -98,7 +98,7 @@ These rules apply to all implementation work in this plan.
 - Every rewrite in a corpus item must use a named law from `laws/`.
 - Supplemental rewrite bindings must not override LHS matches.
 - Generated artifacts must be drift-checked.
-- Validation-only obligations must be labeled explicitly as validation-only.
+- Unsupported quantified obligations must be labeled explicitly as diagnostic-only / not formally proved.
 - Every new bug class found during execution must get a regression test before the task is considered complete.
 
 ## Phase Plan
@@ -230,7 +230,7 @@ Make the system's scope, confidence level, and operational conventions explicit.
 ### Outputs
 
 - tighten docs around engineering-done vs proof-done
-- document validation-only obligations clearly
+- document the proved arithmetic fragment and the remaining diagnostic-only quantified obligations clearly
 - document corpus conventions
 - document artifact regeneration expectations
 - ensure demos are honest about proof strength
@@ -274,11 +274,11 @@ All of the following are true:
 
 Low if prior phases were done honestly.
 
-## Optional Phase 7: Validation-Only Appendix
+## Optional Phase 7: Proved Appendix (Arithmetic Witnesses)
 
 ### Objective
 
-Add a small, explicitly labeled appendix for `validation-only` rewrite cases without letting them block v1.
+Add a small, explicitly labeled appendix for arithmetic `foldr-fusion` witness cases that are now soundly proved in the supported symbolic fragment, without expanding the fixed core corpus.
 
 ### Candidate Targets
 
@@ -287,12 +287,12 @@ Add a small, explicitly labeled appendix for `validation-only` rewrite cases wit
 
 ### Outputs
 
-- tests and docs that clearly mark them as engineering examples only
-- no claim that they are proof-complete
+- tests and docs that mark `negate-sum` and `double-sum` as proved appendix examples
+- no claim that unsupported quantified obligations are proof-complete
 
 ### Exit Criteria
 
-- these examples are either added as labeled appendix material or left out entirely
+- these examples are either added as labeled proved appendix material or left out entirely
 
 ### Risk
 
