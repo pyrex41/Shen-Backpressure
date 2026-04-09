@@ -180,7 +180,7 @@ func TestDischargeRejectsFalseGroundEquality(t *testing.T) {
 	}
 }
 
-func TestDischargeLeavesQuantifiedObligationsUndischarged(t *testing.T) {
+func TestDischargeSymbolicallyProvesQuantifiedArithmeticObligation(t *testing.T) {
 	f := core.MkLam("n", nil, core.MkApps(core.MkPrim(core.PrimMul), core.MkVar("n"), core.MkInt(2)))
 	h := core.MkLam("a", nil, core.MkLam("b", nil,
 		core.MkApps(core.MkPrim(core.PrimAdd),
@@ -201,8 +201,24 @@ func TestDischargeLeavesQuantifiedObligationsUndischarged(t *testing.T) {
 	}
 
 	result := Discharge(cond)
+	if !result.Discharged {
+		t.Fatalf("expected quantified arithmetic obligation to be proved: %+v", result)
+	}
+	if result.Method != "symbolic-polynomial" {
+		t.Fatalf("expected symbolic polynomial proof, got: %+v", result)
+	}
+}
+
+func TestDischargeLeavesUnsupportedQuantifiedObligationsUndischarged(t *testing.T) {
+	cond := laws.InstantiatedCondition{
+		Description: "not (not b) = b",
+		LHS:         core.MkApp(core.MkPrim(core.PrimNot), core.MkApp(core.MkPrim(core.PrimNot), core.MkVar("b"))),
+		RHS:         core.MkVar("b"),
+	}
+
+	result := Discharge(cond)
 	if result.Discharged {
-		t.Fatalf("quantified obligation should remain undischarged: %+v", result)
+		t.Fatalf("unsupported quantified obligation should remain undischarged: %+v", result)
 	}
 	if result.Error == nil || !strings.Contains(result.Error.Error(), "not soundly discharged") {
 		t.Fatalf("expected undischarged error, got: %v", result.Error)
@@ -239,11 +255,8 @@ func TestEndToEndMapFusion(t *testing.T) {
 	t.Logf("map-fusion end-to-end: %s -> %s", core.PrettyPrint(term), core.PrettyPrint(result.Rewritten))
 }
 
-func TestEndToEndFoldrFusionLazy(t *testing.T) {
+func TestEndToEndFoldrFusionStrictNegate(t *testing.T) {
 	// negate . foldr (+) 0 => foldr (\x z -> z - x) 0
-	// We keep this as a lazy rewrite because quantified side conditions are
-	// not yet discharged soundly in strict mode.
-
 	f := core.MkPrim(core.PrimNeg)
 	g := core.MkPrim(core.PrimAdd)
 	e := core.MkInt(0)
@@ -259,9 +272,9 @@ func TestEndToEndFoldrFusionLazy(t *testing.T) {
 	rule := laws.FoldrFusion()
 	extra := laws.Bindings{"?h": h}
 
-	result, err := RewriteLazy(term, rule, laws.RootPath, extra)
+	result, err := RewriteStrict(term, rule, laws.RootPath, extra)
 	if err != nil {
-		t.Fatalf("lazy rewrite failed: %v", err)
+		t.Fatalf("strict rewrite failed: %v", err)
 	}
 
 	// Verify: negate(sum [1,2,3]) = negate(6) = -6
@@ -273,11 +286,42 @@ func TestEndToEndFoldrFusionLazy(t *testing.T) {
 	if val.String() != "-6" {
 		t.Errorf("expected -6, got %s", val)
 	}
-	t.Logf("foldr-fusion lazy end-to-end: %s", core.PrettyPrint(result.Rewritten))
+	t.Logf("foldr-fusion strict end-to-end: %s", core.PrettyPrint(result.Rewritten))
 	t.Logf("  result on [1,2,3]: %s", val)
 }
 
-func TestRewriteStrictRejectsQuantifiedFoldrFusion(t *testing.T) {
+func TestEndToEndFoldrFusionStrictDouble(t *testing.T) {
+	f := core.MkLam("n", nil, core.MkApps(core.MkPrim(core.PrimMul), core.MkVar("n"), core.MkInt(2)))
+	g := core.MkPrim(core.PrimAdd)
+	e := core.MkInt(0)
+	h := core.MkLam("x", nil, core.MkLam("y", nil,
+		core.MkApps(core.MkPrim(core.PrimAdd),
+			core.MkApps(core.MkPrim(core.PrimMul), core.MkVar("x"), core.MkInt(2)),
+			core.MkVar("y"),
+		),
+	))
+
+	term := core.MkApps(core.MkPrim(core.PrimCompose),
+		f,
+		core.MkApps(core.MkPrim(core.PrimFoldr), g, e),
+	)
+
+	result, err := RewriteStrict(term, laws.FoldrFusion(), laws.RootPath, laws.Bindings{"?h": h})
+	if err != nil {
+		t.Fatalf("strict rewrite failed: %v", err)
+	}
+
+	applied := core.MkApps(result.Rewritten, core.MkList(core.MkInt(1), core.MkInt(2), core.MkInt(3)))
+	val, err := core.Eval(core.EmptyEnv(), applied)
+	if err != nil {
+		t.Fatalf("eval failed: %v", err)
+	}
+	if val.String() != "12" {
+		t.Errorf("expected 12, got %s", val)
+	}
+}
+
+func TestRewriteStrictAcceptsProvedFoldrFusion(t *testing.T) {
 	f := core.MkPrim(core.PrimNeg)
 	g := core.MkPrim(core.PrimAdd)
 	e := core.MkInt(0)
@@ -290,12 +334,17 @@ func TestRewriteStrictRejectsQuantifiedFoldrFusion(t *testing.T) {
 		core.MkApps(core.MkPrim(core.PrimFoldr), g, e),
 	)
 
-	_, err := RewriteStrict(term, laws.FoldrFusion(), laws.RootPath, laws.Bindings{"?h": h})
-	if err == nil {
-		t.Fatal("expected strict rewrite to reject undischarged quantified obligation")
+	result, err := RewriteStrict(term, laws.FoldrFusion(), laws.RootPath, laws.Bindings{"?h": h})
+	if err != nil {
+		t.Fatalf("expected strict rewrite to succeed, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "not soundly discharged") {
-		t.Fatalf("expected undischarged error, got: %v", err)
+	applied := core.MkApps(result.Rewritten, core.MkList(core.MkInt(1), core.MkInt(2), core.MkInt(3)))
+	val, err := core.Eval(core.EmptyEnv(), applied)
+	if err != nil {
+		t.Fatalf("eval failed: %v", err)
+	}
+	if val.String() != "-6" {
+		t.Fatalf("expected -6, got %s", val)
 	}
 }
 
