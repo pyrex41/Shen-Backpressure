@@ -42,29 +42,90 @@ language-specific judgment lives: `foldr` becomes a reverse-iterating
 understanding the target language's idioms — these aren't mechanical
 translations.
 
+## Near-term direction: make shen-derive excellent as a tool
+
+The v1 corpus proves the engine works. The next step is making it
+usable outside of Go test code.
+
+### 1. Spec file format and real CLI
+
+Today every derivation target is constructed as Go AST nodes inside
+test files. The parser already handles the surface syntax — the gap is
+in the pipeline. A user or LLM should be able to write:
+
+```
+-- sum.spec
+sum : [Int] -> Int
+sum = foldl (+) 0
+```
+
+and run `shen-derive derive sum.spec --out sum.go --transcript sum.derivation`.
+The `lower` command needs configurable function name and package.
+The `rewrite` command needs path specification (the payment-processable
+rewrite uses path `{0,0}`, but the CLI only supports root).
+
+### 2. First-class derivation transcripts
+
+The derivation transcript is what differentiates shen-derive from
+"just an optimizer." It should be a structured, machine-readable
+artifact — not a pretty-printed string from a test helper. It should
+record: the original spec, each rewrite step (law name, path, bindings),
+obligations and how they were discharged, and the final derived term.
+
+### 3. Law catalog growth
+
+The catalog (currently 4 laws) should grow as real derivation targets
+demand it. Obvious candidates: `foldl-fusion`, `foldr-map` (fold after
+map), `filter-fusion`, scan laws. Keep the existing discipline: no
+laws without corpus targets that exercise them.
+
+### 4. Its own gate pattern
+
+shen-derive and shen-guard are parallel tools for different situations,
+not layers in one pipeline. A project might use one, both, or neither.
+If a project uses shen-derive, it should have its own gate: regenerate
+derived code from specs, drift-check against committed artifacts,
+fail the build if they diverge. This is independent of the shen-guard
+five-gate pipeline.
+
 ## Future direction: multi-language support
 
-The natural path to supporting multiple target languages is:
+The derivation engine (core/, laws/, shen/) is free of Go-specific
+assumptions. The code generator (codegen/) is where language knowledge
+lives. Multi-language support means adding codegen backends.
 
-1. **Port the derivation engine to Rust** as a shared library, exposed
-   via C FFI / PyO3 / napi / wasm as needed.
-2. **Keep codegen as thin, per-language backends.** Each backend can
-   live in its target language (a Go backend in Go calling the Rust
-   core via CGo, a Python backend in Python via PyO3, etc.).
+The value of shen-derive is producing **idiomatic target code**. A
+`foldr` becomes:
 
-The codegen layer is small (~600 lines for Go) relative to the core
-(~3600 lines), so the duplication cost per language is low. The value
-is in producing idiomatic output: Rust backends would emit
-`iter().fold()`, Python would emit comprehensions, C would emit
-explicit index loops with malloc.
+- Go: `for i := len(xs)-1; i >= 0; i--`
+- Rust: `iter().rev().fold()`
+- Python: `functools.reduce` or a comprehension
+- TypeScript: `.reduceRight()`
 
-**Current guidance:** don't port yet. The derivation engine API is
-still stabilizing — the law catalog is small (3 laws), the
-side-condition prover is heuristic-only for quantified obligations, and
-usage patterns are still emerging. Porting now means guessing at
-abstractions. Keep iterating in Go, and when the core API settles,
-the port will be straightforward because the core packages are already
-free of Go-specific assumptions.
+This means codegen must be written by someone who knows the target
+language's idioms. Two viable approaches:
+
+1. **AST-as-JSON**: the engine serializes the rewritten AST as JSON,
+   thin per-language lowerers consume it. The engine stays in Go (or
+   eventually one canonical language). Lowerers are small, independent
+   programs in each target language.
+2. **Reimplement per language**: each language gets its own engine +
+   codegen. The core is ~3600 lines and the abstractions are clear.
+   This is more work but avoids serialization boundaries.
+
+The **wrong** approach is porting the engine to Rust and exposing FFI
+bindings. The rewrite engine is language-agnostic, but the consumer of
+its output needs to understand the AST well enough to lower it — which
+means reimplementing the type system on the receiving side. You'd port
+3600 lines to Rust to avoid duplicating ~600 lines of codegen per
+language. That's backwards. FFI also makes the codegen hostile to
+contributors who work in the target language.
+
+**Current guidance:** keep iterating in Go. The engine API is still
+stabilizing (4 laws, pattern-based lowering, heuristic-only discharge
+for most quantified obligations). When a second language target becomes
+a real need, evaluate AST-as-JSON vs. reimplementation based on what
+the API looks like at that point.
 
 ## Package layout
 
