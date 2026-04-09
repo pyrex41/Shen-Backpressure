@@ -43,7 +43,7 @@ Proof-done means, in addition:
 - no target function depends on quantified obligations that are only heuristically checked,
 - every obligation is either unconditional or soundly discharged.
 
-Today, `shen-derive` is closer to engineering-done than proof-done.
+Today, `shen-derive` is engineering-done for the fixed corpus and proof-done only for the supported arithmetic `foldr-fusion` fragment, not proof-complete overall.
 
 ## Corpus Rules
 
@@ -82,7 +82,7 @@ These conventions are part of "done":
 - Every new bug class gets a regression test before closing the issue.
 - Supplemental metavariable bindings must never override matched bindings.
 - Generated artifacts must be drift-checked against regeneration.
-- If a derivation is only validation-only, that must be stated explicitly in the transcript and docs.
+- If a derivation depends on unsupported quantified obligations, that must be stated explicitly in the transcript and docs as diagnostic-only rather than proved.
 
 ## Required Test Layers
 
@@ -159,7 +159,7 @@ Use this to decide where the project stands.
 - Vertical slices work.
 - Most bugs are edge cases, not architecture failures.
 - New examples still sometimes force new lowering patterns or law shapes.
-- Quantified obligations are still validation-only.
+- Quantified obligations: arithmetic `foldr-fusion` witnesses (integer polynomials) are now soundly proved; others remain diagnostic-only.
 
 ### Green
 
@@ -193,7 +193,7 @@ As of now:
 - Yellow: lowering is still pattern-based rather than general, but the fixed corpus no longer requires broader machinery.
 - Yellow: law catalog is intentionally small and corpus-driven.
 - Yellow: generated Go is correct but not always idiomatic.
-- Red for proof-complete ambitions: quantified obligations are still not soundly discharged.
+- Green for arithmetic `foldr-fusion` proofs: quantified integer polynomial obligations are now soundly discharged symbolically (`negate-sum`, `double-sum`-style witnesses).
 
 ## Recommended Next Step
 
@@ -206,7 +206,7 @@ For any future candidate example, record:
 - `rewrite chain`
 - `needs new law?`
 - `needs new lowerer pattern?`
-- `obligation status: none | ground | validation-only`
+- `obligation status: none | ground | proved-quantified | validation-only`
 - `artifact test present?`
 - `status: red | yellow | green`
 

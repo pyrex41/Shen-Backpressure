@@ -30,7 +30,7 @@ The bar is:
 - correct artifact regeneration,
 - no open rewrite soundness issues in the supported slice.
 
-Quantified obligations are still validation-only. That is acceptable for v1 unless the chosen corpus depends on proof-complete discharge.
+Quantified obligations are now soundly proved only for the supported arithmetic `foldr-fusion` fragment. Outside that fragment they remain diagnostic-only, which is acceptable for v1 as long as the fixed core corpus does not depend on broader proof-complete discharge.
 
 ## Current Known State
 
@@ -43,7 +43,7 @@ The following are already true and should be treated as starting assumptions unl
 - `go test ./...` and `go test -race ./...` pass in `shen-derive/demo/payment-derived`,
 - current law catalog is still small,
 - lowering remains pattern-based,
-- quantified obligations are not soundly discharged in general.
+- quantified obligations are not soundly discharged in general outside the supported arithmetic `foldr-fusion` fragment.
 
 ## Planning Deliverables
 
@@ -127,7 +127,7 @@ Aim for balanced coverage across these categories:
 - simple accumulator transformations
 - cases with no obligations
 - cases with ground obligations
-- cases with validation-only obligations
+- cases with unsupported quantified obligations
 
 Try to include:
 
@@ -155,6 +155,7 @@ Mark examples clearly as:
 
 - `none`
 - `ground`
+- `proved-quantified`
 - `validation-only`
 
 Do not blur those together.
@@ -215,7 +216,7 @@ A bad outcome looks like this:
 - the corpus keeps changing,
 - every hard example gets included by default,
 - planning mixes v1 and v2 goals,
-- there is no distinction between proof-complete and validation-only cases,
+- there is no distinction between the proved fragment and diagnostic-only quantified cases,
 - work is organized as many one-off demo fixes instead of reusable capabilities.
 
 ## Final Instruction To The Next Agent

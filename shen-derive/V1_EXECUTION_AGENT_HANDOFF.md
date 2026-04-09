@@ -65,7 +65,7 @@ Assume these are true unless you find evidence otherwise:
 - payment artifacts are drift-checked
 - `go test ./...` and `go test -race ./...` pass in `shen-derive`
 - `go test ./...` and `go test -race ./...` pass in `shen-derive/demo/payment-derived`
-- quantified obligations remain validation-only in general
+- quantified obligations are now soundly proved only for the supported arithmetic `foldr-fusion` fragment; all other quantified obligations remain diagnostic-only
 
 ## Execution Priorities
 
@@ -88,7 +88,7 @@ Do not skip straight to speculative red items.
 - No handwritten "generated" files are allowed.
 - Every rewrite used in the corpus must be a named law in `laws/`.
 - Every new bug class must get a regression test before it is considered fixed.
-- Validation-only examples must be labeled explicitly as validation-only.
+- Examples outside the supported proof fragment must be labeled explicitly as diagnostic-only / not formally proved.
 - If a target only works because of a one-off hack, it is not green.
 
 ## How To Treat Failures
