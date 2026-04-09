@@ -2,7 +2,7 @@
 //
 // Derives efficient implementations from naive specifications by applying
 // named algebraic laws from the Bird-Meertens (Squiggol) catalog. Each
-// rewrite step emits side-condition proof obligations discharged by Shen.
+// rewrite step emits side-condition obligations for validation/checking.
 //
 // Subcommands:
 //   repl      Interactive evaluator (default if no subcommand)
@@ -71,7 +71,8 @@ Commands:
   parse   <expr>            Parse and pretty-print an expression
   check   <expr>            Type-check an expression
   eval    <expr>            Evaluate an expression
-  rewrite <expr> <rule>     Apply a named rewrite rule at root
+  rewrite [--bind '?x=expr'] <expr> <rule>
+                            Apply a named rewrite rule at root
   lower   <expr>            Lower a term to Go (prints to stdout)
   laws                      List all available rewrite laws
   version                   Print version
@@ -168,36 +169,27 @@ func cmdCheck(args []string) {
 }
 
 func cmdRewrite(args []string) {
-	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: shen-derive rewrite <expression> <rule-name>")
-		fmt.Fprintln(os.Stderr, "\nAvailable rules:")
-		for _, r := range laws.Catalog() {
-			fmt.Fprintf(os.Stderr, "  %-20s %s\n", r.Name, r.Citation)
-		}
+	opts, err := parseRewriteArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "rewrite error: %v\n\n", err)
+		printRewriteUsage()
 		os.Exit(1)
 	}
 
-	// Last argument is the rule name
-	ruleName := args[len(args)-1]
-	exprStr := strings.Join(args[:len(args)-1], " ")
-
-	term, err := core.Parse(exprStr)
+	term, err := core.Parse(opts.Expr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "parse error: %v\n", err)
 		os.Exit(1)
 	}
 
-	rule := laws.LookupRule(ruleName)
+	rule := laws.LookupRule(opts.RuleName)
 	if rule == nil {
-		fmt.Fprintf(os.Stderr, "unknown rule: %q\n", ruleName)
-		fmt.Fprintln(os.Stderr, "Available rules:")
-		for _, r := range laws.Catalog() {
-			fmt.Fprintf(os.Stderr, "  %s\n", r.Name)
-		}
+		fmt.Fprintf(os.Stderr, "unknown rule: %q\n\n", opts.RuleName)
+		printRewriteUsage()
 		os.Exit(1)
 	}
 
-	result, err := shen.RewriteLazy(term, rule, laws.RootPath, nil)
+	result, err := shen.RewriteLazy(term, rule, laws.RootPath, opts.Extra)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "rewrite error: %v\n", err)
 		os.Exit(1)
@@ -295,4 +287,85 @@ func showParse(input string) {
 		return
 	}
 	fmt.Println(core.PrettyPrint(term))
+}
+
+type rewriteOptions struct {
+	Expr     string
+	RuleName string
+	Extra    laws.Bindings
+}
+
+func parseRewriteArgs(args []string) (*rewriteOptions, error) {
+	if len(args) < 2 {
+		return nil, fmt.Errorf("usage: shen-derive rewrite [--bind '?x=expr'] <expression> <rule-name>")
+	}
+
+	var positional []string
+	extra := make(laws.Bindings)
+
+	for i := 0; i < len(args); i++ {
+		if args[i] != "--bind" {
+			positional = append(positional, args[i])
+			continue
+		}
+		if i+1 >= len(args) {
+			return nil, fmt.Errorf("missing value after --bind")
+		}
+		name, term, err := parseRewriteBinding(args[i+1])
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := extra[name]; exists {
+			return nil, fmt.Errorf("duplicate binding for %s", name)
+		}
+		extra[name] = term
+		i++
+	}
+
+	if len(positional) < 2 {
+		return nil, fmt.Errorf("rewrite requires an expression and a rule name")
+	}
+
+	return &rewriteOptions{
+		Expr:     strings.Join(positional[:len(positional)-1], " "),
+		RuleName: positional[len(positional)-1],
+		Extra:    extra,
+	}, nil
+}
+
+func parseRewriteBinding(spec string) (string, core.Term, error) {
+	name, expr, ok := strings.Cut(spec, "=")
+	if !ok {
+		return "", nil, fmt.Errorf("invalid binding %q: expected '?meta=<expr>'", spec)
+	}
+	name = strings.TrimSpace(name)
+	expr = strings.TrimSpace(expr)
+	if !laws.IsMetaVar(name) {
+		return "", nil, fmt.Errorf("invalid binding %q: metavariable names must start with '?'", spec)
+	}
+	if expr == "" {
+		return "", nil, fmt.Errorf("invalid binding %q: missing expression", spec)
+	}
+
+	term, err := core.Parse(expr)
+	if err != nil {
+		return "", nil, fmt.Errorf("binding %s parse error: %w", name, err)
+	}
+	if _, err := core.CheckTerm(term); err != nil {
+		return "", nil, fmt.Errorf("binding %s type error: %w", name, err)
+	}
+	return name, term, nil
+}
+
+func printRewriteUsage() {
+	fmt.Fprintln(os.Stderr, "usage: shen-derive rewrite [--bind '?x=expr'] <expression> <rule-name>")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "Examples:")
+	fmt.Fprintln(os.Stderr, "  shen-derive rewrite 'map f . map g' map-fusion")
+	fmt.Fprintln(os.Stderr, "  shen-derive rewrite --bind '?h=\\x z -> z - x' 'negate . foldr (+) 0' foldr-fusion")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "Available rules:")
+	for _, r := range laws.Catalog() {
+		fmt.Fprintf(os.Stderr, "  %-20s %s\n", r.Name, r.Citation)
+	}
 }

@@ -2,7 +2,7 @@
 //
 // Derived from: processable b0 txs = all (>= 0) (scanl apply b0 txs)
 // Via: scanl-fold fusion (Bird, Algebra of Programming, §3.1)
-// Side conditions discharged by Shen tc+ and empirical testing.
+// Side conditions checked empirically; emitted Shen validated with tc+.
 
 package payment_derived
 

@@ -1,6 +1,7 @@
 package laws
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/core"
@@ -301,6 +302,38 @@ func TestFoldrFusionSideConditionInstantiation(t *testing.T) {
 	}
 	if ov.String() != "-6" {
 		t.Errorf("expected -6, got %s", ov)
+	}
+}
+
+func TestFoldrFusionRequiresSupplementalBinding(t *testing.T) {
+	term := core.MkApps(core.MkPrim(core.PrimCompose),
+		core.MkPrim(core.PrimNeg),
+		core.MkApps(core.MkPrim(core.PrimFoldr), core.MkPrim(core.PrimAdd), core.MkInt(0)),
+	)
+
+	_, err := Rewrite(term, FoldrFusion(), RootPath)
+	if err == nil {
+		t.Fatal("expected unresolved ?h to be rejected")
+	}
+	if got := err.Error(); got == "" || !strings.Contains(got, "unresolved metavariables") {
+		t.Fatalf("expected unresolved metavariable error, got: %v", err)
+	}
+}
+
+func TestRewriteRejectsSupplementalBindingWithMetaVars(t *testing.T) {
+	term := core.MkApps(core.MkPrim(core.PrimCompose),
+		core.MkPrim(core.PrimNeg),
+		core.MkApps(core.MkPrim(core.PrimFoldr), core.MkPrim(core.PrimAdd), core.MkInt(0)),
+	)
+
+	_, err := RewriteWithSupplementalBindings(term, FoldrFusion(), RootPath, Bindings{
+		"?h": MetaVar("?k"),
+	})
+	if err == nil {
+		t.Fatal("expected unresolved supplemental metavariable to be rejected")
+	}
+	if got := err.Error(); got == "" || !strings.Contains(got, "unresolved metavariables") {
+		t.Fatalf("expected unresolved metavariable error, got: %v", err)
 	}
 }
 

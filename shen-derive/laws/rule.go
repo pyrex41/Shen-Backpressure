@@ -9,6 +9,8 @@ package laws
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/core"
 )
@@ -323,6 +325,61 @@ func TermsEqual(a, b core.Term) bool {
 	return termsEqual(a, b)
 }
 
+func unresolvedMetaVarsInTerm(term core.Term, acc map[string]bool) {
+	switch t := term.(type) {
+	case *core.Var:
+		if IsMetaVar(t.Name) {
+			acc[t.Name] = true
+		}
+	case *core.App:
+		unresolvedMetaVarsInTerm(t.Func, acc)
+		unresolvedMetaVarsInTerm(t.Arg, acc)
+	case *core.Lam:
+		unresolvedMetaVarsInTerm(t.Body, acc)
+	case *core.Let:
+		unresolvedMetaVarsInTerm(t.Bound, acc)
+		unresolvedMetaVarsInTerm(t.Body, acc)
+	case *core.ListLit:
+		for _, el := range t.Elems {
+			unresolvedMetaVarsInTerm(el, acc)
+		}
+	case *core.TupleLit:
+		unresolvedMetaVarsInTerm(t.Fst, acc)
+		unresolvedMetaVarsInTerm(t.Snd, acc)
+	case *core.IfExpr:
+		unresolvedMetaVarsInTerm(t.Cond, acc)
+		unresolvedMetaVarsInTerm(t.Then, acc)
+		unresolvedMetaVarsInTerm(t.Else, acc)
+	}
+}
+
+func unresolvedMetaVarsInResult(result *RewriteResult) []string {
+	acc := make(map[string]bool)
+	unresolvedMetaVarsInTerm(result.Rewritten, acc)
+	for _, ob := range result.Obligations {
+		unresolvedMetaVarsInTerm(ob.LHS, acc)
+		unresolvedMetaVarsInTerm(ob.RHS, acc)
+	}
+	if len(acc) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(acc))
+	for name := range acc {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func validateRewriteResult(ruleName string, result *RewriteResult) error {
+	if unresolved := unresolvedMetaVarsInResult(result); len(unresolved) > 0 {
+		return fmt.Errorf("rewrite %s: unresolved metavariables remain after substitution: %s",
+			ruleName, strings.Join(unresolved, ", "))
+	}
+	return nil
+}
+
 // --- Location-based rewriting ---
 
 // Path identifies a position in a term tree. Each element selects a child:
@@ -534,10 +591,14 @@ func Rewrite(term core.Term, rule *Rule, path Path) (*RewriteResult, error) {
 		})
 	}
 
-	return &RewriteResult{
+	result := &RewriteResult{
 		Original:    term,
 		Rewritten:   newTerm,
 		RuleName:    rule.Name,
 		Obligations: obligations,
-	}, nil
+	}
+	if err := validateRewriteResult(rule.Name, result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }

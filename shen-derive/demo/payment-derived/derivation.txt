@@ -31,8 +31,8 @@
 --- Step 3: Discharge side conditions ---
 
   Side condition: all_geq0 distributes over scanl_apply step: check(bal-tx) && ok = snd(step((bal,ok),tx))
-  Discharged: empirical (verified on 25 test cases)
-  Discharged: shen-tc+ ✓
+  Empirical check: passed (verified on 25 test cases)
+  Shen validation: emitted spec accepted by tc+ (validation only; not a proof)
 
 --- Step 4: Lower to Go ---
 
@@ -42,7 +42,7 @@
     //
     // Derived from: processable b0 txs = all (>= 0) (scanl apply b0 txs)
     // Via: scanl-fold fusion (Bird, Algebra of Programming, §3.1)
-    // Side conditions discharged by Shen tc+ and empirical testing.
+    // Side conditions checked empirically; emitted Shen validated with tc+.
     
     package derived
     
@@ -76,9 +76,9 @@
   1. SPEC:    processable b0 txs = all (>=0) (scanl apply b0 txs)
   2. REWRITE: scanl-fold fusion → snd . foldl step (b0, True)
      RULE:    fold-fusion (Bird, Algebra of Programming, §3.1)
-     SIDE:    commutativity of (&&) — discharged empirically + Shen tc+
+     SIDE:    commutativity of (&&) — empirical check + Shen tc+ validation
   3. LOWER:   foldl → forward for-loop, tuple → two variables
   4. OUTPUT:  Processable(b0 int, txs []int) bool
 
 The efficient Go implementation is equivalent to the naive specification.
-Each step is justified by a named algebraic law with discharged side conditions.
+Each step is justified by a named algebraic law with recorded side-condition checks.

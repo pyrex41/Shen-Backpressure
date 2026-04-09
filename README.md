@@ -226,9 +226,9 @@ The project provides two complementary tools. Pick per-function based on what fi
 | | **shen-guard** (existing) | **shen-derive** (new) |
 |---|---|---|
 | **Best for** | I/O, mutation, glue code | Fold-shaped pure computations |
-| **How it works** | Shen spec → shengen → opaque guard types → constructor validation | Naive spec → algebraic rewrites → side conditions discharged by Shen → Go |
+| **How it works** | Shen spec → shengen → opaque guard types → constructor validation | Naive spec → algebraic rewrites → side conditions checked heuristically and Shen-validated → Go |
 | **Artifact** | Generated Go types with validated constructors | Derivation transcript + generated Go function |
-| **Proof method** | Shen sequent calculus proves type rules; Go compiler enforces them | Named algebraic laws (Bird-Meertens) with side conditions discharged by Shen tc+ |
+| **Proof method** | Shen sequent calculus proves type rules; Go compiler enforces them | Named algebraic laws (Bird-Meertens) with recorded obligations; current side-condition checks are empirical and Shen tc+ validates emitted specs |
 | **When to use** | Code that creates, validates, or passes around domain values | Code that folds, scans, maps, or filters sequences |
 
 Both share the same Shen spec format and five-gate pipeline.
@@ -247,6 +247,9 @@ cd shen-derive && go build -o shen-derive .
 
 # List available rewrite laws
 ./shen-derive laws
+
+# Apply a rewrite that needs a supplemental metavariable binding
+./shen-derive rewrite --bind '?h=\x z -> z - x' 'negate . foldr (+) 0' foldr-fusion
 
 # Type-check
 ./shen-derive check '\(x : Int) -> x + 1'

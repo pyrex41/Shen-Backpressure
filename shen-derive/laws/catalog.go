@@ -219,10 +219,14 @@ func RewriteWithSupplementalBindings(term core.Term, rule *Rule, path Path, extr
 		})
 	}
 
-	return &RewriteResult{
+	result := &RewriteResult{
 		Original:    term,
 		Rewritten:   newTerm,
 		RuleName:    rule.Name,
 		Obligations: obligations,
-	}, nil
+	}
+	if err := validateRewriteResult(rule.Name, result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
