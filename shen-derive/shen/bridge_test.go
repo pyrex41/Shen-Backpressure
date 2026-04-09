@@ -8,6 +8,26 @@ import (
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/laws"
 )
 
+func mkAddVarConst(name string, n int64) core.Term {
+	return core.MkApps(core.MkPrim(core.PrimAdd), core.MkVar(name), core.MkInt(n))
+}
+
+func mkCmp(op core.PrimOp, lhs, rhs core.Term) core.Term {
+	return core.MkApps(core.MkPrim(op), lhs, rhs)
+}
+
+func mkAnd(lhs, rhs core.Term) core.Term {
+	return core.MkApps(core.MkPrim(core.PrimAnd), lhs, rhs)
+}
+
+func mkOr(lhs, rhs core.Term) core.Term {
+	return core.MkApps(core.MkPrim(core.PrimOr), lhs, rhs)
+}
+
+func mkNot(term core.Term) core.Term {
+	return core.MkApp(core.MkPrim(core.PrimNot), term)
+}
+
 func TestEmitObligation(t *testing.T) {
 	// Test the side condition from foldr-fusion:
 	// double (x + y) = h x (double y)
@@ -180,7 +200,9 @@ func TestDischargeRejectsFalseGroundEquality(t *testing.T) {
 	}
 }
 
-func TestDischargeSymbolicallyProvesQuantifiedArithmeticObligation(t *testing.T) {
+func TestDischargeSymbolicallyProvesQuantifiedObligation(t *testing.T) {
+	// Arithmetic case still supported via polynomial normalization in the
+	// extended symbolic fragment.
 	f := core.MkLam("n", nil, core.MkApps(core.MkPrim(core.PrimMul), core.MkVar("n"), core.MkInt(2)))
 	h := core.MkLam("a", nil, core.MkLam("b", nil,
 		core.MkApps(core.MkPrim(core.PrimAdd),
@@ -202,11 +224,12 @@ func TestDischargeSymbolicallyProvesQuantifiedArithmeticObligation(t *testing.T)
 
 	result := Discharge(cond)
 	if !result.Discharged {
-		t.Fatalf("expected quantified arithmetic obligation to be proved: %+v", result)
+		t.Fatalf("expected quantified obligation to be proved: %+v", result)
 	}
 	if result.Method != "symbolic-polynomial" {
-		t.Fatalf("expected symbolic polynomial proof, got: %+v", result)
+		t.Fatalf("expected symbolic-polynomial proof, got: %+v", result)
 	}
+	t.Logf("Proved with symbolic-polynomial: %s", result.Output)
 }
 
 func TestDischargeLeavesUnsupportedQuantifiedObligationsUndischarged(t *testing.T) {
@@ -222,6 +245,162 @@ func TestDischargeLeavesUnsupportedQuantifiedObligationsUndischarged(t *testing.
 	}
 	if result.Error == nil || !strings.Contains(result.Error.Error(), "not soundly discharged") {
 		t.Fatalf("expected undischarged error, got: %v", result.Error)
+	}
+	t.Logf("Correctly treated as diagnostic-only: %s", result.Method)
+}
+
+func TestDischargeSymbolicallyProvesComparisonFormulas(t *testing.T) {
+	tests := []struct {
+		name string
+		lhs  core.Term
+		rhs  core.Term
+	}{
+		{
+			name: "eq",
+			lhs:  mkCmp(core.PrimEq, mkAddVarConst("x", 1), mkAddVarConst("x", 1)),
+			rhs:  core.MkBool(true),
+		},
+		{
+			name: "neq",
+			lhs:  mkCmp(core.PrimNeq, mkAddVarConst("x", 1), mkAddVarConst("x", 2)),
+			rhs:  core.MkBool(true),
+		},
+		{
+			name: "lt",
+			lhs:  mkCmp(core.PrimLt, mkAddVarConst("x", 1), mkAddVarConst("x", 2)),
+			rhs:  core.MkBool(true),
+		},
+		{
+			name: "le",
+			lhs:  mkCmp(core.PrimLe, mkAddVarConst("x", 2), mkAddVarConst("x", 2)),
+			rhs:  core.MkBool(true),
+		},
+		{
+			name: "gt",
+			lhs:  mkCmp(core.PrimGt, mkAddVarConst("x", 2), mkAddVarConst("x", 1)),
+			rhs:  core.MkBool(true),
+		},
+		{
+			name: "ge",
+			lhs:  mkCmp(core.PrimGe, mkAddVarConst("x", 2), mkAddVarConst("x", 2)),
+			rhs:  core.MkBool(true),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cond := laws.InstantiatedCondition{
+				Description: tt.name + " comparison is assignment-independent",
+				LHS:         tt.lhs,
+				RHS:         tt.rhs,
+			}
+
+			result := Discharge(cond)
+			if !result.Discharged {
+				t.Fatalf("expected symbolic-fragment to prove supported comparison: %+v", result)
+			}
+			if result.Method != "symbolic-fragment" {
+				t.Fatalf("expected symbolic-fragment, got %s: %+v", result.Method, result)
+			}
+			t.Logf("Proved supported %s comparison: %s", tt.name, result.Output)
+		})
+	}
+}
+
+func TestDischargeSymbolicallyProvesBooleanConnectives(t *testing.T) {
+	tests := []struct {
+		name string
+		lhs  core.Term
+		rhs  core.Term
+	}{
+		{
+			name: "and",
+			lhs: mkAnd(
+				mkCmp(core.PrimNeq, mkAddVarConst("x", 1), mkAddVarConst("x", 2)),
+				mkCmp(core.PrimGe, mkAddVarConst("x", 2), mkAddVarConst("x", 2)),
+			),
+			rhs: core.MkBool(true),
+		},
+		{
+			name: "or",
+			lhs: mkOr(
+				mkCmp(core.PrimGt, mkAddVarConst("x", 1), mkAddVarConst("x", 2)),
+				mkCmp(core.PrimEq, mkAddVarConst("x", 2), mkAddVarConst("x", 2)),
+			),
+			rhs: core.MkBool(true),
+		},
+		{
+			name: "not",
+			lhs:  mkNot(mkCmp(core.PrimLt, mkAddVarConst("x", 2), mkAddVarConst("x", 1))),
+			rhs:  mkCmp(core.PrimLe, mkAddVarConst("x", 1), mkAddVarConst("x", 2)),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cond := laws.InstantiatedCondition{
+				Description: tt.name + " connective over supported comparisons",
+				LHS:         tt.lhs,
+				RHS:         tt.rhs,
+			}
+
+			result := Discharge(cond)
+			if !result.Discharged {
+				t.Fatalf("expected symbolic-fragment to prove boolean connective: %+v", result)
+			}
+			if result.Method != "symbolic-fragment" {
+				t.Fatalf("expected symbolic-fragment, got %s: %+v", result.Method, result)
+			}
+			t.Logf("Proved supported %s connective: %s", tt.name, result.Output)
+		})
+	}
+}
+
+func TestDischargeRejectsVariableDependentComparisonFormulas(t *testing.T) {
+	tests := []struct {
+		name string
+		lhs  core.Term
+		rhs  core.Term
+	}{
+		{
+			name: "eq",
+			lhs:  mkCmp(core.PrimEq, core.MkVar("x"), core.MkVar("y")),
+			rhs:  core.MkBool(false),
+		},
+		{
+			name: "neq",
+			lhs:  mkCmp(core.PrimNeq, core.MkVar("x"), core.MkVar("y")),
+			rhs:  core.MkBool(true),
+		},
+		{
+			name: "lt",
+			lhs:  mkCmp(core.PrimLt, core.MkVar("x"), core.MkVar("y")),
+			rhs:  core.MkBool(false),
+		},
+		{
+			name: "and",
+			lhs:  mkAnd(mkCmp(core.PrimLt, core.MkVar("x"), core.MkVar("y")), core.MkBool(true)),
+			rhs:  core.MkBool(false),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cond := laws.InstantiatedCondition{
+				Description: tt.name + " comparison depends on quantified vars",
+				LHS:         tt.lhs,
+				RHS:         tt.rhs,
+			}
+
+			result := Discharge(cond)
+			if result.Discharged {
+				t.Fatalf("variable-dependent comparison should remain undischarged: %+v", result)
+			}
+			if result.Error == nil || !strings.Contains(result.Error.Error(), "not soundly discharged") {
+				t.Fatalf("expected diagnostic-only rejection, got: %+v", result)
+			}
+			t.Logf("Correctly rejected unsupported %s case: method=%s output=%s", tt.name, result.Method, result.Output)
+		})
 	}
 }
 

@@ -2,13 +2,16 @@
 // and the Shen type checker. It translates instantiated term equalities into
 // Shen sequent-calculus definitions that (tc +) can verify.
 //
-// Limitations (v0):
-//   - Side conditions are restricted to first-order term equalities where
-//     both sides are composed of primitives, variables, and lambda applications.
-//   - The emitted Shen encoding is only checked with (tc +), which validates
-//     the structure of the generated spec but does not prove the equality.
-//   - Quantified obligations outside the supported symbolic proof fragment
-//     still fall back to diagnostic-only validation.
+// Supported proof fragment (safe, sound discharge):
+//   - Quantified obligations whose lhs/rhs normalize to the same integer
+//     polynomial ("symbolic-polynomial").
+//   - Quantified boolean obligations built from and/or/not over arithmetic
+//     comparisons (= != < <= > >=) on integer polynomial terms, but only when
+//     each comparison normalizes to a constant truth value independent of the
+//     free integer variables ("symbolic-fragment").
+//   - Quantified obligations outside this fragment (higher-order, non-arith,
+//     or variable-dependent comparisons) remain diagnostic-only
+//     (Shen tc+ / empirical).
 package shen
 
 import (
@@ -290,6 +293,8 @@ func shenBinOp(op core.PrimOp) string {
 		return "/"
 	case core.PrimEq:
 		return "="
+	case core.PrimNeq:
+		return "not-equal?"
 	case core.PrimLt:
 		return "<"
 	case core.PrimLe:
@@ -298,6 +303,10 @@ func shenBinOp(op core.PrimOp) string {
 		return ">"
 	case core.PrimGe:
 		return ">="
+	case core.PrimAnd:
+		return "and"
+	case core.PrimOr:
+		return "or"
 	default:
 		return ""
 	}
@@ -366,6 +375,10 @@ func ShenPreamble() string {
   {number --> number}
   X -> (- 0 X))
 
+(define not-equal?
+  {A --> A --> boolean}
+  X Y -> (not (= X Y)))
+
 (define compose
   {(B --> C) --> (A --> B) --> (A --> C)}
   F G -> (/. X (F (G X))))
@@ -392,7 +405,7 @@ func ShenPreamble() string {
 // DischargeResult holds the outcome of discharging an obligation.
 type DischargeResult struct {
 	Discharged bool
-	Method     string // "shen-tc+", "empirical", "skip"
+	Method     string // "shen-tc+", "empirical", "symbolic-polynomial", "symbolic-fragment", "undischarged"
 	Output     string // raw output from the tool
 	Error      error
 }
@@ -413,9 +426,12 @@ func FindShenBinary() string {
 
 // Discharge attempts to discharge a side condition obligation soundly.
 // Ground equalities are discharged by exact evaluation. Quantified
-// arithmetic equalities in the supported symbolic fragment are discharged
-// by polynomial normalization. Shen tc+ and empirical testing are retained
-// as diagnostics for obligations outside that proof fragment.
+// polynomial equalities are discharged by symbolic normalization
+// ("symbolic-polynomial"). Quantified boolean obligations built from
+// supported arithmetic comparisons over normalized integer polynomials
+// are discharged only when they normalize to constant truth values
+// ("symbolic-fragment"). Shen tc+ and empirical testing are retained as
+// diagnostics for obligations outside this safe proof fragment.
 func Discharge(cond laws.InstantiatedCondition) DischargeResult {
 	if len(conditionFreeVars(cond)) == 0 {
 		return dischargeGround(cond)
@@ -456,7 +472,7 @@ func Discharge(cond laws.InstantiatedCondition) DischargeResult {
 		Discharged: false,
 		Method:     "undischarged",
 		Output:     strings.Join(notes, "\n"),
-		Error:      fmt.Errorf("quantified side conditions are not soundly discharged yet; Shen tc+ is validation-only and empirical checks are heuristic"),
+		Error:      fmt.Errorf("quantified side conditions outside the supported symbolic fragment (polynomial eqs or boolean combos of arith comparisons) are not soundly discharged; Shen tc+ is validation-only and empirical checks are heuristic"),
 	}
 }
 
