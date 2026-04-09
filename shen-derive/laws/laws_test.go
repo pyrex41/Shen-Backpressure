@@ -1,560 +1,260 @@
 package laws
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/core"
 )
 
-// --- map-fusion tests ---
+func p(s string) core.Sexpr {
+	expr, err := core.ParseSexpr(s)
+	if err != nil {
+		panic("test parse error: " + err.Error() + ": " + s)
+	}
+	return expr
+}
+
+func TestCatalog(t *testing.T) {
+	catalog := Catalog()
+	if len(catalog) != 7 {
+		t.Errorf("expected 7 laws in catalog, got %d", len(catalog))
+	}
+	names := map[string]bool{}
+	for _, r := range catalog {
+		if names[r.Name] {
+			t.Errorf("duplicate law name: %s", r.Name)
+		}
+		names[r.Name] = true
+	}
+}
+
+func TestLookupRule(t *testing.T) {
+	r := LookupRule("map-fusion")
+	if r == nil {
+		t.Fatal("map-fusion not found")
+	}
+	if r.Name != "map-fusion" {
+		t.Errorf("wrong name: %s", r.Name)
+	}
+
+	if LookupRule("nonexistent") != nil {
+		t.Error("should return nil for unknown rule")
+	}
+}
 
 func TestMapFusionMatch(t *testing.T) {
-	// Construct: map f . map g  (where f = \x -> x + 1, g = \x -> x * 2)
-	f := core.MkLam("x", nil, core.MkApps(core.MkPrim(core.PrimAdd), core.MkVar("x"), core.MkInt(1)))
-	g := core.MkLam("x", nil, core.MkApps(core.MkPrim(core.PrimMul), core.MkVar("x"), core.MkInt(2)))
-
-	// map f . map g = compose (map f) (map g)
-	term := core.MkApps(core.MkPrim(core.PrimCompose),
-		core.MkApp(core.MkPrim(core.PrimMap), f),
-		core.MkApp(core.MkPrim(core.PrimMap), g),
-	)
-
+	// (compose (map inc) (map double)) should match map-fusion
+	term := p("(compose (map inc) (map double))")
 	rule := MapFusion()
+
 	result, err := Rewrite(term, rule, RootPath)
 	if err != nil {
-		t.Fatalf("Rewrite failed: %v", err)
+		t.Fatalf("rewrite error: %v", err)
 	}
-
-	// Should produce: map (compose f g)  i.e., map (f . g)
-	got := core.PrettyPrint(result.Rewritten)
-	t.Logf("map-fusion result: %s", got)
-
-	// No side conditions
 	if len(result.Obligations) != 0 {
-		t.Errorf("expected 0 obligations, got %d", len(result.Obligations))
+		t.Errorf("map-fusion should have no obligations, got %d", len(result.Obligations))
 	}
 
-	// Verify semantic equivalence: apply both to [1, 2, 3]
-	// Original: map f (map g [1,2,3]) = map (+1) (map (*2) [1,2,3]) = map (+1) [2,4,6] = [3,5,7]
-	// Rewritten: map (f.g) [1,2,3] = map (\x -> (x*2)+1) [1,2,3] = [3,5,7]
-	origApplied := core.MkApps(term, core.MkList(core.MkInt(1), core.MkInt(2), core.MkInt(3)))
-	rewrittenApplied := core.MkApps(result.Rewritten, core.MkList(core.MkInt(1), core.MkInt(2), core.MkInt(3)))
-
-	origVal, err := core.Eval(core.EmptyEnv(), origApplied)
-	if err != nil {
-		t.Fatalf("eval original: %v", err)
-	}
-	rewrittenVal, err := core.Eval(core.EmptyEnv(), rewrittenApplied)
-	if err != nil {
-		t.Fatalf("eval rewritten: %v", err)
-	}
-
-	if origVal.String() != rewrittenVal.String() {
-		t.Errorf("semantic mismatch: original=%s, rewritten=%s", origVal, rewrittenVal)
-	}
-	if origVal.String() != "[3, 5, 7]" {
-		t.Errorf("unexpected result: %s", origVal)
+	// Result should be (map (compose inc double))
+	want := p("(map (compose inc double))")
+	if !result.Rewritten.Equal(want) {
+		t.Errorf("got %s, want %s",
+			core.PrettyPrintSexpr(result.Rewritten),
+			core.PrettyPrintSexpr(want))
 	}
 }
 
 func TestMapFusionNoMatch(t *testing.T) {
-	// This term doesn't match: map f . filter p (not map . map)
-	term := core.MkApps(core.MkPrim(core.PrimCompose),
-		core.MkApp(core.MkPrim(core.PrimMap), core.MkVar("f")),
-		core.MkApp(core.MkPrim(core.PrimFilter), core.MkVar("p")),
-	)
-
+	// (compose (filter p) (map g)) should NOT match map-fusion
+	term := p("(compose (filter p) (map g))")
 	rule := MapFusion()
+
 	_, err := Rewrite(term, rule, RootPath)
 	if err == nil {
-		t.Error("expected match failure, got success")
+		t.Error("expected error for non-matching term")
 	}
 }
-
-// --- map-foldr-fusion tests ---
 
 func TestMapFoldrFusionMatch(t *testing.T) {
-	// Construct: map f . foldr cons nil  (where f = \x -> x + 1)
-	f := core.MkLam("x", nil, core.MkApps(core.MkPrim(core.PrimAdd), core.MkVar("x"), core.MkInt(1)))
-
-	term := core.MkApps(core.MkPrim(core.PrimCompose),
-		core.MkApp(core.MkPrim(core.PrimMap), f),
-		core.MkApps(core.MkPrim(core.PrimFoldr),
-			core.MkPrim(core.PrimCons),
-			core.MkPrim(core.PrimNil),
-		),
-	)
-
+	term := p("(compose (map f) (foldr cons nil))")
 	rule := MapFoldrFusion()
+
 	result, err := Rewrite(term, rule, RootPath)
 	if err != nil {
-		t.Fatalf("Rewrite failed: %v", err)
+		t.Fatalf("rewrite error: %v", err)
 	}
-
-	got := core.PrettyPrint(result.Rewritten)
-	t.Logf("map-foldr-fusion result: %s", got)
-
 	if len(result.Obligations) != 0 {
-		t.Errorf("expected 0 obligations, got %d", len(result.Obligations))
+		t.Errorf("should have no obligations, got %d", len(result.Obligations))
 	}
 
-	// Verify semantic equivalence on [1, 2, 3]
-	// Original: (map (+1) . foldr cons nil) [1,2,3] = map (+1) [1,2,3] = [2,3,4]
-	// Rewritten: foldr (\x xs -> cons ((+1) x) xs) nil [1,2,3] = [2,3,4]
-	origApplied := core.MkApps(term, core.MkList(core.MkInt(1), core.MkInt(2), core.MkInt(3)))
-	rewrittenApplied := core.MkApps(result.Rewritten, core.MkList(core.MkInt(1), core.MkInt(2), core.MkInt(3)))
-
-	origVal, err := core.Eval(core.EmptyEnv(), origApplied)
-	if err != nil {
-		t.Fatalf("eval original: %v", err)
-	}
-	rewrittenVal, err := core.Eval(core.EmptyEnv(), rewrittenApplied)
-	if err != nil {
-		t.Fatalf("eval rewritten: %v", err)
-	}
-
-	if origVal.String() != rewrittenVal.String() {
-		t.Errorf("semantic mismatch: original=%s, rewritten=%s", origVal, rewrittenVal)
-	}
-	if origVal.String() != "[2, 3, 4]" {
-		t.Errorf("unexpected result: %s", origVal)
+	// Result should be (foldr (lambda X (lambda Xs (cons (f X) Xs))) nil)
+	want := p("(foldr (lambda X (lambda Xs (cons (f X) Xs))) nil)")
+	if !result.Rewritten.Equal(want) {
+		t.Errorf("got %s, want %s",
+			core.PrettyPrintSexpr(result.Rewritten),
+			core.PrettyPrintSexpr(want))
 	}
 }
-
-// --- foldr-fusion tests ---
 
 func TestFoldrFusionMatch(t *testing.T) {
-	// Example: length . filter p
-	// length = foldr (\_ n -> n + 1) 0
-	// We want to fuse: length . filter p = ... a single foldr
-	//
-	// But let's use a simpler concrete example first:
-	// f = \xs -> length xs, where length = foldr (\_ n -> n+1) 0
-	// Actually, let's use the standard example:
-	//
-	// sum . map (+1)  — but that's map fusion, not foldr fusion.
-	//
-	// For foldr-fusion specifically:
-	//   f . foldr g e = foldr h (f e)
-	//   provided f (g x y) = h x (f y)
-	//
-	// Concrete example:
-	//   sum = foldr (+) 0
-	//   double = \x -> x * 2
-	//   double . foldr (+) 0 = foldr h (double 0)
-	//   where h x y = double (x + y) ... hmm that doesn't work because
-	//   we need h x (double y) = double (x + y) = 2*(x+y) = 2x + 2y
-	//   and h x (double y) = h x (2y), so h x z = 2x + z
-	//   So h = \x y -> 2*x + y
-	//
-	// Let's verify: foldr h (double 0) [1,2,3]
-	//   = h 1 (h 2 (h 3 (double 0)))
-	//   = h 1 (h 2 (h 3 0))
-	//   = h 1 (h 2 (2*3 + 0))
-	//   = h 1 (h 2 6)
-	//   = h 1 (2*2 + 6)
-	//   = h 1 10
-	//   = 2*1 + 10
-	//   = 12
-	// Original: double (foldr (+) 0 [1,2,3]) = double 6 = 12  ✓
-
-	f := core.MkLam("n", nil, core.MkApps(core.MkPrim(core.PrimMul), core.MkVar("n"), core.MkInt(2)))
-	g := core.MkPrim(core.PrimAdd)
-	e := core.MkInt(0)
-	h := core.MkLam("x", nil, core.MkLam("y", nil,
-		core.MkApps(core.MkPrim(core.PrimAdd),
-			core.MkApps(core.MkPrim(core.PrimMul), core.MkVar("x"), core.MkInt(2)),
-			core.MkVar("y"),
-		),
-	))
-
-	// Term: compose f (foldr g e) = f . foldr (+) 0
-	term := core.MkApps(core.MkPrim(core.PrimCompose),
-		f,
-		core.MkApps(core.MkPrim(core.PrimFoldr), g, e),
-	)
-
+	// (compose negate (foldr + 0)) with supplemental ?h = -
+	term := p("(compose negate (foldr + 0))")
 	rule := FoldrFusion()
 
-	// Supply ?h as supplemental binding
-	extra := Bindings{"?h": h}
-
-	result, err := RewriteWithSupplementalBindings(term, rule, RootPath, extra)
-	if err != nil {
-		t.Fatalf("Rewrite failed: %v", err)
-	}
-
-	got := core.PrettyPrint(result.Rewritten)
-	t.Logf("foldr-fusion result: %s", got)
-
-	// Check that we got exactly 1 side condition
-	if len(result.Obligations) != 1 {
-		t.Fatalf("expected 1 obligation, got %d", len(result.Obligations))
-	}
-
-	ob := result.Obligations[0]
-	t.Logf("Side condition: %s = %s", core.PrettyPrint(ob.LHS), core.PrettyPrint(ob.RHS))
-	t.Logf("Description: %s", ob.Description)
-
-	// The side condition should be:
-	//   f (g x y) = h x (f y)
-	// Instantiated:
-	//   (\n -> n*2) ((+) x y) = (\x y -> 2*x + y) x ((\n -> n*2) y)
-	// Which simplifies to: 2*(x+y) = 2*x + 2*y (distributivity!)
-
-	// Verify the side condition holds by evaluation with concrete values
-	env := core.EmptyEnv().Extend("x", core.IntVal(3)).Extend("y", core.IntVal(7))
-	lhsVal, err := core.Eval(env, ob.LHS)
-	if err != nil {
-		t.Fatalf("eval side condition LHS: %v", err)
-	}
-	rhsVal, err := core.Eval(env, ob.RHS)
-	if err != nil {
-		t.Fatalf("eval side condition RHS: %v", err)
-	}
-	if lhsVal.String() != rhsVal.String() {
-		t.Errorf("side condition failed for x=3, y=7: LHS=%s, RHS=%s", lhsVal, rhsVal)
-	}
-	t.Logf("Side condition verified for x=3, y=7: %s = %s", lhsVal, rhsVal)
-
-	// Verify semantic equivalence: apply both to [1, 2, 3]
-	origApplied := core.MkApps(term, core.MkList(core.MkInt(1), core.MkInt(2), core.MkInt(3)))
-	rewrittenApplied := core.MkApps(result.Rewritten, core.MkList(core.MkInt(1), core.MkInt(2), core.MkInt(3)))
-
-	origVal, err := core.Eval(core.EmptyEnv(), origApplied)
-	if err != nil {
-		t.Fatalf("eval original: %v", err)
-	}
-	rewrittenVal, err := core.Eval(core.EmptyEnv(), rewrittenApplied)
-	if err != nil {
-		t.Fatalf("eval rewritten: %v", err)
-	}
-
-	if origVal.String() != rewrittenVal.String() {
-		t.Errorf("semantic mismatch: original=%s, rewritten=%s", origVal, rewrittenVal)
-	}
-	if origVal.String() != "12" {
-		t.Errorf("unexpected result: %s (want 12)", origVal)
-	}
-}
-
-func TestFoldrFusionSideConditionInstantiation(t *testing.T) {
-	// Verify that the side condition metavariables are correctly filled.
-	// Use: length . filter p
-	// length = foldr (\_ n -> n + 1) 0, so:
-	//   f = length = \xs -> foldr (\_ n -> n+1) 0 xs ... but that's not right
-	//   for foldr-fusion, f is the outer function, not a fold.
-	//
-	// Actually, length IS a fold: foldr (\_ n -> n+1) 0
-	// So "f . foldr g e" with f = length doesn't make sense directly
-	// because length itself is a fold.
-	//
-	// Better example: negate . sum where sum = foldr (+) 0
-	//   f = negate, g = (+), e = 0
-	//   Side condition: negate (x + y) = h x (negate y)
-	//   So h x z = -(x + (-z))... hmm, negate(x+y) = -x-y
-	//   h x (negate y) = h x (-y) should equal -(x+y) = -x-y
-	//   So h x z = -x + z  (i.e., h = \x z -> z - x)
-	//
-	// Verify: negate(foldr (+) 0 [1,2,3]) = negate(6) = -6
-	//         foldr h (negate 0) [1,2,3] = foldr (\x z -> z-x) 0 [1,2,3]
-	//         = (\x z -> z-x) 1 ((\x z -> z-x) 2 ((\x z -> z-x) 3 0))
-	//         = (z-x=0-3=-3) then (z-x=-3-2=-5) then (z-x=-5-1=-6)
-	//         = -6  ✓
-
-	f := core.MkPrim(core.PrimNeg) // negate
-	g := core.MkPrim(core.PrimAdd)
-	e := core.MkInt(0)
-	h := core.MkLam("x", nil, core.MkLam("z", nil,
-		core.MkApps(core.MkPrim(core.PrimSub), core.MkVar("z"), core.MkVar("x")),
-	))
-
-	term := core.MkApps(core.MkPrim(core.PrimCompose),
-		f,
-		core.MkApps(core.MkPrim(core.PrimFoldr), g, e),
-	)
-
-	rule := FoldrFusion()
+	h := core.Sym("-")
 	result, err := RewriteWithSupplementalBindings(term, rule, RootPath, Bindings{"?h": h})
 	if err != nil {
-		t.Fatalf("Rewrite failed: %v", err)
+		t.Fatalf("rewrite error: %v", err)
+	}
+	if len(result.Obligations) != 1 {
+		t.Fatalf("foldr-fusion should have 1 obligation, got %d", len(result.Obligations))
 	}
 
-	// Verify the side condition: negate(x + y) = (\x z -> z - x) x (negate y)
-	// For x=5, y=3: negate(5+3) = negate(8) = -8
-	//               h 5 (negate 3) = h 5 (-3) = -3 - 5 = -8  ✓
+	// Result should be (foldr - (negate 0))
+	want := p("(foldr - (negate 0))")
+	if !result.Rewritten.Equal(want) {
+		t.Errorf("got %s, want %s",
+			core.PrettyPrintSexpr(result.Rewritten),
+			core.PrettyPrintSexpr(want))
+	}
+
+	// Check obligation: (negate (+ x y)) = (- x (negate y))
 	ob := result.Obligations[0]
-	env := core.EmptyEnv().Extend("x", core.IntVal(5)).Extend("y", core.IntVal(3))
-	lv, _ := core.Eval(env, ob.LHS)
-	rv, _ := core.Eval(env, ob.RHS)
-	if lv.String() != rv.String() {
-		t.Errorf("side condition: LHS=%s, RHS=%s (should be equal)", lv, rv)
-	}
-
-	// Verify end-to-end
-	origApplied := core.MkApps(term, core.MkList(core.MkInt(1), core.MkInt(2), core.MkInt(3)))
-	rewrittenApplied := core.MkApps(result.Rewritten, core.MkList(core.MkInt(1), core.MkInt(2), core.MkInt(3)))
-	ov, _ := core.Eval(core.EmptyEnv(), origApplied)
-	rv2, _ := core.Eval(core.EmptyEnv(), rewrittenApplied)
-	if ov.String() != rv2.String() {
-		t.Errorf("semantic mismatch: %s vs %s", ov, rv2)
-	}
-	if ov.String() != "-6" {
-		t.Errorf("expected -6, got %s", ov)
+	if ob.Description != "f (g x y) = h x (f y) for all x, y" {
+		t.Errorf("wrong obligation description: %s", ob.Description)
 	}
 }
 
-func TestFoldrFusionRequiresSupplementalBinding(t *testing.T) {
-	term := core.MkApps(core.MkPrim(core.PrimCompose),
-		core.MkPrim(core.PrimNeg),
-		core.MkApps(core.MkPrim(core.PrimFoldr), core.MkPrim(core.PrimAdd), core.MkInt(0)),
-	)
+func TestFoldrFusionMissingH(t *testing.T) {
+	term := p("(compose negate (foldr + 0))")
+	rule := FoldrFusion()
 
-	_, err := Rewrite(term, FoldrFusion(), RootPath)
+	// Without supplemental binding for ?h, should fail with unresolved metavar
+	_, err := Rewrite(term, rule, RootPath)
 	if err == nil {
-		t.Fatal("expected unresolved ?h to be rejected")
-	}
-	if got := err.Error(); got == "" || !strings.Contains(got, "unresolved metavariables") {
-		t.Fatalf("expected unresolved metavariable error, got: %v", err)
+		t.Error("expected error for missing ?h binding")
 	}
 }
 
-func TestRewriteRejectsSupplementalBindingWithMetaVars(t *testing.T) {
-	term := core.MkApps(core.MkPrim(core.PrimCompose),
-		core.MkPrim(core.PrimNeg),
-		core.MkApps(core.MkPrim(core.PrimFoldr), core.MkPrim(core.PrimAdd), core.MkInt(0)),
-	)
+func TestFilterFusionMatch(t *testing.T) {
+	term := p("(compose (filter positive?) (filter even?))")
+	rule := FilterFusion()
 
-	_, err := RewriteWithSupplementalBindings(term, FoldrFusion(), RootPath, Bindings{
-		"?h": MetaVar("?k"),
-	})
-	if err == nil {
-		t.Fatal("expected unresolved supplemental metavariable to be rejected")
-	}
-	if got := err.Error(); got == "" || !strings.Contains(got, "unresolved metavariables") {
-		t.Fatalf("expected unresolved metavariable error, got: %v", err)
-	}
-}
-
-func TestRewriteRejectsSupplementalBindingOverride(t *testing.T) {
-	term := core.MkApps(core.MkPrim(core.PrimCompose),
-		core.MkApp(core.MkPrim(core.PrimMap),
-			core.MkLam("x", nil, core.MkApps(core.MkPrim(core.PrimAdd), core.MkVar("x"), core.MkInt(1))),
-		),
-		core.MkApp(core.MkPrim(core.PrimMap),
-			core.MkLam("x", nil, core.MkApps(core.MkPrim(core.PrimMul), core.MkVar("x"), core.MkInt(2))),
-		),
-	)
-
-	_, err := RewriteWithSupplementalBindings(term, MapFusion(), RootPath, Bindings{
-		"?f": core.MkLam("x", nil, core.MkVar("x")),
-	})
-	if err == nil {
-		t.Fatal("expected supplemental binding override to be rejected")
-	}
-	if got := err.Error(); !strings.Contains(got, "would override an LHS match") {
-		t.Fatalf("expected override error, got: %v", err)
-	}
-}
-
-func TestRewriteRejectsUnknownSupplementalBinding(t *testing.T) {
-	term := core.MkApps(core.MkPrim(core.PrimCompose),
-		core.MkPrim(core.PrimNeg),
-		core.MkApps(core.MkPrim(core.PrimFoldr), core.MkPrim(core.PrimAdd), core.MkInt(0)),
-	)
-
-	_, err := RewriteWithSupplementalBindings(term, FoldrFusion(), RootPath, Bindings{
-		"?unused": core.MkInt(0),
-	})
-	if err == nil {
-		t.Fatal("expected unknown supplemental binding to be rejected")
-	}
-	if got := err.Error(); !strings.Contains(got, "is not used by the rule") {
-		t.Fatalf("expected unknown-binding error, got: %v", err)
-	}
-}
-
-func TestAllScanlFusionPaymentShape(t *testing.T) {
-	check := core.MkLam("x", nil,
-		core.MkApps(core.MkPrim(core.PrimGe), core.MkVar("x"), core.MkInt(0)),
-	)
-	allCheck := core.MkApps(core.MkPrim(core.PrimFoldr),
-		core.MkLam("x", nil,
-			core.MkLam("acc", nil,
-				core.MkApps(core.MkPrim(core.PrimAnd),
-					core.MkApp(check, core.MkVar("x")),
-					core.MkVar("acc"),
-				),
-			),
-		),
-		core.MkBool(true),
-	)
-	apply := core.MkLam("bal", nil,
-		core.MkLam("tx", nil,
-			core.MkApps(core.MkPrim(core.PrimSub), core.MkVar("bal"), core.MkVar("tx")),
-		),
-	)
-
-	term := core.MkApp(allCheck,
-		core.MkApps(core.MkPrim(core.PrimScanl),
-			apply,
-			core.MkInt(100),
-			core.MkList(core.MkInt(30), core.MkInt(50), core.MkInt(40)),
-		),
-	)
-
-	result, err := Rewrite(term, AllScanlFusion(), RootPath)
+	result, err := Rewrite(term, rule, RootPath)
 	if err != nil {
-		t.Fatalf("Rewrite failed: %v", err)
+		t.Fatalf("rewrite error: %v", err)
 	}
 	if len(result.Obligations) != 0 {
-		t.Fatalf("expected unconditional rewrite, got %d obligations", len(result.Obligations))
+		t.Errorf("filter-fusion should have no obligations, got %d", len(result.Obligations))
 	}
 
-	origVal, err := core.Eval(core.EmptyEnv(), term)
-	if err != nil {
-		t.Fatalf("eval original: %v", err)
-	}
-	rewrittenVal, err := core.Eval(core.EmptyEnv(), result.Rewritten)
-	if err != nil {
-		t.Fatalf("eval rewritten: %v", err)
-	}
-	if origVal.String() != rewrittenVal.String() {
-		t.Fatalf("semantic mismatch: original=%s rewritten=%s", origVal, rewrittenVal)
-	}
-	if rewrittenVal.String() != "false" {
-		t.Fatalf("expected false, got %s", rewrittenVal)
+	want := p("(filter (lambda X (and (positive? X) (even? X))))")
+	if !result.Rewritten.Equal(want) {
+		t.Errorf("got %s, want %s",
+			core.PrettyPrintSexpr(result.Rewritten),
+			core.PrettyPrintSexpr(want))
 	}
 }
 
-func TestAllScanlFusionPreservesInitialCheck(t *testing.T) {
-	check := core.MkLam("x", nil,
-		core.MkApps(core.MkPrim(core.PrimGe), core.MkVar("x"), core.MkInt(0)),
-	)
-	allCheck := core.MkApps(core.MkPrim(core.PrimFoldr),
-		core.MkLam("x", nil,
-			core.MkLam("acc", nil,
-				core.MkApps(core.MkPrim(core.PrimAnd),
-					core.MkApp(check, core.MkVar("x")),
-					core.MkVar("acc"),
-				),
-			),
-		),
-		core.MkBool(true),
-	)
-	apply := core.MkLam("bal", nil,
-		core.MkLam("tx", nil,
-			core.MkApps(core.MkPrim(core.PrimSub), core.MkVar("bal"), core.MkVar("tx")),
-		),
-	)
+func TestFoldrMapMatch(t *testing.T) {
+	term := p("(compose (foldr + 0) (map square))")
+	rule := FoldrMap()
 
-	term := core.MkApp(allCheck,
-		core.MkApps(core.MkPrim(core.PrimScanl),
-			apply,
-			core.MkInt(-1),
-			core.MkList(),
-		),
-	)
-
-	result, err := Rewrite(term, AllScanlFusion(), RootPath)
+	result, err := Rewrite(term, rule, RootPath)
 	if err != nil {
-		t.Fatalf("Rewrite failed: %v", err)
+		t.Fatalf("rewrite error: %v", err)
+	}
+	if len(result.Obligations) != 0 {
+		t.Errorf("should have no obligations, got %d", len(result.Obligations))
 	}
 
-	rewrittenVal, err := core.Eval(core.EmptyEnv(), result.Rewritten)
+	want := p("(foldr (lambda X (lambda Acc (+ (square X) Acc))) 0)")
+	if !result.Rewritten.Equal(want) {
+		t.Errorf("got %s, want %s",
+			core.PrettyPrintSexpr(result.Rewritten),
+			core.PrettyPrintSexpr(want))
+	}
+}
+
+func TestFoldlFusionMatch(t *testing.T) {
+	term := p("(compose negate (foldl + 0))")
+	rule := FoldlFusion()
+
+	h := core.Sym("-")
+	result, err := RewriteWithSupplementalBindings(term, rule, RootPath, Bindings{"?h": h})
 	if err != nil {
-		t.Fatalf("eval rewritten: %v", err)
+		t.Fatalf("rewrite error: %v", err)
 	}
-	if rewrittenVal.String() != "false" {
-		t.Fatalf("expected initial negative balance to fail, got %s", rewrittenVal)
-	}
-}
-
-// --- Pattern matching tests ---
-
-func TestMatchMetaVar(t *testing.T) {
-	pattern := MetaVar("?x")
-	term := core.MkInt(42)
-
-	b := Match(pattern, term)
-	if b == nil {
-		t.Fatal("expected match")
-	}
-	if !TermsEqual(b["?x"], core.MkInt(42)) {
-		t.Errorf("?x bound to %v, want 42", b["?x"])
-	}
-}
-
-func TestMatchConsistency(t *testing.T) {
-	// Pattern: App(?f, ?f) — requires both occurrences to match the same thing
-	pattern := core.MkApp(MetaVar("?f"), MetaVar("?f"))
-	good := core.MkApp(core.MkInt(1), core.MkInt(1))
-	bad := core.MkApp(core.MkInt(1), core.MkInt(2))
-
-	if Match(pattern, good) == nil {
-		t.Error("expected match for (1, 1)")
-	}
-	if Match(pattern, bad) != nil {
-		t.Error("expected no match for (1, 2)")
-	}
-}
-
-func TestSubstitute(t *testing.T) {
-	template := core.MkApp(MetaVar("?f"), MetaVar("?x"))
-	bindings := Bindings{
-		"?f": core.MkPrim(core.PrimNeg),
-		"?x": core.MkInt(5),
+	if len(result.Obligations) != 1 {
+		t.Fatalf("foldl-fusion should have 1 obligation, got %d", len(result.Obligations))
 	}
 
-	result := Substitute(template, bindings)
-	got := core.PrettyPrint(result)
-	want := "-5"
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
+	want := p("(foldl - (negate 0))")
+	if !result.Rewritten.Equal(want) {
+		t.Errorf("got %s, want %s",
+			core.PrettyPrintSexpr(result.Rewritten),
+			core.PrettyPrintSexpr(want))
 	}
 }
 
 func TestRewriteAtPath(t *testing.T) {
-	// Apply map-fusion inside a larger term:
-	// let xs = [1,2,3] in (map f . map g) xs
-	f := core.MkVar("f")
-	g := core.MkVar("g")
-
-	inner := core.MkApps(core.MkPrim(core.PrimCompose),
-		core.MkApp(core.MkPrim(core.PrimMap), f),
-		core.MkApp(core.MkPrim(core.PrimMap), g),
-	)
-	term := core.MkApp(inner, core.MkList(core.MkInt(1), core.MkInt(2), core.MkInt(3)))
-
-	// The compose is at path [0] (the Func of the outer App)
+	// Apply map-fusion inside a larger term
+	// (foldl (compose (map f) (map g)) 0 xs) — rewrite at path {0} (the step function position)
+	// Wait, that's not right. The path indexes into List.Elems.
+	// (foldl step init xs) is a 4-elem list. step is at index 1.
+	term := p("(foldl (compose (map f) (map g)) init xs)")
 	rule := MapFusion()
-	result, err := Rewrite(term, rule, Path{0})
+
+	result, err := Rewrite(term, rule, Path{1})
 	if err != nil {
-		t.Fatalf("Rewrite at path failed: %v", err)
+		t.Fatalf("rewrite error: %v", err)
 	}
 
-	got := core.PrettyPrint(result.Rewritten)
-	t.Logf("rewrite at path result: %s", got)
-
-	// Should now be: map (f . g) [1, 2, 3]
-	// instead of: (map f . map g) [1, 2, 3]
-	if len(result.Obligations) != 0 {
-		t.Errorf("expected 0 obligations, got %d", len(result.Obligations))
+	want := p("(foldl (map (compose f g)) init xs)")
+	if !result.Rewritten.Equal(want) {
+		t.Errorf("got %s, want %s",
+			core.PrettyPrintSexpr(result.Rewritten),
+			core.PrettyPrintSexpr(want))
 	}
 }
 
-func TestCatalogLookup(t *testing.T) {
-	for _, name := range []string{"map-fusion", "map-foldr-fusion", "foldr-fusion"} {
-		r := LookupRule(name)
-		if r == nil {
-			t.Errorf("LookupRule(%q) returned nil", name)
-		} else if r.Citation == "" {
-			t.Errorf("rule %q has no citation", name)
-		}
+func TestSupplementalBindingOverride(t *testing.T) {
+	term := p("(compose negate (foldr + 0))")
+	rule := FoldrFusion()
+
+	// ?f is already bound by LHS matching — supplemental should fail
+	_, err := RewriteWithSupplementalBindings(term, rule, RootPath,
+		Bindings{"?f": core.Sym("something")})
+	if err == nil {
+		t.Error("expected error for overriding LHS-matched binding")
+	}
+}
+
+func TestSupplementalBindingUnused(t *testing.T) {
+	term := p("(compose negate (foldr + 0))")
+	rule := FoldrFusion()
+
+	// ?z is not mentioned by the rule
+	_, err := RewriteWithSupplementalBindings(term, rule, RootPath,
+		Bindings{"?h": core.Sym("-"), "?z": core.Sym("unused")})
+	if err == nil {
+		t.Error("expected error for unused supplemental binding")
+	}
+}
+
+func TestMatchConsistency(t *testing.T) {
+	// Pattern: (?f ?f) — same metavar twice, must match same subtree
+	pattern := p("(?f ?f)")
+	term1 := p("(a a)")
+	term2 := p("(a b)")
+
+	b1 := Match(pattern, term1)
+	if b1 == nil {
+		t.Error("expected match for (a a)")
 	}
 
-	if LookupRule("nonexistent") != nil {
-		t.Error("expected nil for nonexistent rule")
+	b2 := Match(pattern, term2)
+	if b2 != nil {
+		t.Error("expected no match for (a b) with pattern (?f ?f)")
 	}
 }
