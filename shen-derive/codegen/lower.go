@@ -128,19 +128,19 @@ func (cg *codegen) genFunc(term core.Term, ty core.Type, name string) (string, e
 // It tries to recognize combinator patterns and emit efficient loops.
 func (cg *codegen) body(term core.Term, retTy core.Type) string {
 	// Try combinators that produce clean loop code
-	if s, ok := cg.bodyFoldr(term); ok {
+	if s, ok := cg.bodyFoldr(term, retTy); ok {
 		return s
 	}
-	if s, ok := cg.bodyFoldl(term); ok {
+	if s, ok := cg.bodyFoldl(term, retTy); ok {
 		return s
 	}
-	if s, ok := cg.bodyMap(term); ok {
+	if s, ok := cg.bodyMap(term, retTy); ok {
 		return s
 	}
-	if s, ok := cg.bodyFilter(term); ok {
+	if s, ok := cg.bodyFilter(term, retTy); ok {
 		return s
 	}
-	if s, ok := cg.bodyScanl(term); ok {
+	if s, ok := cg.bodyScanl(term, retTy); ok {
 		return s
 	}
 	// If-then-else at top level
@@ -192,7 +192,7 @@ func isPrim(t core.Term, op core.PrimOp) bool {
 	return ok && p.Op == op
 }
 
-func (cg *codegen) bodyFoldr(term core.Term) (string, bool) {
+func (cg *codegen) bodyFoldr(term core.Term, retTy core.Type) (string, bool) {
 	head, stepFn, initVal, list, ok := matchApp3(term)
 	if !ok || !isPrim(head, core.PrimFoldr) {
 		return "", false
@@ -226,7 +226,7 @@ func (cg *codegen) bodyFoldr(term core.Term) (string, bool) {
 	return buf.String(), true
 }
 
-func (cg *codegen) bodyFoldl(term core.Term) (string, bool) {
+func (cg *codegen) bodyFoldl(term core.Term, retTy core.Type) (string, bool) {
 	head, stepFn, initVal, list, ok := matchApp3(term)
 	if !ok || !isPrim(head, core.PrimFoldl) {
 		return "", false
@@ -254,7 +254,7 @@ func (cg *codegen) bodyFoldl(term core.Term) (string, bool) {
 	return buf.String(), true
 }
 
-func (cg *codegen) bodyMap(term core.Term) (string, bool) {
+func (cg *codegen) bodyMap(term core.Term, retTy core.Type) (string, bool) {
 	head, fn, list, ok := matchApp2(term)
 	if !ok || !isPrim(head, core.PrimMap) {
 		return "", false
@@ -265,9 +265,14 @@ func (cg *codegen) bodyMap(term core.Term) (string, bool) {
 	idx := cg.fresh("i")
 	elem := cg.fresh("x")
 
+	sliceTy := GoType(retTy)
+	if sliceTy == "interface{}" {
+		sliceTy = "[]int"
+	}
+
 	var buf strings.Builder
 	fmt.Fprintf(&buf, "\t%s := %s\n", xs, cg.expr(list))
-	fmt.Fprintf(&buf, "\t%s := make(%s, len(%s))\n", result, "[]int", xs) // type placeholder
+	fmt.Fprintf(&buf, "\t%s := make(%s, len(%s))\n", result, sliceTy, xs)
 	fmt.Fprintf(&buf, "\tfor %s, %s := range %s {\n", idx, elem, xs)
 
 	if body, paramVar, ok := uncurryLam1(fn); ok {
@@ -282,7 +287,7 @@ func (cg *codegen) bodyMap(term core.Term) (string, bool) {
 	return buf.String(), true
 }
 
-func (cg *codegen) bodyFilter(term core.Term) (string, bool) {
+func (cg *codegen) bodyFilter(term core.Term, retTy core.Type) (string, bool) {
 	head, pred, list, ok := matchApp2(term)
 	if !ok || !isPrim(head, core.PrimFilter) {
 		return "", false
@@ -292,9 +297,14 @@ func (cg *codegen) bodyFilter(term core.Term) (string, bool) {
 	result := cg.fresh("result")
 	elem := cg.fresh("x")
 
+	sliceTy := GoType(retTy)
+	if sliceTy == "interface{}" {
+		sliceTy = "[]int"
+	}
+
 	var buf strings.Builder
 	fmt.Fprintf(&buf, "\t%s := %s\n", xs, cg.expr(list))
-	fmt.Fprintf(&buf, "\tvar %s []int\n", result) // type placeholder
+	fmt.Fprintf(&buf, "\tvar %s %s\n", result, sliceTy)
 	fmt.Fprintf(&buf, "\tfor _, %s := range %s {\n", elem, xs)
 
 	if body, paramVar, ok := uncurryLam1(pred); ok {
@@ -311,7 +321,7 @@ func (cg *codegen) bodyFilter(term core.Term) (string, bool) {
 	return buf.String(), true
 }
 
-func (cg *codegen) bodyScanl(term core.Term) (string, bool) {
+func (cg *codegen) bodyScanl(term core.Term, retTy core.Type) (string, bool) {
 	head, stepFn, initVal, list, ok := matchApp3(term)
 	if !ok || !isPrim(head, core.PrimScanl) {
 		return "", false
@@ -322,10 +332,15 @@ func (cg *codegen) bodyScanl(term core.Term) (string, bool) {
 	result := cg.fresh("result")
 	elem := cg.fresh("x")
 
+	sliceTy := GoType(retTy)
+	if sliceTy == "interface{}" {
+		sliceTy = "[]int"
+	}
+
 	var buf strings.Builder
 	fmt.Fprintf(&buf, "\t%s := %s\n", xs, cg.expr(list))
 	fmt.Fprintf(&buf, "\t%s := %s\n", acc, cg.expr(initVal))
-	fmt.Fprintf(&buf, "\t%s := make([]int, 0, len(%s)+1)\n", result, xs) // type placeholder
+	fmt.Fprintf(&buf, "\t%s := make(%s, 0, len(%s)+1)\n", result, sliceTy, xs)
 	fmt.Fprintf(&buf, "\t%s = append(%s, %s)\n", result, result, acc)
 	fmt.Fprintf(&buf, "\tfor _, %s := range %s {\n", elem, xs)
 
@@ -406,7 +421,8 @@ func (cg *codegen) exprSubst(t core.Term, subst map[string]string) string {
 				if p.Op == core.PrimCons {
 					elem := cg.exprSubst(inner.Arg, subst)
 					list := cg.exprSubst(t.Arg, subst)
-					return fmt.Sprintf("append([]int{%s}, %s...)", elem, list)
+					elemTy := cg.guessExprType(inner.Arg)
+					return fmt.Sprintf("append([]%s{%s}, %s...)", elemTy, elem, list)
 				}
 			}
 		}
@@ -414,7 +430,8 @@ func (cg *codegen) exprSubst(t core.Term, subst map[string]string) string {
 		// Detect 3-arg compose: App(App(App(Prim(compose), f), g), x)
 		if head, f, g, x, ok := matchApp3(t); ok && isPrim(head, core.PrimCompose) {
 			gx := cg.exprSubst(&core.App{Func: g, Arg: x}, subst)
-			return cg.exprSubst(&core.App{Func: f, Arg: &core.Var{Name: gx}}, subst)
+			fExpr := cg.exprSubst(f, subst)
+			return fmt.Sprintf("%s(%s)", fExpr, gx)
 		}
 		// Unary ops
 		if p, ok := t.Func.(*core.Prim); ok {
@@ -438,15 +455,14 @@ func (cg *codegen) exprSubst(t core.Term, subst map[string]string) string {
 	case *core.Lam:
 		// Generate a Go closure
 		param := goIdent(t.Param)
-		paramTy := "int" // default; ideally from type info
+		paramTy := "interface{}"
 		if t.ParamType != nil {
 			paramTy = GoType(t.ParamType)
 		}
 		body := cg.exprSubst(t.Body, subst)
 		// Try to infer return type
 		retTy := "interface{}"
-		if inner, ok := t.Body.(*core.Lam); ok {
-			_ = inner
+		if _, ok := t.Body.(*core.Lam); ok {
 			retTy = cg.closureType(t.Body)
 		} else {
 			retTy = cg.guessExprType(t.Body)
@@ -474,12 +490,15 @@ func (cg *codegen) exprSubst(t core.Term, subst map[string]string) string {
 		for i, e := range t.Elems {
 			elems[i] = cg.exprSubst(e, subst)
 		}
-		return "[]int{" + strings.Join(elems, ", ") + "}"
+		elemTy := cg.guessExprType(t)
+		return "[]" + elemTy + "{" + strings.Join(elems, ", ") + "}"
 
 	case *core.TupleLit:
 		fst := cg.exprSubst(t.Fst, subst)
 		snd := cg.exprSubst(t.Snd, subst)
-		return fmt.Sprintf("struct{ Fst int; Snd int }{%s, %s}", fst, snd)
+		fstTy := cg.guessExprType(t.Fst)
+		sndTy := cg.guessExprType(t.Snd)
+		return fmt.Sprintf("struct{ Fst %s; Snd %s }{%s, %s}", fstTy, sndTy, fst, snd)
 	}
 
 	return fmt.Sprintf("/* TODO: %T */", t)
@@ -591,12 +610,12 @@ func goBinOp(op core.PrimOp) string {
 }
 
 func goIdent(name string) string {
+	if len(name) == 0 {
+		return name
+	}
 	// Convert to valid Go identifier
 	name = strings.ReplaceAll(name, "'", "_p")
 	name = strings.ReplaceAll(name, "-", "_")
-	if name[0] == '_' && len(name) > 1 {
-		return name
-	}
 	return name
 }
 
@@ -625,7 +644,7 @@ func (cg *codegen) guessExprType(t core.Term) string {
 			return "string"
 		}
 	case *core.Var:
-		return "int" // default assumption
+		return "int" // default assumption for variables in arithmetic contexts
 	case *core.App:
 		if inner, ok := t.Func.(*core.App); ok {
 			if p, ok := inner.Func.(*core.Prim); ok {
@@ -650,6 +669,11 @@ func (cg *codegen) guessExprType(t core.Term) string {
 		return cg.guessExprType(t.Then)
 	case *core.Lam:
 		return cg.closureType(t)
+	case *core.ListLit:
+		if len(t.Elems) > 0 {
+			return cg.guessExprType(t.Elems[0])
+		}
+		return "int"
 	}
 	return "int"
 }

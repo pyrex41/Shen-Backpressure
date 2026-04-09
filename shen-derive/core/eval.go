@@ -187,25 +187,67 @@ func ExecPrim(op PrimOp, args []Value) (Value, error) {
 	switch op {
 	// Arithmetic
 	case PrimAdd:
-		return IntVal(asInt(args[0]) + asInt(args[1])), nil
+		a, err := asInt(args[0])
+		if err != nil {
+			return nil, fmt.Errorf("+: %w", err)
+		}
+		b, err := asInt(args[1])
+		if err != nil {
+			return nil, fmt.Errorf("+: %w", err)
+		}
+		return IntVal(a + b), nil
 	case PrimSub:
-		return IntVal(asInt(args[0]) - asInt(args[1])), nil
+		a, err := asInt(args[0])
+		if err != nil {
+			return nil, fmt.Errorf("-: %w", err)
+		}
+		b, err := asInt(args[1])
+		if err != nil {
+			return nil, fmt.Errorf("-: %w", err)
+		}
+		return IntVal(a - b), nil
 	case PrimMul:
-		return IntVal(asInt(args[0]) * asInt(args[1])), nil
+		a, err := asInt(args[0])
+		if err != nil {
+			return nil, fmt.Errorf("*: %w", err)
+		}
+		b, err := asInt(args[1])
+		if err != nil {
+			return nil, fmt.Errorf("*: %w", err)
+		}
+		return IntVal(a * b), nil
 	case PrimDiv:
-		b := asInt(args[1])
+		a, err := asInt(args[0])
+		if err != nil {
+			return nil, fmt.Errorf("/: %w", err)
+		}
+		b, err := asInt(args[1])
+		if err != nil {
+			return nil, fmt.Errorf("/: %w", err)
+		}
 		if b == 0 {
 			return nil, fmt.Errorf("division by zero")
 		}
-		return IntVal(asInt(args[0]) / b), nil
+		return IntVal(a / b), nil
 	case PrimMod:
-		b := asInt(args[1])
+		a, err := asInt(args[0])
+		if err != nil {
+			return nil, fmt.Errorf("%%: %w", err)
+		}
+		b, err := asInt(args[1])
+		if err != nil {
+			return nil, fmt.Errorf("%%: %w", err)
+		}
 		if b == 0 {
 			return nil, fmt.Errorf("modulo by zero")
 		}
-		return IntVal(asInt(args[0]) % b), nil
+		return IntVal(a % b), nil
 	case PrimNeg:
-		return IntVal(-asInt(args[0])), nil
+		a, err := asInt(args[0])
+		if err != nil {
+			return nil, fmt.Errorf("negate: %w", err)
+		}
+		return IntVal(-a), nil
 
 	// Comparison
 	case PrimEq:
@@ -213,46 +255,120 @@ func ExecPrim(op PrimOp, args []Value) (Value, error) {
 	case PrimNeq:
 		return BoolVal(!valEqual(args[0], args[1])), nil
 	case PrimLt:
-		return BoolVal(asInt(args[0]) < asInt(args[1])), nil
+		a, err := asInt(args[0])
+		if err != nil {
+			return nil, fmt.Errorf("<: %w", err)
+		}
+		b, err := asInt(args[1])
+		if err != nil {
+			return nil, fmt.Errorf("<: %w", err)
+		}
+		return BoolVal(a < b), nil
 	case PrimLe:
-		return BoolVal(asInt(args[0]) <= asInt(args[1])), nil
+		a, err := asInt(args[0])
+		if err != nil {
+			return nil, fmt.Errorf("<=: %w", err)
+		}
+		b, err := asInt(args[1])
+		if err != nil {
+			return nil, fmt.Errorf("<=: %w", err)
+		}
+		return BoolVal(a <= b), nil
 	case PrimGt:
-		return BoolVal(asInt(args[0]) > asInt(args[1])), nil
+		a, err := asInt(args[0])
+		if err != nil {
+			return nil, fmt.Errorf(">: %w", err)
+		}
+		b, err := asInt(args[1])
+		if err != nil {
+			return nil, fmt.Errorf(">: %w", err)
+		}
+		return BoolVal(a > b), nil
 	case PrimGe:
-		return BoolVal(asInt(args[0]) >= asInt(args[1])), nil
+		a, err := asInt(args[0])
+		if err != nil {
+			return nil, fmt.Errorf(">=: %w", err)
+		}
+		b, err := asInt(args[1])
+		if err != nil {
+			return nil, fmt.Errorf(">=: %w", err)
+		}
+		return BoolVal(a >= b), nil
 
 	// Boolean
 	case PrimAnd:
-		return BoolVal(asBool(args[0]) && asBool(args[1])), nil
+		a, err := asBool(args[0])
+		if err != nil {
+			return nil, fmt.Errorf("&&: %w", err)
+		}
+		b, err := asBool(args[1])
+		if err != nil {
+			return nil, fmt.Errorf("&&: %w", err)
+		}
+		return BoolVal(a && b), nil
 	case PrimOr:
-		return BoolVal(asBool(args[0]) || asBool(args[1])), nil
+		a, err := asBool(args[0])
+		if err != nil {
+			return nil, fmt.Errorf("||: %w", err)
+		}
+		b, err := asBool(args[1])
+		if err != nil {
+			return nil, fmt.Errorf("||: %w", err)
+		}
+		return BoolVal(a || b), nil
 	case PrimNot:
-		return BoolVal(!asBool(args[0])), nil
+		a, err := asBool(args[0])
+		if err != nil {
+			return nil, fmt.Errorf("not: %w", err)
+		}
+		return BoolVal(!a), nil
 
 	// List operations
 	case PrimCons:
-		xs := asList(args[1])
+		xs, err := asList(args[1])
+		if err != nil {
+			return nil, fmt.Errorf("cons: %w", err)
+		}
 		result := make(ListVal, len(xs)+1)
 		result[0] = args[0]
 		copy(result[1:], xs)
 		return result, nil
 
 	case PrimConcat:
-		xss := asList(args[0])
+		xss, err := asList(args[0])
+		if err != nil {
+			return nil, fmt.Errorf("concat: %w", err)
+		}
 		var result ListVal
-		for _, xs := range xss {
-			result = append(result, asList(xs)...)
+		for _, x := range xss {
+			inner, err := asList(x)
+			if err != nil {
+				return nil, fmt.Errorf("concat: %w", err)
+			}
+			result = append(result, inner...)
 		}
 		return result, nil
 
 	case PrimFst:
-		return asTuple(args[0]).Fst, nil
+		t, err := asTuple(args[0])
+		if err != nil {
+			return nil, fmt.Errorf("fst: %w", err)
+		}
+		return t.Fst, nil
 	case PrimSnd:
-		return asTuple(args[0]).Snd, nil
+		t, err := asTuple(args[0])
+		if err != nil {
+			return nil, fmt.Errorf("snd: %w", err)
+		}
+		return t.Snd, nil
 
 	// Map: map f xs
 	case PrimMap:
-		f, xs := args[0], asList(args[1])
+		xs, err := asList(args[1])
+		if err != nil {
+			return nil, fmt.Errorf("map: %w", err)
+		}
+		f := args[0]
 		result := make(ListVal, len(xs))
 		for i, x := range xs {
 			v, err := Apply(f, x)
@@ -265,7 +381,11 @@ func ExecPrim(op PrimOp, args []Value) (Value, error) {
 
 	// Foldr: foldr f e xs = f x1 (f x2 (... (f xn e)))
 	case PrimFoldr:
-		f, e, xs := args[0], args[1], asList(args[2])
+		xs, err := asList(args[2])
+		if err != nil {
+			return nil, fmt.Errorf("foldr: %w", err)
+		}
+		f, e := args[0], args[1]
 		acc := e
 		for i := len(xs) - 1; i >= 0; i-- {
 			partial, err := Apply(f, xs[i])
@@ -281,7 +401,11 @@ func ExecPrim(op PrimOp, args []Value) (Value, error) {
 
 	// Foldl: foldl f e xs = foldl f (f e x1) xs'
 	case PrimFoldl:
-		f, e, xs := args[0], args[1], asList(args[2])
+		xs, err := asList(args[2])
+		if err != nil {
+			return nil, fmt.Errorf("foldl: %w", err)
+		}
+		f, e := args[0], args[1]
 		acc := e
 		for _, x := range xs {
 			partial, err := Apply(f, acc)
@@ -297,7 +421,11 @@ func ExecPrim(op PrimOp, args []Value) (Value, error) {
 
 	// Scanl: scanl f e xs returns [e, f e x1, f (f e x1) x2, ...]
 	case PrimScanl:
-		f, e, xs := args[0], args[1], asList(args[2])
+		xs, err := asList(args[2])
+		if err != nil {
+			return nil, fmt.Errorf("scanl: %w", err)
+		}
+		f, e := args[0], args[1]
 		result := make(ListVal, 0, len(xs)+1)
 		result = append(result, e)
 		acc := e
@@ -316,14 +444,22 @@ func ExecPrim(op PrimOp, args []Value) (Value, error) {
 
 	// Filter: filter p xs
 	case PrimFilter:
-		p, xs := args[0], asList(args[1])
+		xs, err := asList(args[1])
+		if err != nil {
+			return nil, fmt.Errorf("filter: %w", err)
+		}
+		p := args[0]
 		var result ListVal
 		for _, x := range xs {
 			pv, err := Apply(p, x)
 			if err != nil {
 				return nil, fmt.Errorf("filter: %w", err)
 			}
-			if asBool(pv) {
+			b, err := asBool(pv)
+			if err != nil {
+				return nil, fmt.Errorf("filter: %w", err)
+			}
+			if b {
 				result = append(result, x)
 			}
 		}
@@ -339,11 +475,21 @@ func ExecPrim(op PrimOp, args []Value) (Value, error) {
 			if err != nil {
 				return nil, fmt.Errorf("unfoldr: %w", err)
 			}
-			tp := asTuple(pair)
-			if !asBool(tp.Fst) {
+			tp, err := asTuple(pair)
+			if err != nil {
+				return nil, fmt.Errorf("unfoldr: %w", err)
+			}
+			cont, err := asBool(tp.Fst)
+			if err != nil {
+				return nil, fmt.Errorf("unfoldr: %w", err)
+			}
+			if !cont {
 				break
 			}
-			inner := asTuple(tp.Snd)
+			inner, err := asTuple(tp.Snd)
+			if err != nil {
+				return nil, fmt.Errorf("unfoldr: %w", err)
+			}
 			result = append(result, inner.Fst)
 			seed = inner.Snd
 		}
@@ -364,20 +510,36 @@ func ExecPrim(op PrimOp, args []Value) (Value, error) {
 
 // --- Value coercion helpers ---
 
-func asInt(v Value) int64 {
-	return int64(v.(IntVal))
+func asInt(v Value) (int64, error) {
+	iv, ok := v.(IntVal)
+	if !ok {
+		return 0, fmt.Errorf("expected Int, got %T (%s)", v, v)
+	}
+	return int64(iv), nil
 }
 
-func asBool(v Value) bool {
-	return bool(v.(BoolVal))
+func asBool(v Value) (bool, error) {
+	bv, ok := v.(BoolVal)
+	if !ok {
+		return false, fmt.Errorf("expected Bool, got %T (%s)", v, v)
+	}
+	return bool(bv), nil
 }
 
-func asList(v Value) ListVal {
-	return v.(ListVal)
+func asList(v Value) (ListVal, error) {
+	lv, ok := v.(ListVal)
+	if !ok {
+		return nil, fmt.Errorf("expected List, got %T (%s)", v, v)
+	}
+	return lv, nil
 }
 
-func asTuple(v Value) *TupleVal {
-	return v.(*TupleVal)
+func asTuple(v Value) (*TupleVal, error) {
+	tv, ok := v.(*TupleVal)
+	if !ok {
+		return nil, fmt.Errorf("expected Tuple, got %T (%s)", v, v)
+	}
+	return tv, nil
 }
 
 // valEqual compares two values for structural equality.

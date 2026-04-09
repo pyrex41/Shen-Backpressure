@@ -34,7 +34,6 @@ func TestEmitObligation(t *testing.T) {
 		),
 	}
 
-	lambdaCounter = 0
 	shenSpec := EmitObligation(cond)
 	t.Logf("Generated Shen spec:\n%s", shenSpec)
 
@@ -61,7 +60,6 @@ func TestEmitObligationNoFreeVars(t *testing.T) {
 		RHS:         core.MkInt(5),
 	}
 
-	lambdaCounter = 0
 	spec := EmitObligation(cond)
 	t.Logf("Generated:\n%s", spec)
 
