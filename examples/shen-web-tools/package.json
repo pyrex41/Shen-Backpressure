@@ -7,8 +7,10 @@
   "scripts": {
     "build": "npx tsc",
     "shengen": "npx tsx ../../cmd/shengen-ts/shengen.ts specs/core.shen --out runtime/guards_gen.ts",
+    "shen-derive": "npx tsx ../../cmd/shen-derive-ts/shen-derive.ts verify specs/shen-derive-smoke.shen --func sum-nonneg --impl-module ./sum_nonneg.js --impl-func SumNonneg --import ./guards_gen.js --out runtime/sum_nonneg.shen-derive.test.ts",
+    "shen-derive-check": "npx tsx ../../cmd/shen-derive-ts/shen-derive.ts verify specs/shen-derive-smoke.shen --func sum-nonneg --impl-module ./sum_nonneg.js --impl-func SumNonneg --import ./guards_gen.js --out runtime/.sum_nonneg.shen-derive.test.ts.new && diff -u runtime/sum_nonneg.shen-derive.test.ts runtime/.sum_nonneg.shen-derive.test.ts.new && rm runtime/.sum_nonneg.shen-derive.test.ts.new",
     "test": "node --import tsx --test runtime/*.test.ts",
-    "check": "npm run shengen && npm run build"
+    "check": "npm run shengen && npm run shen-derive-check && npm run build && npm test"
   },
   "dependencies": {
     "@arrow-js/core": "^1.0.0-alpha.9"
