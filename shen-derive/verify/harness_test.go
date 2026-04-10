@@ -209,6 +209,128 @@ func TestDomainTypedReturn(t *testing.T) {
 	}
 }
 
+func TestBuildHarnessMultiClauseWithRecursion(t *testing.T) {
+	// A multi-clause define with `where` guards that calls itself
+	// recursively via the base env's define bindings. This is the
+	// integration test for Direction B: pattern matching + guards +
+	// recursive lookups all have to line up.
+	src := `
+(datatype drug-id
+  X : string;
+  ============
+  X : drug-id;)
+
+(datatype contraindication
+  DrugA : drug-id;
+  DrugB : drug-id;
+  ========================
+  [DrugA DrugB] : contraindication;)
+
+(define pair-in-list?
+  {drug-id --> drug-id --> (list contraindication) --> boolean}
+  _ _ [] -> false
+  A B [[X Y] | Rest] -> true  where (and (= A X) (= B Y))
+  A B [[X Y] | Rest] -> true  where (and (= A Y) (= B X))
+  A B [_ | Rest] -> (pair-in-list? A B Rest))
+`
+	tmp := t_tempFile(src)
+	defer t_removeFile(tmp)
+
+	sf, err := specfile.ParseFile(tmp)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	def := sf.FindDefine("pair-in-list?")
+	if def == nil {
+		t.Fatal("pair-in-list? not found")
+	}
+	if got := len(def.Clauses); got != 4 {
+		t.Fatalf("clauses: got %d, want 4", got)
+	}
+
+	tt := specfile.BuildTypeTable(sf.Datatypes, "example.com/dose/internal/shenguard", "shenguard")
+	allDefines := make([]*specfile.Define, len(sf.Defines))
+	for i := range sf.Defines {
+		allDefines[i] = &sf.Defines[i]
+	}
+
+	base := buildBaseEnv(tt, allDefines)
+
+	// Direct evaluation probes — bypass BuildHarness so we can assert on
+	// specific values and exercise the recursive case.
+	drugA := core.StringVal("alice")
+	drugB := core.StringVal("bob")
+	pairAB := core.ListVal{drugA, drugB}
+	pairBA := core.ListVal{drugB, drugA}
+	pairOther := core.ListVal{core.StringVal("carol"), core.StringVal("dave")}
+
+	cases := []struct {
+		name string
+		args []core.Value
+		want bool
+	}{
+		{"empty list → clause 0", []core.Value{drugA, drugB, core.ListVal(nil)}, false},
+		{"direct match → clause 1", []core.Value{drugA, drugB, core.ListVal{pairAB}}, true},
+		{"swapped match → clause 2", []core.Value{drugA, drugB, core.ListVal{pairBA}}, true},
+		{"skip then match → clauses 3→1", []core.Value{drugA, drugB, core.ListVal{pairOther, pairAB}}, true},
+		{"never matches → clause 3 recurse → 0", []core.Value{drugA, drugB, core.ListVal{pairOther, pairOther}}, false},
+	}
+	for _, tc := range cases {
+		got, err := evalDefine(def, tc.args, base)
+		if err != nil {
+			t.Errorf("%s: eval error: %v", tc.name, err)
+			continue
+		}
+		gb, ok := got.(core.BoolVal)
+		if !ok {
+			t.Errorf("%s: got %T, want BoolVal", tc.name, got)
+			continue
+		}
+		if bool(gb) != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, bool(gb), tc.want)
+		}
+	}
+
+	// End-to-end: BuildHarness should succeed on this spec, generate cases,
+	// and emit valid-looking Go source.
+	h, err := BuildHarness(&HarnessConfig{
+		Spec:        def,
+		TypeTable:   tt,
+		AllDefines:  allDefines,
+		ImplPkgPath: "example.com/dose/internal/derived",
+		ImplPkgName: "derived",
+		ImplFunc:    "PairInList",
+		TestPkgName: "derived_test",
+		MaxCases:    20,
+	})
+	if err != nil {
+		t.Fatalf("BuildHarness: %v", err)
+	}
+	if len(h.Cases) == 0 {
+		t.Fatal("no cases generated")
+	}
+	for _, c := range h.Cases {
+		if _, ok := c.Expected.(core.BoolVal); !ok {
+			t.Errorf("case %s: expected bool, got %T", c.Name, c.Expected)
+		}
+	}
+
+	source, err := h.Emit()
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	for _, want := range []string{
+		"func TestSpec_PairInList(t *testing.T)",
+		"mustDrugId",
+		"mustContraindication",
+		"derived.PairInList(",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("emitted source missing %q", want)
+		}
+	}
+}
+
 func TestEvalSpecSimple(t *testing.T) {
 	// A dead-simple "sum is non-negative" spec, no domain types.
 	src := `

@@ -15,6 +15,12 @@ type HarnessConfig struct {
 	Spec      *specfile.Define
 	TypeTable *specfile.TypeTable
 
+	// AllDefines lets the evaluator resolve references between defines in
+	// the same spec file (mutual recursion). Every define — including Spec
+	// itself — should appear in this slice. Callers that don't care about
+	// cross-define references can pass nil or []*specfile.Define{Spec}.
+	AllDefines []*specfile.Define
+
 	// Implementation package info — these are used to generate the import
 	// and the qualified function call in the test body.
 	ImplPkgPath string // e.g. "example.com/payment/internal/derived"
@@ -51,8 +57,16 @@ func BuildHarness(cfg *HarnessConfig) (*Harness, error) {
 	if cfg.TypeTable == nil {
 		return nil, fmt.Errorf("nil type table")
 	}
+	if len(cfg.Spec.TypeSig.ParamTypes) == 0 {
+		return nil, fmt.Errorf("spec %s: verification requires a type signature "+
+			"({...}) — the sampler has no way to generate inputs otherwise",
+			cfg.Spec.Name)
+	}
 	if len(cfg.Spec.ParamNames) != len(cfg.Spec.TypeSig.ParamTypes) {
 		return nil, fmt.Errorf("spec %s: param count mismatch", cfg.Spec.Name)
+	}
+	if len(cfg.Spec.Clauses) == 0 {
+		return nil, fmt.Errorf("spec %s: no clauses", cfg.Spec.Name)
 	}
 
 	// Generate samples per parameter.
@@ -73,9 +87,14 @@ func BuildHarness(cfg *HarnessConfig) (*Harness, error) {
 	}
 	combos := cartesian(paramSamples, maxCases)
 
+	// Build the evaluation env once. It carries field accessors and
+	// (curried) references to every define in the spec file so that
+	// mutually recursive defines resolve each other by name.
+	base := buildBaseEnv(cfg.TypeTable, cfg.AllDefines)
+
 	h := &Harness{Config: cfg}
 	for idx, combo := range combos {
-		val, err := evalSpec(cfg.Spec, combo, cfg.TypeTable)
+		val, err := evalSpec(cfg.Spec, combo, base)
 		if err != nil {
 			return nil, fmt.Errorf("case %d: eval spec: %w", idx, err)
 		}
@@ -126,18 +145,83 @@ func cartesian(paramSamples [][]Sample, maxCases int) [][]Sample {
 	}
 }
 
-// evalSpec evaluates the spec body with the given argument values. It
-// constructs an evaluation environment that contains:
-//   - the spec's parameters bound to their sampled values
-//   - `val` as the identity function (wrapper types are primitives at eval time)
-//   - one closure per field accessor in the type table
-func evalSpec(def *specfile.Define, args []Sample, tt *specfile.TypeTable) (core.Value, error) {
-	env := buildSpecEnv(def, args, tt)
-	return core.Eval(env, def.Body)
+// evalSpec evaluates the given spec define on sampled arguments.
+func evalSpec(def *specfile.Define, args []Sample, base *core.Env) (core.Value, error) {
+	vals := make([]core.Value, len(args))
+	for i, a := range args {
+		vals[i] = a.Value
+	}
+	return evalDefine(def, vals, base)
 }
 
-// buildSpecEnv populates an Env for spec evaluation. See evalSpec.
-func buildSpecEnv(def *specfile.Define, args []Sample, tt *specfile.TypeTable) *core.Env {
+// evalDefine dispatches on the clauses of a define, trying each in order,
+// matching its patterns against the argument values, evaluating the
+// `where` guard (if any), and running the body of the first matching
+// clause.
+func evalDefine(def *specfile.Define, vals []core.Value, base *core.Env) (core.Value, error) {
+	if len(def.Clauses) == 0 {
+		return nil, fmt.Errorf("define %s: no clauses", def.Name)
+	}
+	for i, cl := range def.Clauses {
+		if len(cl.Patterns) != len(vals) {
+			return nil, fmt.Errorf("define %s clause %d: %d patterns vs %d args",
+				def.Name, i, len(cl.Patterns), len(vals))
+		}
+		env, ok, err := bindClausePatterns(base, cl.Patterns, vals)
+		if err != nil {
+			return nil, fmt.Errorf("define %s clause %d: %w", def.Name, i, err)
+		}
+		if !ok {
+			continue
+		}
+		if cl.Guard != nil {
+			g, err := core.Eval(env, cl.Guard)
+			if err != nil {
+				return nil, fmt.Errorf("define %s clause %d: guard: %w", def.Name, i, err)
+			}
+			gb, isBool := g.(core.BoolVal)
+			if !isBool {
+				return nil, fmt.Errorf("define %s clause %d: guard returned %T, expected Bool",
+					def.Name, i, g)
+			}
+			if !bool(gb) {
+				continue
+			}
+		}
+		return core.Eval(env, cl.Body)
+	}
+	return nil, fmt.Errorf("define %s: non-exhaustive clauses (no match for args)", def.Name)
+}
+
+// bindClausePatterns runs the pattern matcher for every (pattern, value)
+// pair in order and returns the resulting environment. If any pattern
+// fails to match structurally, ok is false and err is nil. A real error
+// (unsupported pattern shape) is returned with ok=false.
+func bindClausePatterns(base *core.Env, patterns []core.Sexpr, vals []core.Value) (*core.Env, bool, error) {
+	env := base
+	for i, p := range patterns {
+		bindings, ok, err := core.Match(p, vals[i])
+		if err != nil {
+			return nil, false, err
+		}
+		if !ok {
+			return nil, false, nil
+		}
+		for name, v := range bindings {
+			env = env.Extend(name, v)
+		}
+	}
+	return env, true, nil
+}
+
+// buildBaseEnv populates the evaluation environment shared across all
+// clauses and all cases of a single BuildHarness call. It contains:
+//
+//   - `val` as the identity function (wrapper types are primitives at eval time)
+//   - one closure per field accessor in the type table
+//   - one curried BuiltinFn per define in `defines` so that bodies can
+//     call each other by name (supports mutual recursion)
+func buildBaseEnv(tt *specfile.TypeTable, defines []*specfile.Define) *core.Env {
 	env := core.EmptyEnv()
 
 	// `val` is identity — wrapper/constrained values are already primitives
@@ -148,9 +232,8 @@ func buildSpecEnv(def *specfile.Define, args []Sample, tt *specfile.TypeTable) *
 	})
 
 	// Register field accessors. Each composite field becomes a closure that
-	// projects the corresponding index out of a ListVal. We use the Shen field
-	// name lowered to match common spec-writing style (e.g., field "Amount" →
-	// accessor `amount`). We also register the exact field name for safety.
+	// projects the corresponding index out of a ListVal. We register both
+	// the lowered Shen field name (spec-writing style) and the exact name.
 	registered := map[string]bool{}
 	for _, entry := range tt.Entries {
 		for _, f := range entry.Fields {
@@ -179,11 +262,46 @@ func buildSpecEnv(def *specfile.Define, args []Sample, tt *specfile.TypeTable) *
 		}
 	}
 
-	// Bind parameters.
-	for i, pname := range def.ParamNames {
-		env = env.Extend(pname, args[i].Value)
+	// Install a curried BuiltinFn for every define. The final env (with all
+	// defines registered) is captured by each closure, so a call to `f` from
+	// inside `g`'s body resolves `f` through the same shared env.
+	//
+	// We use a shared pointer so the closures can be rebuilt after the env
+	// is fully populated.
+	shared := &envHolder{}
+	for _, d := range defines {
+		def := d // capture
+		env = env.Extend(def.Name, curriedDefineFn(def, shared))
 	}
+	shared.env = env
 	return env
+}
+
+// envHolder is a tiny indirection so that curried define closures can
+// reference "the fully populated env" after we finish building it, even
+// though buildBaseEnv returns a single pointer.
+type envHolder struct{ env *core.Env }
+
+// curriedDefineFn returns a curried BuiltinFn that collects arity arguments
+// and then dispatches to evalDefine with the shared base env.
+func curriedDefineFn(def *specfile.Define, shared *envHolder) core.Value {
+	arity := def.Arity()
+	var build func(collected []core.Value) core.Value
+	build = func(collected []core.Value) core.Value {
+		return &core.BuiltinFn{
+			Name: def.Name,
+			Fn: func(v core.Value) (core.Value, error) {
+				next := make([]core.Value, len(collected)+1)
+				copy(next, collected)
+				next[len(collected)] = v
+				if len(next) == arity {
+					return evalDefine(def, next, shared.env)
+				}
+				return build(next), nil
+			},
+		}
+	}
+	return build(nil)
 }
 
 // goLiteralFor converts an evaluated spec value to a Go source expression

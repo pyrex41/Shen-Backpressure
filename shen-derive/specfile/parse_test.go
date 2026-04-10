@@ -126,8 +126,62 @@ func TestParseDefine(t *testing.T) {
 	if got := def.ParamNames; len(got) != 2 || got[0] != "B0" || got[1] != "Txs" {
 		t.Errorf("param names: %v", got)
 	}
-	if def.Body == nil {
-		t.Fatal("body is nil")
+	if len(def.Clauses) != 1 {
+		t.Fatalf("clauses: got %d, want 1", len(def.Clauses))
+	}
+	if def.Clauses[0].Body == nil {
+		t.Fatal("clause body is nil")
+	}
+	if def.Clauses[0].Guard != nil {
+		t.Error("unexpected guard on single-clause define")
+	}
+	if got := len(def.Clauses[0].Patterns); got != 2 {
+		t.Errorf("clause patterns: got %d, want 2", got)
+	}
+}
+
+func TestParseDefineMultiClauseWithGuards(t *testing.T) {
+	block := `(define pair-in-list?
+  _ _ [] -> false
+  A B [[X Y] | Rest] -> true  where (and (= A X) (= B Y))
+  A B [[X Y] | Rest] -> true  where (and (= A Y) (= B X))
+  A B [_ | Rest] -> (pair-in-list? A B Rest))`
+
+	def, err := parseDefine(block)
+	if err != nil {
+		t.Fatalf("parseDefine: %v", err)
+	}
+	if def.Name != "pair-in-list?" {
+		t.Errorf("name: %q", def.Name)
+	}
+	if got := len(def.Clauses); got != 4 {
+		t.Fatalf("clauses: got %d, want 4", got)
+	}
+	// Clause 0: `_ _ [] -> false`, no guard.
+	if len(def.Clauses[0].Patterns) != 3 {
+		t.Errorf("clause 0: %d patterns", len(def.Clauses[0].Patterns))
+	}
+	if def.Clauses[0].Guard != nil {
+		t.Error("clause 0: unexpected guard")
+	}
+	// Clauses 1 and 2 both have where guards.
+	if def.Clauses[1].Guard == nil {
+		t.Error("clause 1: missing guard")
+	}
+	if def.Clauses[2].Guard == nil {
+		t.Error("clause 2: missing guard")
+	}
+	// Clause 3 has a recursive call as its body, no guard.
+	if def.Clauses[3].Guard != nil {
+		t.Error("clause 3: unexpected guard")
+	}
+	// The define has no type signature — TypeSig fields should be empty.
+	if len(def.TypeSig.ParamTypes) != 0 {
+		t.Errorf("expected no type sig, got %v", def.TypeSig.ParamTypes)
+	}
+	// Arity should come from first clause pattern count.
+	if def.Arity() != 3 {
+		t.Errorf("arity: got %d, want 3", def.Arity())
 	}
 }
 
