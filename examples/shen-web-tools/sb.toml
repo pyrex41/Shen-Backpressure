@@ -1,0 +1,22 @@
+[project]
+lang = "ts"
+pkg  = "shenguard"
+
+[paths]
+spec = "specs/core.shen"
+
+# Gate 6 — spec-equivalence verification via shen-derive-ts.
+#
+# Each [[derive.specs]] entry pins one hand-written TS implementation
+# to a Shen spec. `sb derive` regenerates the committed test file, diffs
+# it against the committed copy (drift gate), then runs the test.
+[derive]
+
+[[derive.specs]]
+lang      = "ts"
+path      = "specs/shen-derive-smoke.shen"
+func      = "sum-nonneg"
+impl_pkg  = "./sum_nonneg.js"
+impl_func = "SumNonneg"
+guard_pkg = "./guards_gen.js"
+out_file  = "runtime/sum_nonneg.shen-derive.test.ts"

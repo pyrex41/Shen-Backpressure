@@ -38,17 +38,19 @@ type Config struct {
 
 // DeriveSpec configures one shen-derive verify invocation.
 type DeriveSpec struct {
+	Lang     string // "go" (default) or "ts" — selects which shen-derive port runs
 	Path     string // path to the .shen file holding the (define ...) block
 	Func     string // Shen define name, e.g. "processable"
-	ImplPkg  string // Go import path of the implementation package
-	ImplFunc string // Go function name, e.g. "Processable"
-	GuardPkg string // Go import path of the shengen guard package
+	ImplPkg  string // Go import path (go) or relative TS module path (ts) of the implementation
+	ImplFunc string // implementation function name, e.g. "Processable"
+	GuardPkg string // Go import path (go) or relative TS module path (ts) of the shengen guard module
 	OutFile  string // path to the committed generated test file
 	Seed     int64  // optional RNG seed; 0 = deterministic
 }
 
 // tomlDeriveSpec mirrors a [[derive.specs]] entry in sb.toml.
 type tomlDeriveSpec struct {
+	Lang     string `toml:"lang"`
 	Path     string `toml:"path"`
 	Func     string `toml:"func"`
 	ImplPkg  string `toml:"impl_pkg"`
@@ -149,7 +151,12 @@ func LoadConfig() (*Config, error) {
 			cfg.DeriveDir = tc.Derive.Dir
 		}
 		for _, s := range tc.Derive.Specs {
+			lang := s.Lang
+			if lang == "" {
+				lang = "go"
+			}
 			cfg.DeriveSpecs = append(cfg.DeriveSpecs, DeriveSpec{
+				Lang:     lang,
 				Path:     s.Path,
 				Func:     s.Func,
 				ImplPkg:  s.ImplPkg,
