@@ -331,6 +331,93 @@ func TestBuildHarnessMultiClauseWithRecursion(t *testing.T) {
 	}
 }
 
+func TestSeededSamplingDeterministicAndReproducible(t *testing.T) {
+	// A spec with a pure-number signature. With seed=0, only the boundary
+	// pool is used; with seed=42, 8 random draws are appended per primitive.
+	src := `
+(define add-one
+  {number --> number}
+  X -> (+ X 1))
+`
+	tmp := t_tempFile(src)
+	defer t_removeFile(tmp)
+	sf, err := specfile.ParseFile(tmp)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	def := sf.FindDefine("add-one")
+	if def == nil {
+		t.Fatal("missing add-one")
+	}
+	tt := specfile.BuildTypeTable(sf.Datatypes, "", "")
+
+	buildWithSeed := func(seed int64) *Harness {
+		t.Helper()
+		h, err := BuildHarness(&HarnessConfig{
+			Spec:        def,
+			TypeTable:   tt,
+			ImplFunc:    "AddOne",
+			TestPkgName: "pkg_test",
+			MaxCases:    50,
+			Seed:        seed,
+		})
+		if err != nil {
+			t.Fatalf("BuildHarness seed=%d: %v", seed, err)
+		}
+		return h
+	}
+
+	hDet := buildWithSeed(0)
+	hSeed1 := buildWithSeed(42)
+	hSeed2 := buildWithSeed(42)
+
+	// Deterministic (seed=0): 6 boundary values → 6 cases.
+	if len(hDet.Cases) != 6 {
+		t.Errorf("seed=0 cases: got %d, want 6", len(hDet.Cases))
+	}
+
+	// Seeded (seed=42): boundary (6) + 8 random draws = 14 cases.
+	if len(hSeed1.Cases) != 14 {
+		t.Errorf("seed=42 cases: got %d, want 14", len(hSeed1.Cases))
+	}
+
+	// Reproducibility: two runs with the same seed produce identical
+	// input expressions.
+	if len(hSeed1.Cases) != len(hSeed2.Cases) {
+		t.Fatal("reproducibility: case counts differ")
+	}
+	for i := range hSeed1.Cases {
+		a := hSeed1.Cases[i].Args[0].GoExpr
+		b := hSeed2.Cases[i].Args[0].GoExpr
+		if a != b {
+			t.Errorf("case %d: seed-42 runs diverged: %q vs %q", i, a, b)
+		}
+	}
+
+	// The seeded run should actually contain a value outside the boundary
+	// pool (i.e. not one of 0, 1, -1, 5, 2.5, 100).
+	boundary := map[string]bool{"0": true, "1": true, "-1": true, "5": true, "2.5": true, "100": true}
+	foundNovel := false
+	for _, c := range hSeed1.Cases {
+		if !boundary[c.Args[0].GoExpr] {
+			foundNovel = true
+			break
+		}
+	}
+	if !foundNovel {
+		t.Error("seeded run produced no samples outside the boundary pool")
+	}
+
+	// Header comment should stamp the seed.
+	src2, err := hSeed1.Emit()
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if !strings.Contains(src2, "Sampling seed: 42") {
+		t.Error("emitted source missing seed stamp")
+	}
+}
+
 func TestEvalSpecSimple(t *testing.T) {
 	// A dead-simple "sum is non-negative" spec, no domain types.
 	src := `

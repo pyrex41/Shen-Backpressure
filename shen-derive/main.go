@@ -208,6 +208,8 @@ func cmdVerify(args []string) {
 	testPkg := fs.String("test-pkg", "", "package name for the generated test (default: <impl-pkg-name>_test)")
 	out := fs.String("out", "", "output file (default: stdout)")
 	maxCases := fs.Int("max-cases", 50, "maximum number of test cases")
+	seed := fs.Int64("seed", 0, "RNG seed for random sampling (0 = deterministic boundary values only)")
+	randomDraws := fs.Int("random-draws", 0, "number of random primitive draws per type when --seed != 0 (default 8)")
 
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: shen-derive verify <spec.shen> [flags]")
@@ -264,6 +266,8 @@ func cmdVerify(args []string) {
 		ImplFunc:    *implFunc,
 		TestPkgName: *testPkg,
 		MaxCases:    *maxCases,
+		Seed:        *seed,
+		RandomDraws: *randomDraws,
 	}
 	h, err := verify.BuildHarness(cfg)
 	if err != nil {
