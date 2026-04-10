@@ -1,0 +1,27 @@
+[project]
+lang = "go"
+pkg  = "shenguard"
+
+[paths]
+spec   = "specs/core.shen"
+output = "internal/shenguard/guards_gen.go"
+
+# Gate 6 — spec-equivalence verification via shen-derive.
+#
+# For each [[derive.specs]] entry, `sb derive` regenerates the
+# table-driven Go test that asserts the implementation matches the
+# Shen spec, diffs it against the committed copy, and fails on drift.
+# After all drift checks pass, `sb derive` runs `go test` on each
+# referenced implementation package.
+#
+# `sb derive --regen` rewrites the OutFile instead of diffing.
+[derive]
+dir = "../../shen-derive"
+
+[[derive.specs]]
+path      = "specs/core.shen"
+func      = "processable"
+impl_pkg  = "ralph-shen-agent/internal/derived"
+impl_func = "Processable"
+guard_pkg = "ralph-shen-agent/internal/shenguard"
+out_file  = "internal/derived/processable_spec_test.go"

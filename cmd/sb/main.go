@@ -32,6 +32,8 @@ func main() {
 		cmdGen(os.Args[2:])
 	case "gates":
 		cmdGates(os.Args[2:])
+	case "derive":
+		cmdDerive(os.Args[2:])
 	case "loop":
 		cmdLoop(os.Args[2:])
 	case "version", "--version", "-v":
@@ -54,6 +56,7 @@ Commands:
   init      Scaffold a new Shen-backpressure project
   gen       Generate guard types from Shen specs
   gates     Run all five verification gates
+  derive    Run the spec-equivalence verification gate
   loop      Launch a Ralph loop (headless LLM + gates)
   version   Print version
 
