@@ -54,53 +54,100 @@ Flags:
 		return
 	}
 
-	deriveDir := cfg.DeriveDir
-	if deriveDir == "" {
-		// Conventional location: the shen-derive module sits at
-		// ../../shen-derive relative to an examples/<project> directory.
-		// Fall back to that if not explicitly configured.
-		deriveDir = "../../shen-derive"
+	// Resolve the Go shen-derive module dir once (only needed if any
+	// spec uses lang="go"). For TS specs, we invoke shen-derive-ts via
+	// its source path inside the repo and don't need this.
+	hasGo := false
+	for _, s := range cfg.DeriveSpecs {
+		if s.Lang == "go" {
+			hasGo = true
+			break
+		}
 	}
-	absDeriveDir, err := filepath.Abs(deriveDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "sb derive: resolve derive dir: %v\n", err)
-		os.Exit(1)
+	var absDeriveDir string
+	if hasGo {
+		deriveDir := cfg.DeriveDir
+		if deriveDir == "" {
+			deriveDir = "../../shen-derive"
+		}
+		var err error
+		absDeriveDir, err = filepath.Abs(deriveDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "sb derive: resolve derive dir: %v\n", err)
+			os.Exit(1)
+		}
+		if _, err := os.Stat(absDeriveDir); err != nil {
+			fmt.Fprintf(os.Stderr, "sb derive: shen-derive not found at %s: %v\n", absDeriveDir, err)
+			os.Exit(1)
+		}
 	}
-	if _, err := os.Stat(absDeriveDir); err != nil {
-		fmt.Fprintf(os.Stderr, "sb derive: shen-derive not found at %s: %v\n", absDeriveDir, err)
-		os.Exit(1)
-	}
+
+	// For TS specs we invoke cmd/shen-derive-ts/shen-derive.ts from the
+	// project directory via `npx tsx`. The path is repo-conventional:
+	// ../../cmd/shen-derive-ts/shen-derive.ts relative to examples/<proj>.
+	tsCLI := "../../cmd/shen-derive-ts/shen-derive.ts"
+	absTSCLI, _ := filepath.Abs(tsCLI)
 
 	// First pass: regenerate + diff (or overwrite in --regen mode).
 	drifted := 0
-	implPkgs := map[string]bool{}
+	goImplPkgs := map[string]bool{}
+	tsTestFiles := []string{}
 	for i, spec := range cfg.DeriveSpecs {
 		if err := validateDeriveSpec(spec); err != nil {
 			fmt.Fprintf(os.Stderr, "sb derive: spec[%d]: %v\n", i, err)
 			os.Exit(1)
 		}
-		implPkgs[spec.ImplPkg] = true
 
 		absSpec, _ := filepath.Abs(spec.Path)
 		absOut, _ := filepath.Abs(spec.OutFile)
 
-		regenArgs := []string{
-			"run", ".",
-			"verify", absSpec,
-			"--func", spec.Func,
-			"--impl-pkg", spec.ImplPkg,
-			"--impl-func", spec.ImplFunc,
-			"--import", spec.GuardPkg,
-		}
-		if spec.Seed != 0 {
-			regenArgs = append(regenArgs, "--seed", strconv.FormatInt(spec.Seed, 10))
+		fmt.Fprintf(os.Stderr, "sb derive: [%s/%s] %s → %s\n", spec.Lang, spec.Func, spec.Path, spec.OutFile)
+
+		var (
+			runCmd    string
+			runArgs   []string
+			runDir    string
+			tempGlob  string
+		)
+		switch spec.Lang {
+		case "go":
+			goImplPkgs[spec.ImplPkg] = true
+			runCmd = "go"
+			runArgs = []string{
+				"run", ".",
+				"verify", absSpec,
+				"--func", spec.Func,
+				"--impl-pkg", spec.ImplPkg,
+				"--impl-func", spec.ImplFunc,
+				"--import", spec.GuardPkg,
+			}
+			runDir = absDeriveDir
+			tempGlob = "shen-derive-*.go"
+		case "ts":
+			tsTestFiles = append(tsTestFiles, spec.OutFile)
+			runCmd = "npx"
+			runArgs = []string{
+				"tsx", absTSCLI,
+				"verify", absSpec,
+				"--func", spec.Func,
+				"--impl-module", spec.ImplPkg,
+				"--impl-func", spec.ImplFunc,
+				"--import", spec.GuardPkg,
+			}
+			runDir = "" // run in the project cwd
+			tempGlob = "shen-derive-*.ts"
+		default:
+			fmt.Fprintf(os.Stderr, "sb derive: spec[%d]: unknown lang %q (want go or ts)\n", i, spec.Lang)
+			os.Exit(1)
 		}
 
-		fmt.Fprintf(os.Stderr, "sb derive: [%s] %s → %s\n", spec.Func, spec.Path, spec.OutFile)
+		if spec.Seed != 0 {
+			runArgs = append(runArgs, "--seed", strconv.FormatInt(spec.Seed, 10))
+		}
 
 		if *regen {
-			regenArgs = append(regenArgs, "--out", absOut)
-			if err := runInDir(absDeriveDir, "go", regenArgs...); err != nil {
+			runArgs = append(runArgs, "--out", absOut)
+			if err := runInDir(runDir, runCmd, runArgs...); err != nil {
 				fmt.Fprintf(os.Stderr, "sb derive: regen %s: %v\n", spec.Func, err)
 				os.Exit(1)
 			}
@@ -109,7 +156,7 @@ Flags:
 
 		// Normal path: write to a tempfile, diff against the committed
 		// output, and report drift.
-		tmp, err := os.CreateTemp("", "shen-derive-*.go")
+		tmp, err := os.CreateTemp("", tempGlob)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "sb derive: tempfile: %v\n", err)
 			os.Exit(1)
@@ -118,8 +165,8 @@ Flags:
 		tmp.Close()
 		defer os.Remove(tmpPath)
 
-		regenArgs = append(regenArgs, "--out", tmpPath)
-		if err := runInDir(absDeriveDir, "go", regenArgs...); err != nil {
+		runArgs = append(runArgs, "--out", tmpPath)
+		if err := runInDir(runDir, runCmd, runArgs...); err != nil {
 			fmt.Fprintf(os.Stderr, "sb derive: regen %s: %v\n", spec.Func, err)
 			os.Exit(1)
 		}
@@ -152,17 +199,24 @@ Flags:
 		return
 	}
 
-	// Second pass: run `go test` on each implementation package. These
-	// packages live in the project's own Go module (not shen-derive), so
-	// we run the tests from the current working directory.
-	pkgs := make([]string, 0, len(implPkgs))
-	for p := range implPkgs {
-		pkgs = append(pkgs, p+"/...")
+	// Second pass: run tests on the regenerated files.
+	// Go specs → `go test ./impl-pkg/...` per distinct package.
+	goPkgs := make([]string, 0, len(goImplPkgs))
+	for p := range goImplPkgs {
+		goPkgs = append(goPkgs, p+"/...")
 	}
-	sort.Strings(pkgs)
-	for _, p := range pkgs {
+	sort.Strings(goPkgs)
+	for _, p := range goPkgs {
 		if err := runInDir("", "go", "test", p); err != nil {
 			fmt.Fprintf(os.Stderr, "sb derive: go test %s failed: %v\n", p, err)
+			os.Exit(1)
+		}
+	}
+	// TS specs → `node --import tsx --test <outfile>` per generated file.
+	sort.Strings(tsTestFiles)
+	for _, f := range tsTestFiles {
+		if err := runInDir("", "node", "--import", "tsx", "--test", f); err != nil {
+			fmt.Fprintf(os.Stderr, "sb derive: node --test %s failed: %v\n", f, err)
 			os.Exit(1)
 		}
 	}
