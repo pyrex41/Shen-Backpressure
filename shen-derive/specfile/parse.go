@@ -55,17 +55,45 @@ type Conclusion struct {
 
 // Define is a parsed (define ...) block.
 //
-// shen-derive expects the simplest shape: a single clause with uppercase
-// parameter names and an s-expression body.
+// shen-derive supports two shapes of define, both taken from Shen itself:
 //
-//	(define processable
-//	  {amount --> (list transaction) --> boolean}
-//	  B0 Txs -> (foldr ...))
+//  1. Single clause with a simple variable-symbol head:
+//
+//     (define processable
+//       {amount --> (list transaction) --> boolean}
+//       B0 Txs -> (foldr ...))
+//
+//  2. Multiple clauses with pattern matching and optional `where` guards:
+//
+//     (define pair-in-list?
+//       _ _ [] -> false
+//       A B [[X Y] | Rest] -> true  where (and (= A X) (= B Y))
+//       A B [_ | Rest] -> (pair-in-list? A B Rest))
+//
+// The type signature is optional — shen-derive can parse an un-typed
+// define, but the `verify` command will refuse to generate tests for one
+// (since it has no way to sample inputs without the parameter types).
 type Define struct {
 	Name       string
-	TypeSig    TypeSig
-	ParamNames []string   // ["B0", "Txs"]
-	Body       core.Sexpr // the s-expression after "->"
+	TypeSig    TypeSig  // may be zero-value if the define is untyped
+	ParamNames []string // derived from the first clause's patterns
+	Clauses    []Clause
+}
+
+// Clause is one pattern-match clause inside a (define ...) block.
+type Clause struct {
+	Patterns []core.Sexpr // one per parameter, parsed by core.ParseSexpr
+	Guard    core.Sexpr   // nil when the clause has no `where` expression
+	Body     core.Sexpr   // the expression after `->`
+}
+
+// Arity returns the number of parameters this define takes, derived from
+// the first clause's patterns. Returns 0 if there are no clauses.
+func (d *Define) Arity() int {
+	if len(d.Clauses) == 0 {
+		return 0
+	}
+	return len(d.Clauses[0].Patterns)
 }
 
 // TypeSig is a parsed {a --> b --> c} function type signature.
@@ -303,45 +331,233 @@ func parseDefine(block string) (*Define, error) {
 	name := strings.TrimSpace(inner[:nameEnd])
 	rest := strings.TrimSpace(inner[nameEnd:])
 
-	// Expect a {...} type signature next.
-	if !strings.HasPrefix(rest, "{") {
-		return nil, fmt.Errorf("define %s: expected type signature {...}, got %q", name, firstLine(rest))
+	// Optionally parse a {...} type signature. Shen allows un-typed defines
+	// (see dosage-calculator/specs/core.shen for examples); the verify
+	// command will later refuse to run on them.
+	var sig TypeSig
+	if strings.HasPrefix(rest, "{") {
+		sigEnd := strings.Index(rest, "}")
+		if sigEnd == -1 {
+			return nil, fmt.Errorf("define %s: unterminated type signature", name)
+		}
+		var err error
+		sig, err = parseTypeSig(rest[:sigEnd+1])
+		if err != nil {
+			return nil, fmt.Errorf("define %s: %w", name, err)
+		}
+		rest = strings.TrimSpace(rest[sigEnd+1:])
 	}
-	sigEnd := strings.Index(rest, "}")
-	if sigEnd == -1 {
-		return nil, fmt.Errorf("define %s: unterminated type signature", name)
-	}
-	sig, err := parseTypeSig(rest[:sigEnd+1])
+
+	clauses, err := parseDefineClauses(rest)
 	if err != nil {
 		return nil, fmt.Errorf("define %s: %w", name, err)
 	}
-	rest = strings.TrimSpace(rest[sigEnd+1:])
-
-	// The remainder is "ParamA ParamB ... -> BODY".
-	// We only support a single clause. Multiple clauses would use multiple "->".
-	arrowIdx := strings.Index(rest, "->")
-	if arrowIdx == -1 {
-		return nil, fmt.Errorf("define %s: missing '->' in clause", name)
-	}
-	paramStr := strings.TrimSpace(rest[:arrowIdx])
-	bodyStr := strings.TrimSpace(rest[arrowIdx+2:])
-
-	paramNames := strings.Fields(paramStr)
-	if len(paramNames) != len(sig.ParamTypes) {
-		return nil, fmt.Errorf("define %s: %d params in pattern, %d in type sig", name, len(paramNames), len(sig.ParamTypes))
+	if len(clauses) == 0 {
+		return nil, fmt.Errorf("define %s: no clauses", name)
 	}
 
-	body, err := core.ParseSexpr(bodyStr)
-	if err != nil {
-		return nil, fmt.Errorf("define %s: parse body: %w", name, err)
+	// Derive ParamNames from the first clause's patterns. If all patterns
+	// are simple uppercase symbols we use them directly (so existing
+	// single-clause specs like `processable` keep referring to `B0`/`Txs`).
+	// Otherwise we synthesize positional names.
+	paramNames := deriveParamNames(clauses[0].Patterns)
+
+	if len(sig.ParamTypes) > 0 && len(paramNames) != len(sig.ParamTypes) {
+		return nil, fmt.Errorf("define %s: %d params in first clause, %d in type sig",
+			name, len(paramNames), len(sig.ParamTypes))
 	}
 
 	return &Define{
 		Name:       name,
 		TypeSig:    sig,
 		ParamNames: paramNames,
-		Body:       body,
+		Clauses:    clauses,
 	}, nil
+}
+
+// parseDefineClauses splits a define body into its pattern-match clauses.
+// Mirrors the algorithm in cmd/shengen/main.go:parseDefine.
+func parseDefineClauses(body string) ([]Clause, error) {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return nil, fmt.Errorf("empty define body")
+	}
+
+	// Collapse whitespace and split on the " -> " separator. The resulting
+	// alternating layout is:
+	//   segments[0]  = first clause patterns
+	//   segments[i]  = previous clause result (+ optional `where GUARD`)
+	//                  followed by next clause patterns (i = 1 .. n-2)
+	//   segments[n-1] = last clause result
+	bodyOneLine := strings.Join(strings.Fields(body), " ")
+	segments := strings.Split(bodyOneLine, " -> ")
+	if len(segments) < 2 {
+		return nil, fmt.Errorf("missing '->' in define body")
+	}
+
+	var clauses []Clause
+	currentPatterns := segments[0]
+
+	for i := 1; i < len(segments); i++ {
+		seg := segments[i]
+		var resultStr, guardStr, nextPatterns string
+
+		if whereIdx := strings.Index(seg, " where "); whereIdx != -1 {
+			resultStr = strings.TrimSpace(seg[:whereIdx])
+			afterWhere := strings.TrimSpace(seg[whereIdx+len(" where "):])
+			if strings.HasPrefix(afterWhere, "(") {
+				expr, endIdx := extractBalancedParen(afterWhere)
+				guardStr = expr
+				nextPatterns = strings.TrimSpace(afterWhere[endIdx:])
+			} else {
+				// Rare: non-paren guard (single atom). Take the first token.
+				toks := strings.Fields(afterWhere)
+				if len(toks) == 0 {
+					return nil, fmt.Errorf("empty `where` guard in clause %d", i)
+				}
+				guardStr = toks[0]
+				nextPatterns = strings.Join(toks[1:], " ")
+			}
+		} else {
+			seg = strings.TrimSpace(seg)
+			if strings.HasPrefix(seg, "(") {
+				expr, endIdx := extractBalancedParen(seg)
+				resultStr = expr
+				nextPatterns = strings.TrimSpace(seg[endIdx:])
+			} else {
+				toks := strings.Fields(seg)
+				if len(toks) == 0 {
+					return nil, fmt.Errorf("empty clause result at segment %d", i)
+				}
+				resultStr = toks[0]
+				if len(toks) > 1 {
+					nextPatterns = strings.Join(toks[1:], " ")
+				}
+			}
+		}
+
+		patternStrs := splitPatterns(currentPatterns)
+		if len(patternStrs) == 0 {
+			return nil, fmt.Errorf("clause %d: no patterns", len(clauses))
+		}
+
+		patterns := make([]core.Sexpr, len(patternStrs))
+		for j, ps := range patternStrs {
+			s, err := core.ParseSexpr(ps)
+			if err != nil {
+				return nil, fmt.Errorf("clause %d: pattern %q: %w", len(clauses), ps, err)
+			}
+			patterns[j] = s
+		}
+
+		body, err := core.ParseSexpr(resultStr)
+		if err != nil {
+			return nil, fmt.Errorf("clause %d: body %q: %w", len(clauses), resultStr, err)
+		}
+
+		var guard core.Sexpr
+		if guardStr != "" {
+			guard, err = core.ParseSexpr(guardStr)
+			if err != nil {
+				return nil, fmt.Errorf("clause %d: where guard %q: %w",
+					len(clauses), guardStr, err)
+			}
+		}
+
+		clauses = append(clauses, Clause{
+			Patterns: patterns,
+			Guard:    guard,
+			Body:     body,
+		})
+		currentPatterns = nextPatterns
+	}
+
+	// Sanity: every clause should have the same arity as the first.
+	want := len(clauses[0].Patterns)
+	for i, cl := range clauses {
+		if len(cl.Patterns) != want {
+			return nil, fmt.Errorf("clause %d has %d patterns, expected %d",
+				i, len(cl.Patterns), want)
+		}
+	}
+
+	return clauses, nil
+}
+
+// splitPatterns tokenizes a pattern string respecting bracket nesting.
+// "[Med | Meds]" stays as one token; "[[X Y] | Rest]" stays as one token.
+// Ported from cmd/shengen/main.go:splitPatterns.
+func splitPatterns(s string) []string {
+	var patterns []string
+	var current strings.Builder
+	depth := 0
+	flush := func() {
+		if current.Len() > 0 {
+			patterns = append(patterns, current.String())
+			current.Reset()
+		}
+	}
+	for _, ch := range s {
+		switch ch {
+		case '[':
+			depth++
+			current.WriteRune(ch)
+		case ']':
+			depth--
+			current.WriteRune(ch)
+			if depth == 0 {
+				flush()
+			}
+		case ' ', '\t':
+			if depth > 0 {
+				current.WriteRune(ch)
+			} else {
+				flush()
+			}
+		default:
+			current.WriteRune(ch)
+		}
+	}
+	flush()
+	return patterns
+}
+
+// extractBalancedParen returns the balanced parenthesized expression at the
+// start of s (including the outer parens) and the index just past its end.
+// Returns ("", 0) if s does not start with '('. Ported from shengen.
+func extractBalancedParen(s string) (string, int) {
+	if len(s) == 0 || s[0] != '(' {
+		return "", 0
+	}
+	depth := 0
+	for i, ch := range s {
+		switch ch {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return s[:i+1], i + 1
+			}
+		}
+	}
+	return s, len(s)
+}
+
+// deriveParamNames inspects the first clause's patterns and returns names
+// suitable for Go test field generation. Simple uppercase-symbol patterns
+// keep their names; everything else becomes "p0", "p1", ...
+func deriveParamNames(patterns []core.Sexpr) []string {
+	out := make([]string, len(patterns))
+	for i, p := range patterns {
+		out[i] = fmt.Sprintf("p%d", i)
+		if atom, ok := p.(*core.Atom); ok && atom.Kind == core.AtomSymbol {
+			if name := atom.Val; len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
+				out[i] = name
+			}
+		}
+	}
+	return out
 }
 
 // parseTypeSig parses "{a --> b --> c}" into ParamTypes=[a, b], ReturnType=c.
@@ -389,9 +605,3 @@ func splitArrow(s string) []string {
 	return parts
 }
 
-func firstLine(s string) string {
-	if idx := strings.Index(s, "\n"); idx != -1 {
-		return s[:idx]
-	}
-	return s
-}

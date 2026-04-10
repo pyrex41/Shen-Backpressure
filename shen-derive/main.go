@@ -170,9 +170,28 @@ func cmdParse(args []string) {
 
 	fmt.Printf("\nDefines (%d):\n", len(sf.Defines))
 	for _, d := range sf.Defines {
-		sig := fmt.Sprintf("{%s --> %s}", strings.Join(d.TypeSig.ParamTypes, " --> "), d.TypeSig.ReturnType)
-		fmt.Printf("  %s %s\n", d.Name, sig)
-		fmt.Printf("    %s -> %s\n", strings.Join(d.ParamNames, " "), core.PrettyPrintSexpr(d.Body))
+		if len(d.TypeSig.ParamTypes) > 0 {
+			sig := fmt.Sprintf("{%s --> %s}", strings.Join(d.TypeSig.ParamTypes, " --> "), d.TypeSig.ReturnType)
+			fmt.Printf("  %s %s\n", d.Name, sig)
+		} else {
+			fmt.Printf("  %s (no type sig)\n", d.Name)
+		}
+		for ci, cl := range d.Clauses {
+			patStrs := make([]string, len(cl.Patterns))
+			for i, p := range cl.Patterns {
+				patStrs[i] = core.PrettyPrintSexpr(p)
+			}
+			prefix := "    "
+			if len(d.Clauses) > 1 {
+				prefix = fmt.Sprintf("    [%d] ", ci)
+			}
+			guard := ""
+			if cl.Guard != nil {
+				guard = " where " + core.PrettyPrintSexpr(cl.Guard)
+			}
+			fmt.Printf("%s%s -> %s%s\n", prefix,
+				strings.Join(patStrs, " "), core.PrettyPrintSexpr(cl.Body), guard)
+		}
 	}
 }
 
@@ -231,9 +250,15 @@ func cmdVerify(args []string) {
 
 	tt := specfile.BuildTypeTable(sf.Datatypes, *importPath, *importAlias)
 
+	allDefines := make([]*specfile.Define, len(sf.Defines))
+	for i := range sf.Defines {
+		allDefines[i] = &sf.Defines[i]
+	}
+
 	cfg := &verify.HarnessConfig{
 		Spec:        def,
 		TypeTable:   tt,
+		AllDefines:  allDefines,
 		ImplPkgPath: *implPkgPath,
 		ImplPkgName: *implPkgName,
 		ImplFunc:    *implFunc,
