@@ -99,13 +99,29 @@ func buildGateList(cfg *Config) []gate {
 	checkBin, checkArgs := SplitCommand(cfg.Check)
 	auditBin, auditArgs := SplitCommand(cfg.Audit)
 
-	return []gate{
+	gates := []gate{
 		{name: "shengen", cmd: genBin, args: genArgs},
 		{name: "test", cmd: testBin, args: testArgs},
 		{name: "build", cmd: buildBin, args: buildArgs},
 		{name: "shen-check", cmd: checkBin, args: checkArgs},
 		{name: "tcb-audit", cmd: auditBin, args: auditArgs},
 	}
+
+	// Gate 6 — spec-equivalence verification. Only added when the
+	// project has configured at least one [[derive.specs]] entry. The
+	// gate shells out to `sb derive` on the current executable so that
+	// gates.go doesn't need to know about shen-derive internals.
+	if len(cfg.DeriveSpecs) > 0 {
+		if self, err := os.Executable(); err == nil {
+			gates = append(gates, gate{
+				name: "shen-derive",
+				cmd:  self,
+				args: []string{"derive"},
+			})
+		}
+	}
+
+	return gates
 }
 
 func runOneGate(g gate) gateResult {
