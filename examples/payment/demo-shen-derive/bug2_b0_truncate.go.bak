@@ -1,0 +1,24 @@
+// Bug 2: Silent truncation of the initial balance. The impl converts
+// `b0.Val()` (a float64) through an int64 round-trip before using it,
+// losing any fractional component. `go build` is happy — the
+// conversions are all legal Go, and Amount/Transaction are still
+// well-typed. A unit test that only uses integer amounts passes
+// cleanly. shen-derive catches it specifically because the sample
+// pool includes 2.5 as a boundary value, and 2.5 minus 2.5 (spec)
+// is not the same running balance as 2.0 minus 2.5 (this impl).
+package derived
+
+import (
+	"ralph-shen-agent/internal/shenguard"
+)
+
+func Processable(b0 shenguard.Amount, txs []shenguard.Transaction) bool {
+	balance := float64(int64(b0.Val())) // BUG: truncates fractional part
+	for _, tx := range txs {
+		balance -= tx.Amount().Val()
+		if balance < 0 {
+			return false
+		}
+	}
+	return true
+}

@@ -1,0 +1,22 @@
+// Bug 1: Sign flip. The impl adds each transaction to the balance
+// instead of subtracting. `go build` is happy — the types are fine,
+// Amount.Val() is still a float64, the loop body is still legal Go.
+// A naive unit test that only checks "sum matches" might pass too,
+// depending on how it's written. shen-derive catches it on any case
+// where the running balance would have gone negative.
+package derived
+
+import (
+	"ralph-shen-agent/internal/shenguard"
+)
+
+func Processable(b0 shenguard.Amount, txs []shenguard.Transaction) bool {
+	balance := b0.Val()
+	for _, tx := range txs {
+		balance += tx.Amount().Val() // BUG: should be -=
+		if balance < 0 {
+			return false
+		}
+	}
+	return true
+}

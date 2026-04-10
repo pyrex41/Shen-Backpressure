@@ -1,0 +1,24 @@
+// Bug 3: Strict-zero boundary error. The spec says running balances
+// must be `(>= X 0) : verified` — exactly zero is fine. This impl
+// uses `balance <= 0` for the early-exit check, so any case where
+// the running balance lands exactly on zero is rejected. `go build`
+// is happy (the operator is legal). Unit tests that only use
+// strictly positive transactions miss it entirely. shen-derive
+// catches it because the sample pool includes 0 and 1 and produces
+// cases where 1 - 1 = 0 is a legal running balance.
+package derived
+
+import (
+	"ralph-shen-agent/internal/shenguard"
+)
+
+func Processable(b0 shenguard.Amount, txs []shenguard.Transaction) bool {
+	balance := b0.Val()
+	for _, tx := range txs {
+		balance -= tx.Amount().Val()
+		if balance <= 0 { // BUG: should be `< 0`
+			return false
+		}
+	}
+	return true
+}
