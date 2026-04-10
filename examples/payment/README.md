@@ -59,11 +59,30 @@ make run-relaxed
 └── go.mod
 ```
 
-## The Three Gates
+## The Gates
 
 1. **`go test ./...`** — Do the specific test cases pass?
 2. **`go build ./cmd/ralph`** — Does the code compile?
 3. **`shen (tc +)`** — Do the sequent-calculus type proofs hold for all inputs?
+4. **`sb derive` / `make shen-derive-verify`** — Does `internal/derived/Processable` still match the `(define processable ...)` spec in `specs/core.shen`?
+
+Gate 4 is the spec-equivalence check. `specs/core.shen` contains a
+`(define processable ...)` block that expresses the obvious-correct
+version of the balance-check as a fold over the running balances.
+`shen-derive verify` evaluates that spec on a set of sampled inputs
+(boundary values by default, optionally plus seeded random draws)
+and emits `internal/derived/processable_spec_test.go` — a
+table-driven test that calls the real implementation and asserts
+pointwise equality against the spec's outputs.
+
+The committed copy of that test file is the drift gate. Changing
+`processable.go`, the spec, or the sampling strategy without
+regenerating the test file fails the gate. `make shen-derive-regen`
+(or `sb derive --regen`) rewrites it.
+
+See `sb.toml` for the `[[derive.specs]]` entry and
+`../../shen-derive/DESIGN.md` for how the harness builds its samples
+and evaluation environment.
 
 ## Shen Type Specs
 
