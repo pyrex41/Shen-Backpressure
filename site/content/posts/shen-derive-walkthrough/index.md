@@ -171,7 +171,7 @@ That's the whole pattern-matching story. Nine tests cover it in `shen-derive/cor
 
 ## The `sb derive` gate
 
-`sb derive` is the sixth gate in the five-gate `sb` pipeline. Add a `[[derive.specs]]` entry to `sb.toml`:
+`sb derive` is an additional gate `sb` registers automatically when the project has configured any `[[derive.specs]]` entries. Add one to `sb.toml`:
 
 ```toml
 [derive]
@@ -188,7 +188,9 @@ out_file  = "internal/derived/processable_spec_test.go"
 
 Then `sb derive` (or `sb gates`) runs `shen-derive verify` via `go run`, diffs the regenerated test against the committed `out_file`, fails on drift with a unified diff, and runs `go test` on each referenced impl package. `sb derive --regen` rewrites the committed file in place when the drift is intentional.
 
-The cmd/sb module and the shen-derive module are separate Go modules by design, so the integration is subprocess-based, matching how `examples/payment/Makefile` has done it all along — `sb derive` just lifts that Makefile pattern into the CLI so every project can opt in with config alone.
+The `cmd/sb` module and the `shen-derive` module are separate Go modules by design, so the integration is subprocess-based, matching how `examples/payment/Makefile` has done it all along — `sb derive` just lifts that Makefile pattern into the CLI so every project can opt in with config alone.
+
+You can configure whichever subset of gates you actually want. In the payment example, `make all` runs `go build`, `go test`, `shen-check.sh`, and `make shen-derive-verify`. `sb gates` runs the fuller pipeline including `shengen` regeneration and a TCB audit. Neither is more canonical than the other — pick the set that matches what you want the repo to guarantee.
 
 ## The honest story about what this proves
 

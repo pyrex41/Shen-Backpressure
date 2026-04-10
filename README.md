@@ -231,8 +231,10 @@ The project provides two complementary tools. Pick per-function based on what fi
 | **Proof method** | Shen sequent calculus proves type rules; Go compiler enforces them | Spec-vs-impl equivalence on sampled inputs — deterministic boundary values + optional seeded random draws; constrained types filter samples against their `verified` predicates |
 | **When to use** | Code that creates, validates, or passes around domain values | Pure functions where the obvious spec is clear and the efficient implementation is not |
 
-Both share the same `.shen` spec file format. shen-derive plugs into `sb`
-as a sixth gate (`sb derive`) alongside the existing five.
+Both share the same `.shen` spec file format. shen-derive plugs into
+`sb` as an additional gate (`sb derive`) alongside the existing
+pipeline — `sb gates` registers it automatically when a project has
+configured `[[derive.specs]]` in `sb.toml`.
 
 ### shen-derive quick start
 
