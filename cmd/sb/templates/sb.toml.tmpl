@@ -14,8 +14,35 @@ test = "{{.Test}}"
 shen_check = "{{.Check}}"
 audit = "./bin/shenguard-audit.sh"
 
-[gates]
+[engine]
 relaxed = false
+
+[[gates]]
+name = "shengen"
+kind = "command"
+run  = "./bin/shengen-codegen.sh"
+
+[[gates]]
+name = "test"
+kind = "command"
+run  = "{{.Test}}"
+parallel_group = "build-test"
+
+[[gates]]
+name = "build"
+kind = "command"
+run  = "{{.Build}}"
+parallel_group = "build-test"
+
+[[gates]]
+name = "shen-check"
+kind = "command"
+run  = "{{.Check}}"
+
+[[gates]]
+name = "tcb-audit"
+kind = "command"
+run  = "./bin/shenguard-audit.sh"
 
 [loop]
 harness = "claude -p"

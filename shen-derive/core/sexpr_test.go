@@ -267,3 +267,204 @@ func TestHeadSym(t *testing.T) {
 		t.Error("expected empty for empty list")
 	}
 }
+
+func TestParseDeeplyNested(t *testing.T) {
+	// 10 levels of nesting
+	input := "(a (b (c (d (e (f (g (h (i (j k))))))))))"
+	got, err := ParseSexpr(input)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	// Verify it round-trips
+	printed := PrettyPrintSexpr(got)
+	reparsed, err := ParseSexpr(printed)
+	if err != nil {
+		t.Fatalf("re-parse error: %v", err)
+	}
+	if !got.Equal(reparsed) {
+		t.Errorf("round-trip failed for deeply nested expression")
+	}
+}
+
+func TestParseStringEscapes(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string // the string value (unescaped)
+	}{
+		{`"hello"`, "hello"},
+		{`"with\nnewline"`, "with\nnewline"},
+		{`"with\ttab"`, "with\ttab"},
+		{`"with\\backslash"`, "with\\backslash"},
+		{`"with\"quote"`, "with\"quote"},
+		{`""`, ""},
+		{`"parens (in) strings"`, "parens (in) strings"},
+		{`"brackets [in] strings"`, "brackets [in] strings"},
+	}
+	for _, tt := range tests {
+		got, err := ParseSexpr(tt.input)
+		if err != nil {
+			t.Errorf("ParseSexpr(%q) error: %v", tt.input, err)
+			continue
+		}
+		atom, ok := got.(*Atom)
+		if !ok || atom.Kind != AtomString {
+			t.Errorf("ParseSexpr(%q) = %v, expected string atom", tt.input, got)
+			continue
+		}
+		if atom.Val != tt.want {
+			t.Errorf("ParseSexpr(%q).Val = %q, want %q", tt.input, atom.Val, tt.want)
+		}
+	}
+}
+
+func TestParseSquareListNested(t *testing.T) {
+	// [[X Y] | Rest] — nested square bracket patterns
+	got, err := ParseSexpr("[[1 2] | Rest]")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	// Should desugar to (cons (cons 1 (cons 2 nil)) Rest)
+	want := SList(Sym("cons"),
+		SList(Sym("cons"), Num(1), SList(Sym("cons"), Num(2), Sym("nil"))),
+		Sym("Rest"))
+	if !got.Equal(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestParseSquareListEmpty(t *testing.T) {
+	// Empty square list
+	got, err := ParseSexpr("[]")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if !got.Equal(Sym("nil")) {
+		t.Errorf("[] should desugar to nil, got %v", got)
+	}
+}
+
+func TestParseBlockComment(t *testing.T) {
+	// Block comment \* ... *\ should be skipped by the sexpr parser
+	got, err := ParseSexpr(`
+		\* this is a block comment *\
+		(+ 1 2)
+	`)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	want := SList(Sym("+"), Num(1), Num(2))
+	if !got.Equal(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestParseBlockCommentInline(t *testing.T) {
+	// Block comment within an expression
+	got, err := ParseSexpr(`(+ \* comment *\ 1 2)`)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	want := SList(Sym("+"), Num(1), Num(2))
+	if !got.Equal(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestParseMixedComments(t *testing.T) {
+	input := `
+		\\ line comment
+		\* block comment *\
+		-- old-style comment
+		42
+	`
+	got, err := ParseSexpr(input)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if !got.Equal(Num(42)) {
+		t.Errorf("got %v, want 42", got)
+	}
+}
+
+func TestParseAllMultipleWithComments(t *testing.T) {
+	input := `
+		\\ first form
+		(define foo X -> X)
+		\* block comment *\
+		(define bar Y -> Y)
+	`
+	results, err := ParseAllSexprs(input)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 forms, got %d", len(results))
+	}
+}
+
+func TestParseNegativeNumbers(t *testing.T) {
+	tests := []struct {
+		input string
+		want  Sexpr
+	}{
+		{"-42", Num(-42)},
+		{"-3.14", Float(-3.14)},
+		// +5 parses as integer with leading +
+		{"+5", &Atom{Val: "+5", Kind: AtomInt}},
+	}
+	for _, tt := range tests {
+		got, err := ParseSexpr(tt.input)
+		if err != nil {
+			t.Errorf("ParseSexpr(%q) error: %v", tt.input, err)
+			continue
+		}
+		if !got.Equal(tt.want) {
+			t.Errorf("ParseSexpr(%q) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestParseOperatorSymbols(t *testing.T) {
+	// Operators should be parsed as symbols.
+	// Note: "-->" is excluded because "--" triggers the line-comment parser.
+	ops := []string{"+", "-", "*", "/", ">=", "<=", "!=", "->"}
+	for _, op := range ops {
+		got, err := ParseSexpr(op)
+		if err != nil {
+			t.Errorf("ParseSexpr(%q) error: %v", op, err)
+			continue
+		}
+		atom, ok := got.(*Atom)
+		if !ok || atom.Kind != AtomSymbol {
+			t.Errorf("ParseSexpr(%q): expected symbol, got %v", op, got)
+		}
+	}
+}
+
+func TestParseUnclosedErrors(t *testing.T) {
+	bad := []string{
+		"(",
+		"(+ 1",
+		"[1 2",
+		`"unclosed string`,
+	}
+	for _, input := range bad {
+		_, err := ParseSexpr(input)
+		if err == nil {
+			t.Errorf("ParseSexpr(%q) should error", input)
+		}
+	}
+}
+
+func TestParseUnexpectedClosers(t *testing.T) {
+	bad := []string{
+		")",
+		"]",
+	}
+	for _, input := range bad {
+		_, err := ParseSexpr(input)
+		if err == nil {
+			t.Errorf("ParseSexpr(%q) should error", input)
+		}
+	}
+}

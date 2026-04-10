@@ -153,19 +153,47 @@ func (sf *SpecFile) FindDatatype(name string) *Datatype {
 
 // --- Comment stripping ---
 
-// stripShenComments removes \* ... *\ block comments from Shen source.
-// It does NOT touch string literals since Shen strings use double quotes
-// and don't contain the comment delimiters.
+// stripShenComments removes \* ... *\ block comments and \\ line comments
+// from Shen source. It respects double-quoted string literals — comment
+// delimiters inside strings are left untouched.
 func stripShenComments(s string) string {
 	var b strings.Builder
 	i := 0
 	for i < len(s) {
+		// Skip over string literals so we don't misinterpret their contents.
+		if s[i] == '"' {
+			b.WriteByte(s[i])
+			i++
+			for i < len(s) {
+				if s[i] == '\\' && i+1 < len(s) {
+					b.WriteByte(s[i])
+					b.WriteByte(s[i+1])
+					i += 2
+					continue
+				}
+				b.WriteByte(s[i])
+				if s[i] == '"' {
+					i++
+					break
+				}
+				i++
+			}
+			continue
+		}
+		// Block comment: \* ... *\
 		if i+1 < len(s) && s[i] == '\\' && s[i+1] == '*' {
 			end := strings.Index(s[i+2:], "*\\")
 			if end == -1 {
 				break // unterminated comment — drop rest
 			}
 			i += end + 4
+			continue
+		}
+		// Line comment: \\ ...
+		if i+1 < len(s) && s[i] == '\\' && s[i+1] == '\\' {
+			for i < len(s) && s[i] != '\n' {
+				i++
+			}
 			continue
 		}
 		b.WriteByte(s[i])
@@ -177,7 +205,8 @@ func stripShenComments(s string) string {
 // --- Balanced-paren block extraction ---
 
 // extractBlocks finds balanced-paren blocks beginning with prefix.
-// Matches shengen's extractBlocks (cmd/shengen/main.go:1129) exactly.
+// String literals are skipped so that parens inside strings don't affect
+// the depth count.
 func extractBlocks(content, prefix string) []string {
 	var blocks []string
 	remaining := content
@@ -188,7 +217,25 @@ func extractBlocks(content, prefix string) []string {
 		}
 		remaining = remaining[idx:]
 		depth, end := 0, -1
-		for i, ch := range remaining {
+		i := 0
+		for i < len(remaining) {
+			ch := remaining[i]
+			if ch == '"' {
+				// Skip string literal.
+				i++
+				for i < len(remaining) {
+					if remaining[i] == '\\' && i+1 < len(remaining) {
+						i += 2
+						continue
+					}
+					if remaining[i] == '"' {
+						i++
+						break
+					}
+					i++
+				}
+				continue
+			}
 			if ch == '(' {
 				depth++
 			} else if ch == ')' {
@@ -198,6 +245,7 @@ func extractBlocks(content, prefix string) []string {
 					break
 				}
 			}
+			i++
 		}
 		if end == -1 {
 			break
@@ -383,14 +431,15 @@ func parseDefineClauses(body string) ([]Clause, error) {
 		return nil, fmt.Errorf("empty define body")
 	}
 
-	// Collapse whitespace and split on the " -> " separator. The resulting
+	// Collapse whitespace and split on the " -> " separator, respecting
+	// nesting inside parentheses, brackets, and strings. The resulting
 	// alternating layout is:
 	//   segments[0]  = first clause patterns
 	//   segments[i]  = previous clause result (+ optional `where GUARD`)
 	//                  followed by next clause patterns (i = 1 .. n-2)
 	//   segments[n-1] = last clause result
 	bodyOneLine := strings.Join(strings.Fields(body), " ")
-	segments := strings.Split(bodyOneLine, " -> ")
+	segments := splitArrowTopLevel(bodyOneLine)
 	if len(segments) < 2 {
 		return nil, fmt.Errorf("missing '->' in define body")
 	}
@@ -484,9 +533,10 @@ func parseDefineClauses(body string) ([]Clause, error) {
 	return clauses, nil
 }
 
-// splitPatterns tokenizes a pattern string respecting bracket nesting.
-// "[Med | Meds]" stays as one token; "[[X Y] | Rest]" stays as one token.
-// Ported from cmd/shengen/main.go:splitPatterns.
+// splitPatterns tokenizes a pattern string respecting bracket and paren
+// nesting. "[Med | Meds]" stays as one token; "[[X Y] | Rest]" stays as
+// one token; "(cons X Y)" stays as one token.
+// Ported from cmd/shengen/main.go:splitPatterns, extended for parens.
 func splitPatterns(s string) []string {
 	var patterns []string
 	var current strings.Builder
@@ -499,10 +549,10 @@ func splitPatterns(s string) []string {
 	}
 	for _, ch := range s {
 		switch ch {
-		case '[':
+		case '[', '(':
 			depth++
 			current.WriteRune(ch)
-		case ']':
+		case ']', ')':
 			depth--
 			current.WriteRune(ch)
 			if depth == 0 {
@@ -558,6 +608,44 @@ func deriveParamNames(patterns []core.Sexpr) []string {
 		}
 	}
 	return out
+}
+
+// splitArrowTopLevel splits on " -> " only at the top level (depth 0),
+// skipping over parenthesized, bracketed, and string-quoted regions.
+func splitArrowTopLevel(s string) []string {
+	var parts []string
+	depth := 0
+	inString := false
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if inString {
+			if s[i] == '\\' && i+1 < len(s) {
+				i++ // skip escaped char
+				continue
+			}
+			if s[i] == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch s[i] {
+		case '"':
+			inString = true
+		case '(', '[':
+			depth++
+		case ')', ']':
+			if depth > 0 {
+				depth--
+			}
+		}
+		if depth == 0 && !inString && i+3 < len(s) && s[i:i+4] == " -> " {
+			parts = append(parts, s[start:i])
+			start = i + 4
+			i += 3
+		}
+	}
+	parts = append(parts, s[start:])
+	return parts
 }
 
 // parseTypeSig parses "{a --> b --> c}" into ParamTypes=[a, b], ReturnType=c.
