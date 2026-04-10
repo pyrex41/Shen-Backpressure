@@ -1,0 +1,736 @@
+package codegen
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/pyrex41/Shen-Backpressure/shen-derive/core"
+	"github.com/pyrex41/Shen-Backpressure/shen-derive/laws"
+	"github.com/pyrex41/Shen-Backpressure/shen-derive/shen"
+)
+
+const updateCorpusArtifactsEnv = "SHEN_DERIVE_UPDATE_CORPUS_ARTIFACTS"
+
+type corpusRewrite struct {
+	rule  *laws.Rule
+	path  laws.Path
+	extra laws.Bindings
+}
+
+type corpusCase struct {
+	name string
+	args []core.Sexpr
+	want core.Sexpr
+}
+
+type corpusTarget struct {
+	name     string
+	funcName string
+	artifact string
+	spec     core.Sexpr
+	tm       *TypeMap
+	rewrites []corpusRewrite
+	cases    []corpusCase
+}
+
+type compiledCorpusCase struct {
+	name        string
+	args        []string
+	wantLiteral string
+}
+
+func TestV1Corpus(t *testing.T) {
+	targets := v1CorpusTargets()
+	if got := len(targets); got != 20 {
+		t.Fatalf("v1 corpus drift: got %d targets, want 20", got)
+	}
+
+	for _, target := range targets {
+		t.Run(target.name, func(t *testing.T) {
+			runCorpusTarget(t, target)
+		})
+	}
+}
+
+func TestPhase9ExpansionTargets(t *testing.T) {
+	targets := phase9ExpansionTargets()
+	if got := len(targets); got != 4 {
+		t.Fatalf("phase 9 expansion drift: got %d targets, want 4", got)
+	}
+
+	for _, target := range targets {
+		t.Run(target.name, func(t *testing.T) {
+			runCorpusTarget(t, target)
+		})
+	}
+}
+
+func TestPhase10ExpansionTargets(t *testing.T) {
+	targets := phase10ExpansionTargets()
+	if got := len(targets); got != 2 {
+		t.Fatalf("phase 10 expansion drift: got %d targets, want 2", got)
+	}
+
+	for _, target := range targets {
+		t.Run(target.name, func(t *testing.T) {
+			runCorpusTarget(t, target)
+		})
+	}
+}
+
+func TestPhase11ExpansionTargets(t *testing.T) {
+	targets := phase11ExpansionTargets()
+	if got := len(targets); got != 1 {
+		t.Fatalf("phase 11 expansion drift: got %d targets, want 1", got)
+	}
+
+	for _, target := range targets {
+		t.Run(target.name, func(t *testing.T) {
+			runCorpusTarget(t, target)
+		})
+	}
+}
+
+func runCorpusTarget(t *testing.T, target corpusTarget) {
+	t.Helper()
+
+	derived := target.spec
+	for _, step := range target.rewrites {
+		if step.rule == nil || step.rule.Name == "" {
+			t.Fatal("rewrite step must use a named law")
+		}
+		result, err := shen.RewriteStrict(derived, step.rule, step.path, step.extra)
+		if err != nil {
+			t.Fatalf("RewriteStrict(%s): %v", step.rule.Name, err)
+		}
+		if len(result.Obligations) != 0 {
+			t.Fatalf("core corpus rewrites must be unconditional; %s left %d obligations", step.rule.Name, len(result.Obligations))
+		}
+		derived = result.Rewritten
+	}
+
+	// Verify spec/derived equivalence on test cases
+	compiledCases := make([]compiledCorpusCase, 0, len(target.cases))
+	for _, tc := range target.cases {
+		specVal := evalApplied(t, target.spec, tc.args)
+		derivedVal := evalApplied(t, derived, tc.args)
+		wantVal := evalSexpr(t, tc.want)
+
+		if specVal.String() != wantVal.String() {
+			t.Fatalf("%s: spec value = %s, want %s", tc.name, specVal, wantVal)
+		}
+		if derivedVal.String() != wantVal.String() {
+			t.Fatalf("%s: derived value = %s, want %s", tc.name, derivedVal, wantVal)
+		}
+
+		if len(tc.args) != len(target.tm.ParamTypes) {
+			t.Fatalf("%s: got %d args for %d parameters", tc.name, len(tc.args), len(target.tm.ParamTypes))
+		}
+
+		argLiterals := make([]string, len(tc.args))
+		for i, arg := range tc.args {
+			argLiterals[i] = goLiteralForValue(t, evalSexpr(t, arg), target.tm.ParamTypes[i])
+		}
+		compiledCases = append(compiledCases, compiledCorpusCase{
+			name:        tc.name,
+			args:        argLiterals,
+			wantLiteral: goLiteralForValue(t, wantVal, target.tm.ResultType),
+		})
+	}
+
+	goCode, err := LowerToGo(derived, target.tm, target.funcName, "derived")
+	if err != nil {
+		t.Fatalf("LowerToGo: %v", err)
+	}
+
+	assertArtifact(t, target.artifact, target.name, goCode)
+	compileAndTest(t, goCode, renderCompiledCorpusTest(target.funcName, target.tm.ResultType, compiledCases))
+}
+
+func evalApplied(t *testing.T, fn core.Sexpr, args []core.Sexpr) core.Value {
+	t.Helper()
+	// Build (fn arg1 arg2 ...)
+	elems := make([]core.Sexpr, 0, 1+len(args))
+	elems = append(elems, fn)
+	elems = append(elems, args...)
+	applied := core.SList(elems...)
+	return evalSexpr(t, applied)
+}
+
+func evalSexpr(t *testing.T, sexpr core.Sexpr) core.Value {
+	t.Helper()
+	v, err := core.Eval(core.EmptyEnv(), sexpr)
+	if err != nil {
+		t.Fatalf("Eval(%s): %v", sexpr, err)
+	}
+	return v
+}
+
+func goLiteralForValue(t *testing.T, v core.Value, goTy string) string {
+	t.Helper()
+
+	switch goTy {
+	case "int":
+		n, ok := v.(core.IntVal)
+		if !ok {
+			t.Fatalf("want int literal, got %T", v)
+		}
+		return fmt.Sprintf("%d", int64(n))
+	case "bool":
+		b, ok := v.(core.BoolVal)
+		if !ok {
+			t.Fatalf("want bool literal, got %T", v)
+		}
+		if bool(b) {
+			return "true"
+		}
+		return "false"
+	case "string":
+		s, ok := v.(core.StringVal)
+		if !ok {
+			t.Fatalf("want string literal, got %T", v)
+		}
+		return fmt.Sprintf("%q", string(s))
+	default:
+		// Handle slice types
+		if strings.HasPrefix(goTy, "[]") {
+			xs, ok := v.(core.ListVal)
+			if !ok {
+				t.Fatalf("want list literal for %s, got %T", goTy, v)
+			}
+			elemTy := goTy[2:]
+			parts := make([]string, len(xs))
+			for i, elem := range xs {
+				parts[i] = goLiteralForValue(t, elem, elemTy)
+			}
+			return fmt.Sprintf("%s{%s}", goTy, strings.Join(parts, ", "))
+		}
+		// Handle struct (tuple) types
+		if strings.HasPrefix(goTy, "struct{") {
+			pair, ok := v.(*core.TupleVal)
+			if !ok {
+				t.Fatalf("want tuple literal for %s, got %T", goTy, v)
+			}
+			// Parse "struct{ Fst X; Snd Y }" to extract X, Y
+			fstTy, sndTy := parseTupleType(goTy)
+			return fmt.Sprintf("%s{%s, %s}",
+				goTy,
+				goLiteralForValue(t, pair.Fst, fstTy),
+				goLiteralForValue(t, pair.Snd, sndTy),
+			)
+		}
+		t.Fatalf("unsupported literal type %q", goTy)
+		return ""
+	}
+}
+
+func parseTupleType(goTy string) (fstTy, sndTy string) {
+	// Parse "struct{ Fst X; Snd Y }" → X, Y
+	s := strings.TrimPrefix(goTy, "struct{ Fst ")
+	parts := strings.SplitN(s, "; Snd ", 2)
+	if len(parts) != 2 {
+		return "int", "bool"
+	}
+	fstTy = parts[0]
+	sndTy = strings.TrimSuffix(parts[1], " }")
+	return fstTy, sndTy
+}
+
+func renderCompiledCorpusTest(funcName string, resultTy string, cases []compiledCorpusCase) string {
+	var b strings.Builder
+	b.WriteString("package derived\n\n")
+	if needsSliceCompare(resultTy) {
+		b.WriteString("import (\n\t\"slices\"\n\t\"testing\"\n)\n\n")
+	} else if needsReflect(resultTy) {
+		b.WriteString("import (\n\t\"reflect\"\n\t\"testing\"\n)\n\n")
+	} else {
+		b.WriteString("import \"testing\"\n\n")
+	}
+	fmt.Fprintf(&b, "func Test%sCorpus(t *testing.T) {\n", funcName)
+	for _, tc := range cases {
+		fmt.Fprintf(&b, "\tt.Run(%q, func(t *testing.T) {\n", tc.name)
+		fmt.Fprintf(&b, "\t\tgot := %s(%s)\n", funcName, strings.Join(tc.args, ", "))
+		fmt.Fprintf(&b, "\t\twant := %s\n", tc.wantLiteral)
+		if needsSliceCompare(resultTy) {
+			b.WriteString("\t\tif !slices.Equal(got, want) {\n")
+		} else if needsReflect(resultTy) {
+			b.WriteString("\t\tif !reflect.DeepEqual(got, want) {\n")
+		} else {
+			b.WriteString("\t\tif got != want {\n")
+		}
+		fmt.Fprintf(&b, "\t\t\tt.Fatalf(\"got = %%v, want %%v\", got, want)\n")
+		b.WriteString("\t\t}\n")
+		b.WriteString("\t})\n")
+	}
+	b.WriteString("}\n")
+	return b.String()
+}
+
+func needsSliceCompare(ty string) bool {
+	return strings.HasPrefix(ty, "[]")
+}
+
+func needsReflect(ty string) bool {
+	return strings.HasPrefix(ty, "struct{")
+}
+
+func assertArtifact(t *testing.T, artifactGroup, name, actual string) {
+	t.Helper()
+
+	if artifactGroup == "" {
+		artifactGroup = "corpus"
+	}
+	path := filepath.Join("testdata", artifactGroup, name+".go")
+	actual = normalizeCorpusArtifact(actual)
+
+	if os.Getenv(updateCorpusArtifactsEnv) == "1" {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatalf("mkdir artifact dir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(actual+"\n"), 0644); err != nil {
+			t.Fatalf("write artifact: %v", err)
+		}
+	}
+
+	wantBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read artifact %s: %v", path, err)
+	}
+	if want := normalizeCorpusArtifact(string(wantBytes)); want != actual {
+		t.Fatalf("artifact %s is stale\n--- want ---\n%s\n--- actual ---\n%s", path, want, actual)
+	}
+}
+
+func normalizeCorpusArtifact(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.TrimRight(s, "\n")
+}
+
+// --- S-expression helpers for building test data ---
+
+func mkIntList(xs ...int64) core.Sexpr {
+	result := core.Sexpr(core.Sym("nil"))
+	for i := len(xs) - 1; i >= 0; i-- {
+		result = core.SList(core.Sym("cons"), core.Num(xs[i]), result)
+	}
+	return result
+}
+
+func mkBoolList(xs ...bool) core.Sexpr {
+	result := core.Sexpr(core.Sym("nil"))
+	for i := len(xs) - 1; i >= 0; i-- {
+		result = core.SList(core.Sym("cons"), core.Bool(xs[i]), result)
+	}
+	return result
+}
+
+func mkStringList(xs ...string) core.Sexpr {
+	result := core.Sexpr(core.Sym("nil"))
+	for i := len(xs) - 1; i >= 0; i-- {
+		result = core.SList(core.Sym("cons"), core.Str(xs[i]), result)
+	}
+	return result
+}
+
+func v1CorpusTargets() []corpusTarget {
+	sum := corpusTarget{
+		name:     "sum",
+		funcName: "Sum",
+		spec:     p("(foldl + 0)"),
+		tm:       &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "int"},
+		cases: []corpusCase{
+			{name: "mixed-signs", args: []core.Sexpr{mkIntList(-1, 2, -3)}, want: core.Num(-2)},
+			{name: "empty", args: []core.Sexpr{mkIntList()}, want: core.Num(0)},
+			{name: "ascending", args: []core.Sexpr{mkIntList(1, 2, 3, 4, 5)}, want: core.Num(15)},
+		},
+	}
+
+	runningSum := corpusTarget{
+		name:     "running-sum",
+		funcName: "RunningSum",
+		spec:     p("(scanl + 0)"),
+		tm:       &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "[]int"},
+		cases: []corpusCase{
+			{name: "empty", args: []core.Sexpr{mkIntList()}, want: mkIntList(0)},
+			{name: "positive", args: []core.Sexpr{mkIntList(1, 2, 3)}, want: mkIntList(0, 1, 3, 6)},
+			{name: "mixed", args: []core.Sexpr{mkIntList(2, -1, 5)}, want: mkIntList(0, 2, 1, 6)},
+		},
+	}
+
+	squares := corpusTarget{
+		name:     "squares",
+		funcName: "Squares",
+		spec:     p("(map (lambda X (* X X)))"),
+		tm:       &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "[]int"},
+		cases: []corpusCase{
+			{name: "empty", args: []core.Sexpr{mkIntList()}, want: mkIntList()},
+			{name: "positive", args: []core.Sexpr{mkIntList(1, 2, 3, 4)}, want: mkIntList(1, 4, 9, 16)},
+			{name: "mixed", args: []core.Sexpr{mkIntList(-2, 0, 3)}, want: mkIntList(4, 0, 9)},
+		},
+	}
+
+	filterPositive := corpusTarget{
+		name:     "filter-positive",
+		funcName: "FilterPositive",
+		spec:     p("(filter (lambda X (> X 0)))"),
+		tm:       &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "[]int"},
+		cases: []corpusCase{
+			{name: "mixed", args: []core.Sexpr{mkIntList(-2, -1, 0, 1, 2, 3)}, want: mkIntList(1, 2, 3)},
+			{name: "all-negative", args: []core.Sexpr{mkIntList(-3, -2, -1)}, want: mkIntList()},
+			{name: "empty", args: []core.Sexpr{mkIntList()}, want: mkIntList()},
+		},
+	}
+
+	allNonNegative := corpusTarget{
+		name:     "all-non-negative",
+		funcName: "AllNonNegative",
+		spec:     p("(foldr (lambda X (lambda Acc (if (>= X 0) Acc false))) true)"),
+		tm:       &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "bool"},
+		cases: []corpusCase{
+			{name: "all-good", args: []core.Sexpr{mkIntList(1, 2, 3, 4)}, want: core.Bool(true)},
+			{name: "contains-negative", args: []core.Sexpr{mkIntList(1, -2, 3)}, want: core.Bool(false)},
+			{name: "empty", args: []core.Sexpr{mkIntList()}, want: core.Bool(true)},
+		},
+	}
+
+	sumPositives := corpusTarget{
+		name:     "sum-positives",
+		funcName: "SumPositives",
+		spec:     p("(foldr (lambda X (lambda Acc (if (> X 0) (+ X Acc) Acc))) 0)"),
+		tm:       &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "int"},
+		cases: []corpusCase{
+			{name: "mixed", args: []core.Sexpr{mkIntList(1, -2, 3, -4, 5)}, want: core.Num(9)},
+			{name: "all-negative", args: []core.Sexpr{mkIntList(-1, -2)}, want: core.Num(0)},
+			{name: "empty", args: []core.Sexpr{mkIntList()}, want: core.Num(0)},
+		},
+	}
+
+	singletonBool := corpusTarget{
+		name:     "singleton-bool",
+		funcName: "SingletonBool",
+		spec:     p("(lambda X (cons X nil))"),
+		tm:       &TypeMap{ParamTypes: []string{"bool"}, ResultType: "[]bool"},
+		cases: []corpusCase{
+			{name: "true", args: []core.Sexpr{core.Bool(true)}, want: mkBoolList(true)},
+			{name: "false", args: []core.Sexpr{core.Bool(false)}, want: mkBoolList(false)},
+			{name: "true-again", args: []core.Sexpr{core.Bool(true)}, want: mkBoolList(true)},
+		},
+	}
+
+	incAllLet := corpusTarget{
+		name:     "inc-all-let",
+		funcName: "IncAllLet",
+		spec:     p("(map (lambda X (let Y (+ X 1) Y)))"),
+		tm:       &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "[]int"},
+		cases: []corpusCase{
+			{name: "empty", args: []core.Sexpr{mkIntList()}, want: mkIntList()},
+			{name: "positive", args: []core.Sexpr{mkIntList(1, 2, 3)}, want: mkIntList(2, 3, 4)},
+			{name: "mixed", args: []core.Sexpr{mkIntList(-1, 0, 5)}, want: mkIntList(0, 1, 6)},
+		},
+	}
+
+	nonNegFlags := corpusTarget{
+		name:     "non-neg-flags",
+		funcName: "NonNegFlags",
+		spec:     p("(foldr (lambda X (lambda Xs (cons (>= X 0) Xs))) nil)"),
+		tm:       &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "[]bool"},
+		cases: []corpusCase{
+			{name: "mixed", args: []core.Sexpr{mkIntList(-1, 0, 2)}, want: mkBoolList(false, true, true)},
+			{name: "all-negative", args: []core.Sexpr{mkIntList(-3, -2)}, want: mkBoolList(false, false)},
+			{name: "empty", args: []core.Sexpr{mkIntList()}, want: mkBoolList()},
+		},
+	}
+
+	identityBools := corpusTarget{
+		name:     "identity-bools",
+		funcName: "IdentityBools",
+		spec:     p("(map (lambda X (if X X false)))"),
+		tm:       &TypeMap{ParamTypes: []string{"[]bool"}, ResultType: "[]bool"},
+		cases: []corpusCase{
+			{name: "mixed", args: []core.Sexpr{mkBoolList(true, false, true)}, want: mkBoolList(true, false, true)},
+			{name: "all-false", args: []core.Sexpr{mkBoolList(false, false)}, want: mkBoolList(false, false)},
+			{name: "empty", args: []core.Sexpr{mkBoolList()}, want: mkBoolList()},
+		},
+	}
+
+	paymentProcessable := corpusTarget{
+		name:     "payment-processable",
+		funcName: "PaymentProcessable",
+		spec: p(`(lambda b0 (lambda txs
+			(foldr (lambda X (lambda Acc (and ((lambda X (>= X 0)) X) Acc)))
+				true
+				(scanl (lambda B (lambda Tx (- B Tx))) b0 txs))))`),
+		tm: &TypeMap{ParamTypes: []string{"int", "[]int"}, ResultType: "bool"},
+		rewrites: []corpusRewrite{
+			{rule: laws.AllScanlFusion(), path: laws.Path{2, 2}},
+		},
+		cases: []corpusCase{
+			{name: "overspend", args: []core.Sexpr{core.Num(100), mkIntList(30, 50, 40)}, want: core.Bool(false)},
+			{name: "safe", args: []core.Sexpr{core.Num(100), mkIntList(30, 20, 10)}, want: core.Bool(true)},
+			{name: "negative-initial", args: []core.Sexpr{core.Num(-1), mkIntList()}, want: core.Bool(false)},
+			{name: "exact-depletion", args: []core.Sexpr{core.Num(5), mkIntList(3, 2)}, want: core.Bool(true)},
+		},
+	}
+
+	product := corpusTarget{
+		name:     "product",
+		funcName: "Product",
+		spec:     p("(foldl * 1)"),
+		tm:       &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "int"},
+		cases: []corpusCase{
+			{name: "empty", args: []core.Sexpr{mkIntList()}, want: core.Num(1)},
+			{name: "positive", args: []core.Sexpr{mkIntList(2, 3, 4)}, want: core.Num(24)},
+			{name: "mixed-signs", args: []core.Sexpr{mkIntList(-1, 2, -3)}, want: core.Num(6)},
+		},
+	}
+
+	runningProduct := corpusTarget{
+		name:     "running-product",
+		funcName: "RunningProduct",
+		spec:     p("(scanl * 1)"),
+		tm:       &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "[]int"},
+		cases: []corpusCase{
+			{name: "empty", args: []core.Sexpr{mkIntList()}, want: mkIntList(1)},
+			{name: "positive", args: []core.Sexpr{mkIntList(2, 3, 4)}, want: mkIntList(1, 2, 6, 24)},
+			{name: "contains-zero", args: []core.Sexpr{mkIntList(5, 0, 2)}, want: mkIntList(1, 5, 0, 0)},
+		},
+	}
+
+	anyNegative := corpusTarget{
+		name:     "any-negative",
+		funcName: "AnyNegative",
+		spec:     p("(foldr (lambda X (lambda Acc (if (< X 0) true Acc))) false)"),
+		tm:       &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "bool"},
+		cases: []corpusCase{
+			{name: "contains-negative", args: []core.Sexpr{mkIntList(1, -2, 3)}, want: core.Bool(true)},
+			{name: "all-non-negative", args: []core.Sexpr{mkIntList(0, 2, 4)}, want: core.Bool(false)},
+			{name: "empty", args: []core.Sexpr{mkIntList()}, want: core.Bool(false)},
+		},
+	}
+
+	countNonNegative := corpusTarget{
+		name:     "count-non-negative",
+		funcName: "CountNonNegative",
+		spec:     p("(foldl (lambda N (lambda X (if (>= X 0) (+ N 1) N))) 0)"),
+		tm:       &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "int"},
+		cases: []corpusCase{
+			{name: "mixed", args: []core.Sexpr{mkIntList(-1, 0, 2)}, want: core.Num(2)},
+			{name: "all-negative", args: []core.Sexpr{mkIntList(-3, -2)}, want: core.Num(0)},
+			{name: "empty", args: []core.Sexpr{mkIntList()}, want: core.Num(0)},
+		},
+	}
+
+	balanceFinal := corpusTarget{
+		name:     "balance-final",
+		funcName: "BalanceFinal",
+		spec: p(`(lambda b0 (lambda txs
+			(fst (foldl
+				(lambda State (lambda Tx
+					(let Next (- (fst State) Tx)
+						(@p Next (and (snd State) (>= Next 0))))))
+				(@p b0 (>= b0 0))
+				txs))))`),
+		tm: &TypeMap{ParamTypes: []string{"int", "[]int"}, ResultType: "int"},
+		cases: []corpusCase{
+			{name: "overspend", args: []core.Sexpr{core.Num(100), mkIntList(30, 50, 40)}, want: core.Num(-20)},
+			{name: "safe", args: []core.Sexpr{core.Num(100), mkIntList(30, 20, 10)}, want: core.Num(40)},
+			{name: "empty-negative", args: []core.Sexpr{core.Num(-1), mkIntList()}, want: core.Num(-1)},
+		},
+	}
+
+	balanceStatePair := corpusTarget{
+		name:     "balance-state-pair",
+		funcName: "BalanceStatePair",
+		spec: p(`(lambda b0 (lambda txs
+			(foldl
+				(lambda State (lambda Tx
+					(let Next (- (fst State) Tx)
+						(@p Next (and (snd State) (>= Next 0))))))
+				(@p b0 (>= b0 0))
+				txs)))`),
+		tm: &TypeMap{ParamTypes: []string{"int", "[]int"}, ResultType: "struct{ Fst int; Snd bool }"},
+		cases: []corpusCase{
+			{name: "overspend", args: []core.Sexpr{core.Num(100), mkIntList(30, 50, 40)}, want: p("(@p -20 false)")},
+			{name: "safe", args: []core.Sexpr{core.Num(100), mkIntList(30, 20, 10)}, want: p("(@p 40 true)")},
+			{name: "exact-depletion", args: []core.Sexpr{core.Num(5), mkIntList(3, 2)}, want: p("(@p 0 true)")},
+		},
+	}
+
+	mapFusionBasic := corpusTarget{
+		name:     "map-fusion-basic",
+		funcName: "MapFusionBasic",
+		spec:     p("(compose (map (lambda X (+ X 1))) (map (lambda X (* X 2))))"),
+		tm:       &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "[]int"},
+		rewrites: []corpusRewrite{
+			{rule: laws.MapFusion(), path: laws.RootPath},
+		},
+		cases: []corpusCase{
+			{name: "ascending", args: []core.Sexpr{mkIntList(1, 2, 3)}, want: mkIntList(3, 5, 7)},
+			{name: "mixed", args: []core.Sexpr{mkIntList(-2, 0, 5)}, want: mkIntList(-3, 1, 11)},
+			{name: "empty", args: []core.Sexpr{mkIntList()}, want: mkIntList()},
+		},
+	}
+
+	mapIncThenSquare := corpusTarget{
+		name:     "map-inc-then-square",
+		funcName: "MapIncThenSquare",
+		spec:     p("(compose (map (lambda X (* X X))) (map (lambda X (+ X 1))))"),
+		tm:       &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "[]int"},
+		rewrites: []corpusRewrite{
+			{rule: laws.MapFusion(), path: laws.RootPath},
+		},
+		cases: []corpusCase{
+			{name: "ascending", args: []core.Sexpr{mkIntList(1, 2, 3)}, want: mkIntList(4, 9, 16)},
+			{name: "mixed", args: []core.Sexpr{mkIntList(-2, 0, 5)}, want: mkIntList(1, 1, 36)},
+			{name: "empty", args: []core.Sexpr{mkIntList()}, want: mkIntList()},
+		},
+	}
+
+	mapFoldrIdentity := corpusTarget{
+		name:     "map-foldr-identity",
+		funcName: "MapFoldrIdentity",
+		spec:     p("(compose (map (lambda X (+ X 1))) (foldr cons nil))"),
+		tm:       &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "[]int"},
+		rewrites: []corpusRewrite{
+			{rule: laws.MapFoldrFusion(), path: laws.RootPath},
+		},
+		cases: []corpusCase{
+			{name: "ascending", args: []core.Sexpr{mkIntList(1, 2, 3)}, want: mkIntList(2, 3, 4)},
+			{name: "mixed", args: []core.Sexpr{mkIntList(-2, 0, 5)}, want: mkIntList(-1, 1, 6)},
+			{name: "empty", args: []core.Sexpr{mkIntList()}, want: mkIntList()},
+		},
+	}
+
+	return []corpusTarget{
+		sum,
+		runningSum,
+		squares,
+		filterPositive,
+		allNonNegative,
+		sumPositives,
+		singletonBool,
+		incAllLet,
+		nonNegFlags,
+		identityBools,
+		paymentProcessable,
+		product,
+		runningProduct,
+		anyNegative,
+		countNonNegative,
+		balanceFinal,
+		balanceStatePair,
+		mapFusionBasic,
+		mapIncThenSquare,
+		mapFoldrIdentity,
+	}
+}
+
+func phase9ExpansionTargets() []corpusTarget {
+	return []corpusTarget{
+		{
+			name:     "safe-under-limit",
+			funcName: "SafeUnderLimit",
+			artifact: "expansion",
+			spec: p(`(lambda Limit (lambda Xs
+				(foldr (lambda X (lambda Acc (if (<= X Limit) Acc false))) true Xs)))`),
+			tm: &TypeMap{ParamTypes: []string{"int", "[]int"}, ResultType: "bool"},
+			cases: []corpusCase{
+				{name: "all-safe", args: []core.Sexpr{core.Num(5), mkIntList(1, 5, 3)}, want: core.Bool(true)},
+				{name: "contains-breach", args: []core.Sexpr{core.Num(5), mkIntList(1, 7, 3)}, want: core.Bool(false)},
+				{name: "empty", args: []core.Sexpr{core.Num(-1), mkIntList()}, want: core.Bool(true)},
+			},
+		},
+		{
+			name:     "prefix-nonzero",
+			funcName: "PrefixNonzero",
+			artifact: "expansion",
+			spec: p(`(lambda Xs
+				(scanl (lambda Acc (lambda X (and Acc (!= X 0)))) true Xs))`),
+			tm: &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "[]bool"},
+			cases: []corpusCase{
+				{name: "empty", args: []core.Sexpr{mkIntList()}, want: mkBoolList(true)},
+				{name: "all-nonzero", args: []core.Sexpr{mkIntList(3, -2, 5)}, want: mkBoolList(true, true, true, true)},
+				{name: "zero-breaks-prefix", args: []core.Sexpr{mkIntList(3, 0, 2)}, want: mkBoolList(true, true, false, false)},
+			},
+		},
+		{
+			name:     "equal-zero-flags",
+			funcName: "EqualZeroFlags",
+			artifact: "expansion",
+			spec:     p("(map (lambda X (= X 0)))"),
+			tm:       &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "[]bool"},
+			cases: []corpusCase{
+				{name: "mixed", args: []core.Sexpr{mkIntList(-1, 0, 2, 0)}, want: mkBoolList(false, true, false, true)},
+				{name: "all-zero", args: []core.Sexpr{mkIntList(0, 0)}, want: mkBoolList(true, true)},
+				{name: "empty", args: []core.Sexpr{mkIntList()}, want: mkBoolList()},
+			},
+		},
+		{
+			name:     "string-eq-flags",
+			funcName: "StringEqFlags",
+			artifact: "expansion",
+			spec: p(`(lambda Want (lambda Xs
+				(map (lambda S (= S Want)) Xs)))`),
+			tm: &TypeMap{ParamTypes: []string{"string", "[]string"}, ResultType: "[]bool"},
+			cases: []corpusCase{
+				{name: "mixed", args: []core.Sexpr{core.Str("ok"), mkStringList("ok", "no", "ok")}, want: mkBoolList(true, false, true)},
+				{name: "empty-target-and-list", args: []core.Sexpr{core.Str(""), mkStringList()}, want: mkBoolList()},
+				{name: "empty-string-matches", args: []core.Sexpr{core.Str(""), mkStringList("", "a", "")}, want: mkBoolList(true, false, true)},
+			},
+		},
+	}
+}
+
+func phase10ExpansionTargets() []corpusTarget {
+	return []corpusTarget{
+		{
+			name:     "map-after-filter",
+			funcName: "MapAfterFilter",
+			artifact: "expansion",
+			spec: p(`(lambda Xs
+				(map (lambda X (+ X 1))
+					(filter (lambda X (> X 0)) Xs)))`),
+			tm: &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "[]int"},
+			cases: []corpusCase{
+				{name: "mixed", args: []core.Sexpr{mkIntList(-2, 0, 1, 2, 3)}, want: mkIntList(2, 3, 4)},
+				{name: "all-filtered", args: []core.Sexpr{mkIntList(-2, 0)}, want: mkIntList()},
+				{name: "empty", args: []core.Sexpr{mkIntList()}, want: mkIntList()},
+			},
+		},
+		{
+			name:     "filter-after-map",
+			funcName: "FilterAfterMap",
+			artifact: "expansion",
+			spec: p(`(lambda Xs
+				(filter (lambda X (>= X 0))
+					(map (lambda X (- X 1)) Xs)))`),
+			tm: &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "[]int"},
+			cases: []corpusCase{
+				{name: "mixed", args: []core.Sexpr{mkIntList(0, 1, 3)}, want: mkIntList(0, 2)},
+				{name: "all-filtered", args: []core.Sexpr{mkIntList(-2, -1, 0)}, want: mkIntList()},
+				{name: "empty", args: []core.Sexpr{mkIntList()}, want: mkIntList()},
+			},
+		},
+	}
+}
+
+func phase11ExpansionTargets() []corpusTarget {
+	return []corpusTarget{
+		{
+			name:     "concat-map",
+			funcName: "ConcatMap",
+			artifact: "expansion",
+			spec: p(`(lambda Xs
+				(concat (map (lambda X (cons X (cons (+ X 1) nil))) Xs)))`),
+			tm: &TypeMap{ParamTypes: []string{"[]int"}, ResultType: "[]int"},
+			cases: []corpusCase{
+				{name: "mixed", args: []core.Sexpr{mkIntList(-1, 2)}, want: mkIntList(-1, 0, 2, 3)},
+				{name: "singleton", args: []core.Sexpr{mkIntList(5)}, want: mkIntList(5, 6)},
+				{name: "empty", args: []core.Sexpr{mkIntList()}, want: mkIntList()},
+			},
+		},
+	}
+}

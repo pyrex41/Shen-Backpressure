@@ -1,0 +1,361 @@
+package shen
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/pyrex41/Shen-Backpressure/shen-derive/core"
+	"github.com/pyrex41/Shen-Backpressure/shen-derive/laws"
+)
+
+func p(s string) core.Sexpr {
+	sexpr, err := core.ParseSexpr(s)
+	if err != nil {
+		panic("parse: " + err.Error())
+	}
+	return sexpr
+}
+
+func TestEmitObligation(t *testing.T) {
+	cond := laws.InstantiatedCondition{
+		Description: "f (g x y) = h x (f y) for all x, y",
+		LHS:         p("((lambda N (* N 2)) (+ x y))"),
+		RHS:         p("((lambda A (lambda B (+ (* A 2) B))) x ((lambda N (* N 2)) y))"),
+	}
+
+	shenSpec := EmitObligation(cond)
+	t.Logf("Generated Shen spec:\n%s", shenSpec)
+
+	if !strings.Contains(shenSpec, "obligation") {
+		t.Error("missing obligation in spec")
+	}
+}
+
+func TestEmitObligationNoFreeVars(t *testing.T) {
+	cond := laws.InstantiatedCondition{
+		Description: "2 + 3 = 5",
+		LHS:         p("(+ 2 3)"),
+		RHS:         core.Num(5),
+	}
+
+	spec := EmitObligation(cond)
+	t.Logf("Generated:\n%s", spec)
+
+	if !strings.Contains(spec, "obligation") {
+		t.Error("missing conclusion")
+	}
+}
+
+func TestDischargeEmpiricalMapFusion(t *testing.T) {
+	cond := laws.InstantiatedCondition{
+		Description: "x + 0 = x (identity)",
+		LHS:         p("(+ x 0)"),
+		RHS:         core.Sym("x"),
+	}
+
+	result := DischargeEmpirical(cond)
+	if !result.Discharged {
+		t.Fatalf("expected empirical discharge to succeed: %v", result.Error)
+	}
+	t.Logf("Empirical result: %s", result.Output)
+}
+
+func TestDischargeEmpiricalFoldrFusion(t *testing.T) {
+	cond := laws.InstantiatedCondition{
+		Description: "f (g x y) = h x (f y) for all x, y",
+		LHS:         p("((lambda N (* N 2)) (+ x y))"),
+		RHS:         p("((lambda A (lambda B (+ (* A 2) B))) x ((lambda N (* N 2)) y))"),
+	}
+
+	result := DischargeEmpirical(cond)
+	if !result.Discharged {
+		t.Fatalf("expected discharge to succeed: %v\n  output: %s", result.Error, result.Output)
+	}
+	t.Logf("Empirical result: %s", result.Output)
+}
+
+func TestDischargeEmpiricalFails(t *testing.T) {
+	cond := laws.InstantiatedCondition{
+		Description: "x + y = x * y (should fail)",
+		LHS:         p("(+ x y)"),
+		RHS:         p("(* x y)"),
+	}
+
+	result := DischargeEmpirical(cond)
+	if result.Discharged {
+		t.Error("expected empirical discharge to fail for x+y=x*y")
+	}
+	t.Logf("Correctly rejected: %v (%s)", result.Error, result.Output)
+}
+
+func TestDischargeShenValidationOnly(t *testing.T) {
+	shenBin := FindShenBinary()
+	if shenBin == "" {
+		t.Skip("Shen runtime not available")
+	}
+
+	cond := laws.InstantiatedCondition{
+		Description: "f (g x y) = h x (f y) for all x, y",
+		LHS:         p("((lambda N (* N 2)) (+ x y))"),
+		RHS:         p("((lambda A (lambda B (+ (* A 2) B))) x ((lambda N (* N 2)) y))"),
+	}
+
+	result := DischargeShenOnly(cond)
+	if result.Discharged {
+		t.Fatalf("Shen tc+ should not certify quantified obligations: %+v", result)
+	}
+	// Accept either "does not constitute a proof" or "shen tc+ failed" (tc+ may reject the emitted spec)
+	if result.Error == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	t.Logf("Shen tc+ validation result: method=%s, err=%v", result.Method, result.Error)
+}
+
+func TestDischargeRejectsFalseGroundEquality(t *testing.T) {
+	cond := laws.InstantiatedCondition{
+		Description: "2 + 2 = 5",
+		LHS:         p("(+ 2 2)"),
+		RHS:         core.Num(5),
+	}
+
+	result := Discharge(cond)
+	if result.Discharged {
+		t.Fatalf("expected false ground equality to be rejected: %+v", result)
+	}
+	if result.Error == nil || !strings.Contains(result.Error.Error(), "ground equality failed") {
+		t.Fatalf("expected exact ground-eval failure, got: %v", result.Error)
+	}
+}
+
+func TestDischargeSymbolicallyProvesQuantifiedObligation(t *testing.T) {
+	cond := laws.InstantiatedCondition{
+		Description: "f (g x y) = h x (f y) for all x, y",
+		LHS:         p("((lambda N (* N 2)) (+ x y))"),
+		RHS:         p("((lambda A (lambda B (+ (* A 2) B))) x ((lambda N (* N 2)) y))"),
+	}
+
+	result := Discharge(cond)
+	if !result.Discharged {
+		t.Fatalf("expected quantified obligation to be proved: %+v", result)
+	}
+	if result.Method != "symbolic-polynomial" {
+		t.Fatalf("expected symbolic-polynomial proof, got: %+v", result)
+	}
+	t.Logf("Proved with symbolic-polynomial: %s", result.Output)
+}
+
+func TestDischargeLeavesUnsupportedQuantifiedObligationsUndischarged(t *testing.T) {
+	cond := laws.InstantiatedCondition{
+		Description: "not (not b) = b",
+		LHS:         p("(not (not b))"),
+		RHS:         core.Sym("b"),
+	}
+
+	result := Discharge(cond)
+	if result.Discharged {
+		t.Fatalf("unsupported quantified obligation should remain undischarged: %+v", result)
+	}
+	if result.Error == nil {
+		t.Fatal("expected error for unsupported obligation")
+	}
+	t.Logf("Correctly treated as diagnostic-only: %s (error: %v)", result.Method, result.Error)
+}
+
+func TestDischargeSymbolicallyProvesComparisonFormulas(t *testing.T) {
+	tests := []struct {
+		name string
+		lhs  core.Sexpr
+		rhs  core.Sexpr
+	}{
+		{name: "eq", lhs: p("(= (+ x 1) (+ x 1))"), rhs: core.Bool(true)},
+		{name: "neq", lhs: p("(!= (+ x 1) (+ x 2))"), rhs: core.Bool(true)},
+		{name: "lt", lhs: p("(< (+ x 1) (+ x 2))"), rhs: core.Bool(true)},
+		{name: "le", lhs: p("(<= (+ x 2) (+ x 2))"), rhs: core.Bool(true)},
+		{name: "gt", lhs: p("(> (+ x 2) (+ x 1))"), rhs: core.Bool(true)},
+		{name: "ge", lhs: p("(>= (+ x 2) (+ x 2))"), rhs: core.Bool(true)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cond := laws.InstantiatedCondition{
+				Description: tt.name + " comparison is assignment-independent",
+				LHS:         tt.lhs,
+				RHS:         tt.rhs,
+			}
+
+			result := Discharge(cond)
+			if !result.Discharged {
+				t.Fatalf("expected symbolic-fragment to prove: %+v", result)
+			}
+			if result.Method != "symbolic-fragment" {
+				t.Fatalf("expected symbolic-fragment, got %s: %+v", result.Method, result)
+			}
+			t.Logf("Proved supported %s comparison: %s", tt.name, result.Output)
+		})
+	}
+}
+
+func TestDischargeSymbolicallyProvesBooleanConnectives(t *testing.T) {
+	tests := []struct {
+		name string
+		lhs  core.Sexpr
+		rhs  core.Sexpr
+	}{
+		{
+			name: "and",
+			lhs:  p("(and (!= (+ x 1) (+ x 2)) (>= (+ x 2) (+ x 2)))"),
+			rhs:  core.Bool(true),
+		},
+		{
+			name: "or",
+			lhs:  p("(or (> (+ x 1) (+ x 2)) (= (+ x 2) (+ x 2)))"),
+			rhs:  core.Bool(true),
+		},
+		{
+			name: "not",
+			lhs:  p("(not (< (+ x 2) (+ x 1)))"),
+			rhs:  p("(<= (+ x 1) (+ x 2))"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cond := laws.InstantiatedCondition{
+				Description: tt.name + " connective over supported comparisons",
+				LHS:         tt.lhs,
+				RHS:         tt.rhs,
+			}
+
+			result := Discharge(cond)
+			if !result.Discharged {
+				t.Fatalf("expected symbolic-fragment to prove: %+v", result)
+			}
+			if result.Method != "symbolic-fragment" {
+				t.Fatalf("expected symbolic-fragment, got %s: %+v", result.Method, result)
+			}
+		})
+	}
+}
+
+func TestDischargeRejectsVariableDependentComparisonFormulas(t *testing.T) {
+	tests := []struct {
+		name string
+		lhs  core.Sexpr
+		rhs  core.Sexpr
+	}{
+		{name: "eq", lhs: p("(= x y)"), rhs: core.Bool(false)},
+		{name: "neq", lhs: p("(!= x y)"), rhs: core.Bool(true)},
+		{name: "lt", lhs: p("(< x y)"), rhs: core.Bool(false)},
+		{name: "and", lhs: p("(and (< x y) true)"), rhs: core.Bool(false)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cond := laws.InstantiatedCondition{
+				Description: tt.name + " comparison depends on quantified vars",
+				LHS:         tt.lhs,
+				RHS:         tt.rhs,
+			}
+
+			result := Discharge(cond)
+			if result.Discharged {
+				t.Fatalf("variable-dependent comparison should remain undischarged: %+v", result)
+			}
+			if result.Error == nil {
+				t.Fatal("expected error for variable-dependent comparison")
+			}
+		})
+	}
+}
+
+// --- End-to-end tests ---
+
+func TestEndToEndMapFusion(t *testing.T) {
+	term := p("(compose (map (lambda X (+ X 1))) (map (lambda X (* X 2))))")
+
+	rule := laws.MapFusion()
+	result, err := RewriteStrict(term, rule, laws.RootPath, nil)
+	if err != nil {
+		t.Fatalf("strict rewrite failed: %v", err)
+	}
+
+	applied := core.SList(result.Rewritten,
+		p("(cons 1 (cons 2 (cons 3 nil)))"))
+	val, err := core.Eval(core.EmptyEnv(), applied)
+	if err != nil {
+		t.Fatalf("eval failed: %v", err)
+	}
+	if val.String() != "[3, 5, 7]" {
+		t.Errorf("expected [3, 5, 7], got %s", val)
+	}
+}
+
+func TestEndToEndFoldrFusionStrictNegate(t *testing.T) {
+	term := p("(compose (lambda N (- 0 N)) (foldr + 0))")
+	h := p("(lambda X (lambda Z (- Z X)))")
+
+	result, err := RewriteStrict(term, laws.FoldrFusion(), laws.RootPath, laws.Bindings{"?h": h})
+	if err != nil {
+		t.Fatalf("strict rewrite failed: %v", err)
+	}
+
+	applied := core.SList(result.Rewritten,
+		p("(cons 1 (cons 2 (cons 3 nil)))"))
+	val, err := core.Eval(core.EmptyEnv(), applied)
+	if err != nil {
+		t.Fatalf("eval failed: %v", err)
+	}
+	if val.String() != "-6" {
+		t.Errorf("expected -6, got %s", val)
+	}
+}
+
+func TestEndToEndFoldrFusionStrictDouble(t *testing.T) {
+	term := p("(compose (lambda N (* N 2)) (foldr + 0))")
+	h := p("(lambda X (lambda Y (+ (* X 2) Y)))")
+
+	result, err := RewriteStrict(term, laws.FoldrFusion(), laws.RootPath, laws.Bindings{"?h": h})
+	if err != nil {
+		t.Fatalf("strict rewrite failed: %v", err)
+	}
+
+	applied := core.SList(result.Rewritten,
+		p("(cons 1 (cons 2 (cons 3 nil)))"))
+	val, err := core.Eval(core.EmptyEnv(), applied)
+	if err != nil {
+		t.Fatalf("eval failed: %v", err)
+	}
+	if val.String() != "12" {
+		t.Errorf("expected 12, got %s", val)
+	}
+}
+
+func TestRewriteStrictAcceptsProvedFoldrFusion(t *testing.T) {
+	term := p("(compose (lambda N (- 0 N)) (foldr + 0))")
+	h := p("(lambda X (lambda Z (- Z X)))")
+
+	result, err := RewriteStrict(term, laws.FoldrFusion(), laws.RootPath, laws.Bindings{"?h": h})
+	if err != nil {
+		t.Fatalf("expected strict rewrite to succeed, got: %v", err)
+	}
+
+	applied := core.SList(result.Rewritten,
+		p("(cons 1 (cons 2 (cons 3 nil)))"))
+	val, err := core.Eval(core.EmptyEnv(), applied)
+	if err != nil {
+		t.Fatalf("eval failed: %v", err)
+	}
+	if val.String() != "-6" {
+		t.Fatalf("expected -6, got %s", val)
+	}
+}
+
+func TestRewriteStrictRejectsInvalidFoldrFusionWitness(t *testing.T) {
+	term := p("(compose (lambda N (- 0 N)) (foldr + 0))")
+	badH := p("(lambda X (lambda Z (+ Z X)))")
+
+	_, err := RewriteStrict(term, laws.FoldrFusion(), laws.RootPath, laws.Bindings{"?h": badH})
+	if err == nil {
+		t.Fatal("expected strict rewrite to reject invalid witness")
+	}
+}

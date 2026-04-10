@@ -1,0 +1,598 @@
+// Package shen implements the bridge between shen-derive's side conditions
+// and the Shen type checker. It translates instantiated term equalities into
+// Shen sequent-calculus definitions that (tc +) can verify.
+//
+// Supported proof fragment (safe, sound discharge):
+//   - Quantified obligations whose lhs/rhs normalize to the same integer
+//     polynomial ("symbolic-polynomial").
+//   - Quantified boolean obligations built from and/or/not over arithmetic
+//     comparisons (= != < <= > >=) on integer polynomial terms, but only when
+//     each comparison normalizes to a constant truth value independent of the
+//     free integer variables ("symbolic-fragment").
+//   - Quantified obligations outside this fragment (higher-order, non-arith,
+//     or variable-dependent comparisons) remain diagnostic-only
+//     (Shen tc+ / empirical).
+package shen
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+
+	"github.com/pyrex41/Shen-Backpressure/shen-derive/core"
+	"github.com/pyrex41/Shen-Backpressure/shen-derive/laws"
+)
+
+// --- Term-to-Shen translation ---
+
+// EmitObligation takes an instantiated side condition (a term equality)
+// and emits a Shen spec that tc+ can validate.
+func EmitObligation(cond laws.InstantiatedCondition) string {
+	var b strings.Builder
+	freeVars := collectFreeVars(cond.LHS)
+	for k, v := range collectFreeVars(cond.RHS) {
+		freeVars[k] = v
+	}
+
+	b.WriteString("\\* shen-derive obligation: ")
+	b.WriteString(cond.Description)
+	b.WriteString(" *\\\n\n")
+
+	// Emit as a define that takes free vars and returns the equality check.
+	// For now, both sides are printed as s-expressions.
+	lhsStr := sexprToShen(cond.LHS)
+	rhsStr := sexprToShen(cond.RHS)
+
+	if len(freeVars) == 0 {
+		fmt.Fprintf(&b, "(define obligation-check\n  {number --> boolean}\n  _ -> (= %s %s))\n", lhsStr, rhsStr)
+	} else {
+		fvNames := sortedKeys(freeVars)
+		shenParams := make([]string, len(fvNames))
+		for i, name := range fvNames {
+			shenParams[i] = shenVarName(name)
+		}
+		typeParts := make([]string, len(fvNames)+1)
+		for i := range typeParts {
+			typeParts[i] = "number"
+		}
+		typeSig := "{" + strings.Join(typeParts, " --> ") + "}"
+		fmt.Fprintf(&b, "(define obligation-check\n  %s\n  %s -> (= %s %s))\n",
+			typeSig, strings.Join(shenParams, " "), lhsStr, rhsStr)
+	}
+
+	return b.String()
+}
+
+// sexprToShen converts an s-expression to a Shen source string.
+// This is nearly trivial since s-expressions ARE Shen syntax.
+func sexprToShen(s core.Sexpr) string {
+	switch s := s.(type) {
+	case *core.Atom:
+		switch s.Kind {
+		case core.AtomSymbol:
+			name := s.Val
+			// Shen variables must start with uppercase
+			if len(name) > 0 && name[0] >= 'a' && name[0] <= 'z' {
+				// Check if it's a built-in; leave as-is
+				if isOperator(name) {
+					return name
+				}
+				// Otherwise capitalize (variable reference)
+				return shenVarName(name)
+			}
+			return name
+		case core.AtomString:
+			return fmt.Sprintf("%q", s.Val)
+		default:
+			return s.Val
+		}
+	case *core.List:
+		if len(s.Elems) == 0 {
+			return "[]"
+		}
+		parts := make([]string, len(s.Elems))
+		for i, e := range s.Elems {
+			parts[i] = sexprToShen(e)
+		}
+		return "(" + strings.Join(parts, " ") + ")"
+	}
+	return fmt.Sprintf("<unknown:%T>", s)
+}
+
+func isOperator(name string) bool {
+	switch name {
+	case "+", "-", "*", "/", "%", "=", "!=", "<", "<=", ">", ">=",
+		"and", "or", "not", "cons", "nil", "fst", "snd", "map", "filter",
+		"foldl", "foldr", "scanl", "compose", "lambda", "let", "if", "@p",
+		"true", "false", "concat":
+		return true
+	}
+	return false
+}
+
+// shenVarName converts a variable name to Shen format (capitalize first letter).
+func shenVarName(name string) string {
+	if len(name) == 0 {
+		return name
+	}
+	return strings.ToUpper(name[:1]) + name[1:]
+}
+
+// collectFreeVars returns the set of free variable names in an s-expression.
+func collectFreeVars(s core.Sexpr) map[string]bool {
+	fv := make(map[string]bool)
+	bound := make(map[string]bool)
+	collectFV(s, bound, fv)
+	return fv
+}
+
+func collectFV(s core.Sexpr, bound, free map[string]bool) {
+	switch s := s.(type) {
+	case *core.Atom:
+		if s.Kind == core.AtomSymbol && !bound[s.Val] && !isOperator(s.Val) {
+			// Not a metavar (those start with ?)
+			if len(s.Val) > 0 && s.Val[0] != '?' {
+				free[s.Val] = true
+			}
+		}
+	case *core.List:
+		head := core.HeadSym(s)
+		switch head {
+		case "lambda":
+			if len(s.Elems) == 3 {
+				param, ok := core.SymName(s.Elems[1])
+				if ok {
+					newBound := copyBound(bound)
+					newBound[param] = true
+					collectFV(s.Elems[2], newBound, free)
+					return
+				}
+			}
+		case "let":
+			if len(s.Elems) == 4 {
+				name, ok := core.SymName(s.Elems[1])
+				if ok {
+					collectFV(s.Elems[2], bound, free)
+					newBound := copyBound(bound)
+					newBound[name] = true
+					collectFV(s.Elems[3], newBound, free)
+					return
+				}
+			}
+		}
+		for _, e := range s.Elems {
+			collectFV(e, bound, free)
+		}
+	}
+}
+
+func copyBound(m map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+func sortedKeys(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	// Simple sort
+	for i := 0; i < len(keys); i++ {
+		for j := i + 1; j < len(keys); j++ {
+			if keys[i] > keys[j] {
+				keys[i], keys[j] = keys[j], keys[i]
+			}
+		}
+	}
+	return keys
+}
+
+// --- Shen runner preamble ---
+
+// ShenPreamble returns helper definitions needed by side-condition specs.
+func ShenPreamble() string {
+	return `\* shen-derive runtime helpers *\
+
+(define negate
+  {number --> number}
+  X -> (- 0 X))
+
+(define not-equal?
+  {A --> A --> boolean}
+  X Y -> (not (= X Y)))
+
+(define compose
+  {(B --> C) --> (A --> B) --> (A --> C)}
+  F G -> (/. X (F (G X))))
+
+(define foldr
+  {(A --> B --> B) --> B --> (list A) --> B}
+  F E [] -> E
+  F E [X | Xs] -> (F X (foldr F E Xs)))
+
+(define foldl
+  {(B --> A --> B) --> B --> (list A) --> B}
+  F E [] -> E
+  F E [X | Xs] -> (foldl F (F E X) Xs))
+
+(define scanl
+  {(B --> A --> B) --> B --> (list A) --> (list B)}
+  F E [] -> [E]
+  F E [X | Xs] -> [E | (scanl F (F E X) Xs)])
+`
+}
+
+// --- Discharge ---
+
+// DischargeResult holds the outcome of discharging an obligation.
+type DischargeResult struct {
+	Discharged bool
+	Method     string
+	Output     string
+	Error      error
+}
+
+// FindShenBinary locates a Shen runtime.
+func FindShenBinary() string {
+	if env := os.Getenv("SHEN"); env != "" {
+		return env
+	}
+	for _, name := range []string{"shen-sbcl", "shen-scheme", "shen"} {
+		if path, err := exec.LookPath(name); err == nil {
+			return path
+		}
+	}
+	return ""
+}
+
+// Discharge attempts to discharge a side condition obligation soundly.
+func Discharge(cond laws.InstantiatedCondition) DischargeResult {
+	if len(conditionFreeVars(cond)) == 0 {
+		return dischargeGround(cond)
+	}
+
+	if symbolic, ok := dischargeSymbolic(cond); ok {
+		return symbolic
+	}
+
+	var notes []string
+
+	shenBin := FindShenBinary()
+	if shenBin != "" {
+		validation := validateWithShen(cond, shenBin)
+		if validation.Error != nil {
+			return DischargeResult{
+				Discharged: false,
+				Method:     "shen-tc+ validation",
+				Output:     validation.Output,
+				Error:      validation.Error,
+			}
+		}
+		notes = append(notes, "Shen tc+ validated the emitted spec")
+	} else {
+		notes = append(notes, "Shen tc+ unavailable")
+	}
+
+	empirical := dischargeEmpirical(cond)
+	if empirical.Discharged {
+		notes = append(notes, "empirical check passed: "+empirical.Output)
+	} else if empirical.Output != "" {
+		notes = append(notes, "empirical check failed: "+empirical.Output)
+	} else if empirical.Error != nil {
+		notes = append(notes, "empirical check failed: "+empirical.Error.Error())
+	}
+
+	return DischargeResult{
+		Discharged: false,
+		Method:     "undischarged",
+		Output:     strings.Join(notes, "\n"),
+		Error:      fmt.Errorf("quantified side conditions outside the supported symbolic fragment are not soundly discharged"),
+	}
+}
+
+// DischargeShenOnly validates the emitted Shen with tc+ but never treats
+// that validation as a semantic proof of the side condition.
+func DischargeShenOnly(cond laws.InstantiatedCondition) DischargeResult {
+	shenBin := FindShenBinary()
+	if shenBin == "" {
+		return DischargeResult{
+			Discharged: false,
+			Method:     "shen-tc+",
+			Error:      fmt.Errorf("no Shen runtime found; install shen-sbcl or set $SHEN"),
+		}
+	}
+	validation := validateWithShen(cond, shenBin)
+	if validation.Error != nil {
+		return validation
+	}
+	return DischargeResult{
+		Discharged: false,
+		Method:     "shen-tc+ (validation only)",
+		Output:     validation.Output,
+		Error:      fmt.Errorf("Shen tc+ validated the emitted spec, but this encoding does not constitute a proof"),
+	}
+}
+
+// DischargeEmpirical tests the side condition empirically.
+func DischargeEmpirical(cond laws.InstantiatedCondition) DischargeResult {
+	return dischargeEmpirical(cond)
+}
+
+func validateWithShen(cond laws.InstantiatedCondition, shenBin string) DischargeResult {
+	spec := ShenPreamble() + "\n" + EmitObligation(cond)
+
+	tmp, err := os.CreateTemp("", "shen-derive-obligation-*.shen")
+	if err != nil {
+		return DischargeResult{Discharged: false, Method: "shen-tc+", Error: err}
+	}
+	defer os.Remove(tmp.Name())
+
+	if _, err := tmp.WriteString(spec); err != nil {
+		tmp.Close()
+		return DischargeResult{Discharged: false, Method: "shen-tc+", Error: err}
+	}
+	tmp.Close()
+
+	ctx := exec.Command(shenBin, "eval", "-e", "(tc +)", "-l", tmp.Name())
+	ctx.Env = append(os.Environ(), "SHEN_QUIET=1")
+
+	out, err := runWithTimeout(ctx, 30*time.Second)
+	if err != nil {
+		return DischargeResult{
+			Discharged: false,
+			Method:     "shen-tc+",
+			Output:     string(out),
+			Error:      fmt.Errorf("shen tc+ failed: %w", err),
+		}
+	}
+
+	return DischargeResult{
+		Discharged: true,
+		Method:     "shen-tc+",
+		Output:     string(out),
+	}
+}
+
+func dischargeGround(cond laws.InstantiatedCondition) DischargeResult {
+	var notes []string
+
+	if shenBin := FindShenBinary(); shenBin != "" {
+		validation := validateWithShen(cond, shenBin)
+		if validation.Error != nil {
+			return DischargeResult{
+				Discharged: false,
+				Method:     "shen-tc+ validation",
+				Output:     validation.Output,
+				Error:      validation.Error,
+			}
+		}
+		notes = append(notes, "Shen tc+ validated the emitted spec")
+	}
+
+	lv, err1 := core.Eval(core.EmptyEnv(), cond.LHS)
+	rv, err2 := core.Eval(core.EmptyEnv(), cond.RHS)
+	if err1 != nil || err2 != nil {
+		return DischargeResult{
+			Discharged: false,
+			Method:     "ground-eval",
+			Output:     strings.Join(notes, "\n"),
+			Error:      fmt.Errorf("ground evaluation error: lhs=%v, rhs=%v", err1, err2),
+		}
+	}
+	if lv.String() != rv.String() {
+		return DischargeResult{
+			Discharged: false,
+			Method:     "ground-eval",
+			Output:     strings.Join(append(notes, fmt.Sprintf("LHS=%s, RHS=%s", lv, rv)), "\n"),
+			Error:      fmt.Errorf("ground equality failed: %s != %s", lv, rv),
+		}
+	}
+
+	notes = append(notes, "ground equality evaluated exactly")
+	method := "ground-eval"
+	if len(notes) > 1 {
+		method = "ground-eval+shen-tc+"
+	}
+	return DischargeResult{
+		Discharged: true,
+		Method:     method,
+		Output:     strings.Join(notes, "\n"),
+	}
+}
+
+func dischargeEmpirical(cond laws.InstantiatedCondition) DischargeResult {
+	fvs := collectFreeVars(cond.LHS)
+	for k, v := range collectFreeVars(cond.RHS) {
+		fvs[k] = v
+	}
+
+	fvNames := sortedKeys(fvs)
+
+	samples := []core.Value{
+		core.IntVal(0), core.IntVal(1), core.IntVal(-1),
+		core.IntVal(2), core.IntVal(5), core.IntVal(10),
+		core.IntVal(-3), core.IntVal(7), core.IntVal(100),
+		core.BoolVal(true), core.BoolVal(false),
+	}
+
+	tested := 0
+	failed := 0
+	var firstFailure string
+
+	if len(fvNames) == 0 {
+		lv, err1 := core.Eval(core.EmptyEnv(), cond.LHS)
+		rv, err2 := core.Eval(core.EmptyEnv(), cond.RHS)
+		if err1 != nil || err2 != nil {
+			return DischargeResult{
+				Discharged: false,
+				Method:     "empirical",
+				Error:      fmt.Errorf("evaluation error: lhs=%v, rhs=%v", err1, err2),
+			}
+		}
+		if lv.String() != rv.String() {
+			return DischargeResult{
+				Discharged: false,
+				Method:     "empirical",
+				Output:     fmt.Sprintf("LHS=%s, RHS=%s", lv, rv),
+				Error:      fmt.Errorf("side condition failed: %s != %s", lv, rv),
+			}
+		}
+		return DischargeResult{
+			Discharged: true,
+			Method:     "empirical",
+			Output:     fmt.Sprintf("verified on 1 test case (no free variables)"),
+		}
+	}
+
+	if len(fvNames) == 1 {
+		for _, v := range samples {
+			tested++
+			env := core.EmptyEnv().Extend(fvNames[0], v)
+			if ok, msg := testEquality(env, cond); !ok {
+				failed++
+				if firstFailure == "" {
+					firstFailure = fmt.Sprintf("%s=%s: %s", fvNames[0], v, msg)
+				}
+			}
+		}
+	} else if len(fvNames) == 2 {
+		for _, v1 := range samples {
+			for _, v2 := range samples {
+				tested++
+				env := core.EmptyEnv().Extend(fvNames[0], v1).Extend(fvNames[1], v2)
+				if ok, msg := testEquality(env, cond); !ok {
+					failed++
+					if firstFailure == "" {
+						firstFailure = fmt.Sprintf("%s=%s, %s=%s: %s",
+							fvNames[0], v1, fvNames[1], v2, msg)
+					}
+				}
+			}
+		}
+	} else {
+		for i := 0; i < len(samples) && i < 5; i++ {
+			for j := 0; j < len(samples) && j < 5; j++ {
+				tested++
+				env := core.EmptyEnv()
+				for k, name := range fvNames {
+					switch k {
+					case 0:
+						env = env.Extend(name, samples[i])
+					case 1:
+						env = env.Extend(name, samples[j])
+					default:
+						env = env.Extend(name, samples[k%len(samples)])
+					}
+				}
+				if ok, msg := testEquality(env, cond); !ok {
+					failed++
+					if firstFailure == "" {
+						firstFailure = msg
+					}
+				}
+			}
+		}
+	}
+
+	if failed > 0 {
+		return DischargeResult{
+			Discharged: false,
+			Method:     "empirical",
+			Output:     fmt.Sprintf("failed %d/%d test cases; first: %s", failed, tested, firstFailure),
+			Error:      fmt.Errorf("side condition failed empirically"),
+		}
+	}
+
+	return DischargeResult{
+		Discharged: true,
+		Method:     "empirical",
+		Output:     fmt.Sprintf("verified on %d test cases", tested),
+	}
+}
+
+func conditionFreeVars(cond laws.InstantiatedCondition) []string {
+	fvs := collectFreeVars(cond.LHS)
+	for k, v := range collectFreeVars(cond.RHS) {
+		fvs[k] = v
+	}
+	return sortedKeys(fvs)
+}
+
+func testEquality(env *core.Env, cond laws.InstantiatedCondition) (ok bool, msg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			ok = true
+			msg = ""
+		}
+	}()
+
+	lv, err1 := core.Eval(env, cond.LHS)
+	if err1 != nil {
+		return true, ""
+	}
+	rv, err2 := core.Eval(env, cond.RHS)
+	if err2 != nil {
+		return true, ""
+	}
+	if lv.String() != rv.String() {
+		return false, fmt.Sprintf("LHS=%s, RHS=%s", lv, rv)
+	}
+	return true, ""
+}
+
+func runWithTimeout(cmd *exec.Cmd, timeout time.Duration) ([]byte, error) {
+	done := make(chan struct{})
+	var out []byte
+	var err error
+
+	go func() {
+		out, err = cmd.CombinedOutput()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return out, err
+	case <-time.After(timeout):
+		if cmd.Process != nil {
+			cmd.Process.Kill()
+		}
+		return nil, fmt.Errorf("timed out after %s", timeout)
+	}
+}
+
+// --- Lazy/Strict rewrite modes ---
+
+// RewriteLazy applies a rewrite rule and collects obligations without
+// discharging them.
+func RewriteLazy(term core.Sexpr, rule *laws.Rule, path laws.Path, extra laws.Bindings) (*laws.RewriteResult, error) {
+	if extra != nil {
+		return laws.RewriteWithSupplementalBindings(term, rule, path, extra)
+	}
+	return laws.Rewrite(term, rule, path)
+}
+
+// RewriteStrict applies a rewrite rule and immediately discharges all
+// obligations. Fails if any obligation can't be discharged.
+func RewriteStrict(term core.Sexpr, rule *laws.Rule, path laws.Path, extra laws.Bindings) (*laws.RewriteResult, error) {
+	result, err := RewriteLazy(term, rule, path, extra)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, ob := range result.Obligations {
+		dr := Discharge(ob)
+		if !dr.Discharged {
+			return nil, fmt.Errorf("obligation not discharged (%s): %s\n  LHS: %s\n  RHS: %s\n  %v",
+				dr.Method, ob.Description,
+				ob.LHS.String(), ob.RHS.String(), dr.Error)
+		}
+	}
+
+	return result, nil
+}
