@@ -1,0 +1,167 @@
+package shen
+
+import (
+	"bytes"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/pyrex41/Shen-Backpressure/shen-derive/codegen"
+	"github.com/pyrex41/Shen-Backpressure/shen-derive/core"
+	"github.com/pyrex41/Shen-Backpressure/shen-derive/laws"
+)
+
+func TestProvedAppendixCoverage(t *testing.T) {
+	t.Run("negate-sum-proof-boundary", testProvedNegateSum)
+	t.Run("double-sum-proof-boundary", testProvedDoubleSum)
+}
+
+func testProvedNegateSum(t *testing.T) {
+	term := p("(compose (lambda N (- 0 N)) (foldr + 0))")
+	h := p("(lambda X (lambda Z (- Z X)))")
+
+	result, err := RewriteStrict(term, laws.FoldrFusion(), laws.RootPath, laws.Bindings{"?h": h})
+	if err != nil {
+		t.Fatalf("RewriteStrict failed: %v", err)
+	}
+	if len(result.Obligations) == 0 {
+		t.Fatal("expected side condition obligation from foldr-fusion")
+	}
+	t.Logf("RewriteStrict succeeded: %s -> %s", term, result.Rewritten)
+
+	// Verify proof boundary
+	cond := result.Obligations[0]
+	dr := Discharge(cond)
+	if !dr.Discharged || dr.Method != "symbolic-polynomial" {
+		t.Fatalf("PROOF BOUNDARY FAILED: expected symbolic-polynomial proof, got method=%s discharged=%v err=%v",
+			dr.Method, dr.Discharged, dr.Error)
+	}
+	t.Logf("PROOF BOUNDARY VERIFIED (symbolic-polynomial): %s", dr.Output)
+
+	// Compare evaluator outputs
+	input := p("(cons 1 (cons 2 (cons 3 (cons 4 nil))))")
+	origApplied := core.SList(term, input)
+	rewApplied := core.SList(result.Rewritten, input)
+
+	origVal, err := core.Eval(core.EmptyEnv(), origApplied)
+	if err != nil {
+		t.Fatalf("original eval failed: %v", err)
+	}
+	rewVal, err := core.Eval(core.EmptyEnv(), rewApplied)
+	if err != nil {
+		t.Fatalf("rewritten eval failed: %v", err)
+	}
+	if origVal.String() != rewVal.String() || origVal.String() != "-10" {
+		t.Errorf("evaluator mismatch or wrong result: orig=%s rew=%s", origVal, rewVal)
+	}
+
+	// Lower to Go
+	tm := &codegen.TypeMap{ParamTypes: []string{"[]int"}, ResultType: "int"}
+	goCode, err := codegen.LowerToGo(result.Rewritten, tm, "NegateSumProved", "provedappendix")
+	if err != nil {
+		t.Fatalf("LowerToGo failed: %v", err)
+	}
+
+	if err := runProvedAppendixGo(t, goCode, "NegateSumProved", []int{1, 2, 3, 4}, -10); err != nil {
+		t.Fatalf("Go compile/run failed: %v", err)
+	}
+}
+
+func testProvedDoubleSum(t *testing.T) {
+	term := p("(compose (lambda N (* N 2)) (foldr + 0))")
+	h := p("(lambda X (lambda Y (+ (* X 2) Y)))")
+
+	result, err := RewriteStrict(term, laws.FoldrFusion(), laws.RootPath, laws.Bindings{"?h": h})
+	if err != nil {
+		t.Fatalf("RewriteStrict failed: %v", err)
+	}
+	if len(result.Obligations) == 0 {
+		t.Fatal("expected side condition obligation from foldr-fusion")
+	}
+
+	cond := result.Obligations[0]
+	dr := Discharge(cond)
+	if !dr.Discharged || dr.Method != "symbolic-polynomial" {
+		t.Fatalf("PROOF BOUNDARY FAILED for double-sum: got %s: %v", dr.Method, dr.Error)
+	}
+
+	// Compare evaluator outputs
+	input := p("(cons 1 (cons 2 (cons 3 nil)))")
+	origApplied := core.SList(term, input)
+	rewApplied := core.SList(result.Rewritten, input)
+
+	origVal, err := core.Eval(core.EmptyEnv(), origApplied)
+	if err != nil {
+		t.Fatalf("original eval: %v", err)
+	}
+	rewVal, err := core.Eval(core.EmptyEnv(), rewApplied)
+	if err != nil {
+		t.Fatalf("rewritten eval: %v", err)
+	}
+	if origVal.String() != rewVal.String() || origVal.String() != "12" {
+		t.Errorf("evaluator mismatch: %s vs %s", origVal, rewVal)
+	}
+
+	// Lower to Go
+	tm := &codegen.TypeMap{ParamTypes: []string{"[]int"}, ResultType: "int"}
+	goCode, err := codegen.LowerToGo(result.Rewritten, tm, "DoubleSumProved", "provedappendix")
+	if err != nil {
+		t.Fatalf("LowerToGo failed: %v", err)
+	}
+
+	if err := runProvedAppendixGo(t, goCode, "DoubleSumProved", []int{1, 2, 3}, 12); err != nil {
+		t.Fatalf("Go compile/run failed: %v", err)
+	}
+}
+
+func runProvedAppendixGo(t *testing.T, goCode, funcName string, input []int, want int) error {
+	tmpDir, err := os.MkdirTemp("", "shen-proved-appendix-"+funcName+"-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(`module provedappendix
+go 1.24
+`), 0644); err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "appendix.go"), []byte(goCode), 0644); err != nil {
+		return err
+	}
+
+	inputStr := strings.Trim(strings.ReplaceAll(fmt.Sprintf("%v", input), " ", ", "), "[]")
+
+	testCode := fmt.Sprintf(`package provedappendix
+
+import "testing"
+
+func Test%s(t *testing.T) {
+	input := []int{%s}
+	got := %s(input)
+	if got != %d {
+		t.Errorf("expected %d, got %%d", got)
+	}
+}
+`, funcName, inputStr, funcName, want, want)
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "appendix_test.go"), []byte(testCode), 0644); err != nil {
+		return err
+	}
+
+	cmd := exec.Command("go", "test", "-run", "Test"+funcName, "-v")
+	cmd.Dir = tmpDir
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("go test failed for %s: %w\noutput:\n%s", funcName, err, out.String())
+	}
+	t.Logf("Successfully compiled+ran proved Go for %s", funcName)
+	return nil
+}

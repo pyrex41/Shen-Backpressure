@@ -45,3 +45,16 @@
   Check : balance-checked;
   =============================
   [Tx Check] : safe-transfer;)
+
+\* --- Derivation targets (consumed by shen-derive, not shengen) --- *\
+
+\* processable: starting from balance B0, is every running balance
+   non-negative after applying each transaction in order? *\
+
+(define processable
+  {amount --> (list transaction) --> boolean}
+  B0 Txs -> (foldr (lambda X (lambda Acc (and (>= (val X) 0) Acc)))
+              true
+              (scanl (lambda B (lambda Tx (- (val B) (val (amount Tx)))))
+                     (val B0)
+                     Txs)))

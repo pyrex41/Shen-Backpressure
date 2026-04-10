@@ -1,0 +1,540 @@
+package shen
+
+import (
+	"fmt"
+	"math/big"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/pyrex41/Shen-Backpressure/shen-derive/core"
+	"github.com/pyrex41/Shen-Backpressure/shen-derive/laws"
+)
+
+type symValue interface{}
+
+type symPoly struct {
+	poly polynomial
+}
+
+type symBool struct {
+	value bool
+}
+
+type symClosure struct {
+	env   map[string]symValue
+	param string
+	body  core.Sexpr
+}
+
+type symPrimPartial struct {
+	op   string
+	args []symValue
+}
+
+type proofSupportError struct {
+	msg string
+}
+
+const (
+	symbolicPolynomialMethod = "symbolic-polynomial"
+	symbolicFragmentMethod   = "symbolic-fragment"
+)
+
+func (e *proofSupportError) Error() string {
+	return e.msg
+}
+
+type polynomial struct {
+	terms map[string]*big.Int
+}
+
+func dischargeSymbolic(cond laws.InstantiatedCondition) (DischargeResult, bool) {
+	freeVars := conditionFreeVars(cond)
+	sort.Strings(freeVars)
+
+	// With s-expressions we don't have a type system to check free var types.
+	// Assume all free vars are integers — the symbolic prover will fail
+	// gracefully with a proofSupportError if they're not.
+
+	env := make(map[string]symValue, len(freeVars))
+	for _, name := range freeVars {
+		env[name] = symPoly{poly: varPolynomial(name)}
+	}
+
+	lhs, err := symbolicEval(cond.LHS, env)
+	if err != nil {
+		return unsupportedProofResult(symbolicFragmentMethod, err), false
+	}
+	rhs, err := symbolicEval(cond.RHS, env)
+	if err != nil {
+		return unsupportedProofResult(symbolicFragmentMethod, err), false
+	}
+
+	if p1, ok := lhs.(symPoly); ok {
+		if p2, ok := rhs.(symPoly); ok {
+			if p1.poly.equal(p2.poly) {
+				return DischargeResult{
+					Discharged: true,
+					Method:     symbolicPolynomialMethod,
+					Output: fmt.Sprintf("proved normalized polynomial equality:\n  lhs = %s\n  rhs = %s",
+						p1.poly.String(), p2.poly.String()),
+				}, true
+			}
+
+			diff := p1.poly.sub(p2.poly)
+			return DischargeResult{
+				Discharged: false,
+				Method:     symbolicPolynomialMethod,
+				Output: fmt.Sprintf("lhs = %s\nrhs = %s\ndiff = %s",
+					p1.poly.String(), p2.poly.String(), diff.String()),
+				Error: fmt.Errorf("symbolic polynomial proof failed: normalized forms differ"),
+			}, true
+		}
+	}
+
+	if b1, ok := lhs.(symBool); ok {
+		if b2, ok := rhs.(symBool); ok {
+			if b1.value == b2.value {
+				return DischargeResult{
+					Discharged: true,
+					Method:     symbolicFragmentMethod,
+					Output: fmt.Sprintf("proved normalized boolean/comparison formula evaluates identically to %t",
+						b1.value),
+				}, true
+			}
+			return DischargeResult{
+				Discharged: false,
+				Method:     symbolicFragmentMethod,
+				Output:     fmt.Sprintf("lhs=%t rhs=%t", b1.value, b2.value),
+				Error:      fmt.Errorf("boolean expressions normalize to different constants"),
+			}, true
+		}
+	}
+
+	return unsupportedProofResult(symbolicFragmentMethod,
+		fmt.Errorf("lhs/rhs normalized to unsupported types: %T vs %T", lhs, rhs)), false
+}
+
+func unsupportedProofResult(method string, err error) DischargeResult {
+	return DischargeResult{
+		Discharged: false,
+		Method:     method,
+		Error:      err,
+	}
+}
+
+// symPrimArity returns the arity of a primitive for the symbolic prover.
+func symPrimArity(op string) int {
+	switch op {
+	case "not", "fst", "snd":
+		return 1
+	case "+", "-", "*", "/", "%", "=", "!=", "<", "<=", ">", ">=", "and", "or", "cons":
+		return 2
+	default:
+		return 0
+	}
+}
+
+func symbolicEval(sexpr core.Sexpr, env map[string]symValue) (symValue, error) {
+	switch s := sexpr.(type) {
+	case *core.Atom:
+		switch s.Kind {
+		case core.AtomInt:
+			n, err := strconv.ParseInt(s.Val, 10, 64)
+			if err != nil {
+				return nil, &proofSupportError{msg: fmt.Sprintf("bad int: %s", s.Val)}
+			}
+			return symPoly{poly: constPolynomial(n)}, nil
+		case core.AtomBool:
+			return symBool{value: s.Val == "true"}, nil
+		case core.AtomSymbol:
+			if v, ok := env[s.Val]; ok {
+				return v, nil
+			}
+			if symPrimArity(s.Val) > 0 {
+				return &symPrimPartial{op: s.Val}, nil
+			}
+			return nil, &proofSupportError{msg: fmt.Sprintf("unbound variable %q in symbolic prover", s.Val)}
+		default:
+			return nil, &proofSupportError{msg: fmt.Sprintf("unsupported atom kind %v", s.Kind)}
+		}
+
+	case *core.List:
+		if len(s.Elems) == 0 {
+			return nil, &proofSupportError{msg: "empty list in symbolic prover"}
+		}
+
+		head := core.HeadSym(s)
+
+		// Lambda
+		if head == "lambda" && len(s.Elems) == 3 {
+			param, ok := core.SymName(s.Elems[1])
+			if !ok {
+				return nil, &proofSupportError{msg: "lambda param not symbol"}
+			}
+			return &symClosure{env: copySymEnv(env), param: param, body: s.Elems[2]}, nil
+		}
+
+		// Let
+		if head == "let" && len(s.Elems) == 4 {
+			name, ok := core.SymName(s.Elems[1])
+			if !ok {
+				return nil, &proofSupportError{msg: "let name not symbol"}
+			}
+			bound, err := symbolicEval(s.Elems[2], env)
+			if err != nil {
+				return nil, err
+			}
+			next := copySymEnv(env)
+			next[name] = bound
+			return symbolicEval(s.Elems[3], next)
+		}
+
+		// If
+		if head == "if" && len(s.Elems) == 4 {
+			cond, err := symbolicEval(s.Elems[1], env)
+			if err != nil {
+				return nil, err
+			}
+			b, ok := cond.(symBool)
+			if !ok {
+				return nil, &proofSupportError{msg: "symbolic prover only supports ground boolean conditions"}
+			}
+			if b.value {
+				return symbolicEval(s.Elems[2], env)
+			}
+			return symbolicEval(s.Elems[3], env)
+		}
+
+		// Tuple
+		if head == "@p" && len(s.Elems) == 3 {
+			return nil, &proofSupportError{msg: "tuples not supported in symbolic prover"}
+		}
+
+		// General application: evaluate head and args, apply
+		fn, err := symbolicEval(s.Elems[0], env)
+		if err != nil {
+			return nil, err
+		}
+		result := fn
+		for _, arg := range s.Elems[1:] {
+			av, err := symbolicEval(arg, env)
+			if err != nil {
+				return nil, err
+			}
+			result, err = symbolicApply(result, av)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return result, nil
+	}
+
+	return nil, &proofSupportError{msg: fmt.Sprintf("unsupported sexpr %T in symbolic prover", sexpr)}
+}
+
+func symbolicApply(fn symValue, arg symValue) (symValue, error) {
+	switch f := fn.(type) {
+	case *symClosure:
+		next := copySymEnv(f.env)
+		next[f.param] = arg
+		return symbolicEval(f.body, next)
+	case *symPrimPartial:
+		args := append(append([]symValue(nil), f.args...), arg)
+		arity := symPrimArity(f.op)
+		if arity == 0 {
+			return nil, &proofSupportError{msg: fmt.Sprintf("unknown prim %s in symbolic prover", f.op)}
+		}
+		if len(args) < arity {
+			return &symPrimPartial{op: f.op, args: args}, nil
+		}
+		return symbolicExecPrim(f.op, args)
+	default:
+		return nil, &proofSupportError{msg: fmt.Sprintf("cannot apply symbolic value %T", fn)}
+	}
+}
+
+func symbolicExecPrim(op string, args []symValue) (symValue, error) {
+	switch op {
+	case "+":
+		a, err := asSymPoly(args[0])
+		if err != nil {
+			return nil, err
+		}
+		b, err := asSymPoly(args[1])
+		if err != nil {
+			return nil, err
+		}
+		return symPoly{poly: a.add(b)}, nil
+	case "-":
+		a, err := asSymPoly(args[0])
+		if err != nil {
+			return nil, err
+		}
+		b, err := asSymPoly(args[1])
+		if err != nil {
+			return nil, err
+		}
+		return symPoly{poly: a.sub(b)}, nil
+	case "*":
+		a, err := asSymPoly(args[0])
+		if err != nil {
+			return nil, err
+		}
+		b, err := asSymPoly(args[1])
+		if err != nil {
+			return nil, err
+		}
+		return symPoly{poly: a.mul(b)}, nil
+	case "=":
+		return compareSymPolys(args, func(c int) bool { return c == 0 }, "=")
+	case "!=":
+		return compareSymPolys(args, func(c int) bool { return c != 0 }, "!=")
+	case "<":
+		return compareSymPolys(args, func(c int) bool { return c < 0 }, "<")
+	case "<=":
+		return compareSymPolys(args, func(c int) bool { return c <= 0 }, "<=")
+	case ">":
+		return compareSymPolys(args, func(c int) bool { return c > 0 }, ">")
+	case ">=":
+		return compareSymPolys(args, func(c int) bool { return c >= 0 }, ">=")
+	case "and":
+		a, err := asSymBool(args[0])
+		if err != nil {
+			return nil, err
+		}
+		b, err := asSymBool(args[1])
+		if err != nil {
+			return nil, err
+		}
+		return symBool{value: a && b}, nil
+	case "or":
+		a, err := asSymBool(args[0])
+		if err != nil {
+			return nil, err
+		}
+		b, err := asSymBool(args[1])
+		if err != nil {
+			return nil, err
+		}
+		return symBool{value: a || b}, nil
+	case "not":
+		a, err := asSymBool(args[0])
+		if err != nil {
+			return nil, err
+		}
+		return symBool{value: !a}, nil
+	default:
+		return nil, &proofSupportError{msg: fmt.Sprintf("unsupported primitive %s in symbolic prover", op)}
+	}
+}
+
+func asSymPoly(v symValue) (polynomial, error) {
+	p, ok := v.(symPoly)
+	if !ok {
+		return polynomial{}, &proofSupportError{msg: fmt.Sprintf("expected polynomial value, got %T", v)}
+	}
+	return p.poly, nil
+}
+
+func asSymBool(v symValue) (bool, error) {
+	b, ok := v.(symBool)
+	if !ok {
+		return false, &proofSupportError{msg: fmt.Sprintf("expected boolean value, got %T", v)}
+	}
+	return b.value, nil
+}
+
+func compareSymPolys(args []symValue, pred func(int) bool, opName string) (symValue, error) {
+	a, err := asSymPoly(args[0])
+	if err != nil {
+		return nil, err
+	}
+	b, err := asSymPoly(args[1])
+	if err != nil {
+		return nil, err
+	}
+	diff := a.sub(b)
+	if !diff.isConstant() {
+		return nil, &proofSupportError{msg: fmt.Sprintf("symbolic prover only supports %s comparisons of constant polynomial differences", opName)}
+	}
+	return symBool{value: pred(diff.constant().Cmp(big.NewInt(0)))}, nil
+}
+
+func copySymEnv(env map[string]symValue) map[string]symValue {
+	out := make(map[string]symValue, len(env))
+	for k, v := range env {
+		out[k] = v
+	}
+	return out
+}
+
+func zeroPolynomial() polynomial {
+	return polynomial{terms: make(map[string]*big.Int)}
+}
+
+func constPolynomial(n int64) polynomial {
+	p := zeroPolynomial()
+	if n != 0 {
+		p.terms[""] = big.NewInt(n)
+	}
+	return p
+}
+
+func varPolynomial(name string) polynomial {
+	p := zeroPolynomial()
+	p.terms[name] = big.NewInt(1)
+	return p
+}
+
+func (p polynomial) add(q polynomial) polynomial {
+	out := p.clone()
+	for mono, coeff := range q.terms {
+		out.addCoeff(mono, coeff)
+	}
+	return out
+}
+
+func (p polynomial) sub(q polynomial) polynomial {
+	out := p.clone()
+	for mono, coeff := range q.terms {
+		out.addCoeff(mono, new(big.Int).Neg(coeff))
+	}
+	return out
+}
+
+func (p polynomial) mul(q polynomial) polynomial {
+	out := zeroPolynomial()
+	for m1, c1 := range p.terms {
+		for m2, c2 := range q.terms {
+			coeff := new(big.Int).Mul(c1, c2)
+			out.addCoeff(multiplyMonomials(m1, m2), coeff)
+		}
+	}
+	return out
+}
+
+func (p polynomial) neg() polynomial {
+	out := zeroPolynomial()
+	for mono, coeff := range p.terms {
+		out.terms[mono] = new(big.Int).Neg(coeff)
+	}
+	return out
+}
+
+func (p polynomial) equal(q polynomial) bool {
+	p = p.clone()
+	q = q.clone()
+	p.normalize()
+	q.normalize()
+	if len(p.terms) != len(q.terms) {
+		return false
+	}
+	for mono, coeff := range p.terms {
+		other, ok := q.terms[mono]
+		if !ok || coeff.Cmp(other) != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (p polynomial) isConstant() bool {
+	p = p.clone()
+	p.normalize()
+	return len(p.terms) == 0 || (len(p.terms) == 1 && p.terms[""] != nil)
+}
+
+func (p polynomial) constant() *big.Int {
+	if coeff, ok := p.terms[""]; ok {
+		return new(big.Int).Set(coeff)
+	}
+	return big.NewInt(0)
+}
+
+func (p polynomial) clone() polynomial {
+	out := zeroPolynomial()
+	for mono, coeff := range p.terms {
+		out.terms[mono] = new(big.Int).Set(coeff)
+	}
+	return out
+}
+
+func (p *polynomial) addCoeff(mono string, coeff *big.Int) {
+	if coeff.Sign() == 0 {
+		return
+	}
+	if existing, ok := p.terms[mono]; ok {
+		sum := new(big.Int).Add(existing, coeff)
+		if sum.Sign() == 0 {
+			delete(p.terms, mono)
+			return
+		}
+		p.terms[mono] = sum
+		return
+	}
+	p.terms[mono] = new(big.Int).Set(coeff)
+}
+
+func (p *polynomial) normalize() {
+	for mono, coeff := range p.terms {
+		if coeff.Sign() == 0 {
+			delete(p.terms, mono)
+		}
+	}
+}
+
+func (p polynomial) String() string {
+	p = p.clone()
+	p.normalize()
+	if len(p.terms) == 0 {
+		return "0"
+	}
+
+	monos := make([]string, 0, len(p.terms))
+	for mono := range p.terms {
+		monos = append(monos, mono)
+	}
+	sort.Strings(monos)
+
+	parts := make([]string, 0, len(monos))
+	for _, mono := range monos {
+		coeff := p.terms[mono]
+		switch mono {
+		case "":
+			parts = append(parts, coeff.String())
+		default:
+			switch coeff.Cmp(big.NewInt(1)) {
+			case 0:
+				parts = append(parts, mono)
+			default:
+				if coeff.Cmp(big.NewInt(-1)) == 0 {
+					parts = append(parts, "-"+mono)
+				} else {
+					parts = append(parts, fmt.Sprintf("%s*%s", coeff.String(), mono))
+				}
+			}
+		}
+	}
+	return strings.Join(parts, " + ")
+}
+
+func multiplyMonomials(a, b string) string {
+	if a == "" {
+		return b
+	}
+	if b == "" {
+		return a
+	}
+	parts := append(splitMonomial(a), splitMonomial(b)...)
+	sort.Strings(parts)
+	return strings.Join(parts, "*")
+}
+
+func splitMonomial(mono string) []string {
+	if mono == "" {
+		return nil
+	}
+	return strings.Split(mono, "*")
+}
