@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"os"
@@ -11,28 +12,35 @@ import (
 )
 
 type gate struct {
-	name string
-	cmd  string
-	args []string
+	name          string
+	kind          GateKind
+	cmd           string
+	args          []string
+	parallelGroup string
 }
 
 type gateResult struct {
-	name    string
-	passed  bool
-	output  string
-	elapsed time.Duration
+	name     string
+	kind     GateKind
+	passed   bool
+	exitCode int
+	stdout   string
+	stderr   string
+	output   string // combined, kept for backward compat
+	elapsed  time.Duration
 }
 
 func cmdGates(args []string) {
 	fs := flag.NewFlagSet("gates", flag.ExitOnError)
 	relaxed := fs.Bool("relaxed", false, "run test and build gates in parallel")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, `sb gates — Run all five verification gates
+		fmt.Fprintf(os.Stderr, `sb gates — Run manifest-defined verification gates
 
 Usage: sb gates [flags]
 
-Runs the five-gate verification pipeline using the commands from sb.toml
-or convention defaults:
+Runs the verification gate pipeline defined in sb.toml. Gates are
+either defined explicitly via [[gates]] array-of-tables, or synthesised
+from the legacy [commands] section:
 
   Gate 1: shengen       Regenerate guard types from spec
   Gate 2: test          Run tests against regenerated types
@@ -40,8 +48,8 @@ or convention defaults:
   Gate 4: shen-check    Verify spec internal consistency
   Gate 5: tcb-audit     Verify shenguard package integrity
 
-Each gate command is configurable via sb.toml [commands] or shell scripts
-in bin/. The LLM adapts these per project via the skills.
+Gates with the same parallel_group run concurrently; all others run
+sequentially.
 
 Flags:
 `)
@@ -61,12 +69,16 @@ Flags:
 
 	gates := buildGateList(cfg)
 
-	var results []gateResult
-	if *relaxed {
-		results = runGatesRelaxed(gates)
-	} else {
-		results = runGatesStrict(gates)
+	// In legacy mode, -relaxed flag sets parallel groups on test+build.
+	if *relaxed && !cfg.HasManifestGates() {
+		for i := range gates {
+			if gates[i].name == "test" || gates[i].name == "build" {
+				gates[i].parallelGroup = "build-test"
+			}
+		}
 	}
+
+	results := runGateList(gates)
 
 	// Summary
 	fmt.Fprintln(os.Stderr)
@@ -93,28 +105,50 @@ Flags:
 }
 
 func buildGateList(cfg *Config) []gate {
-	genBin, genArgs := SplitCommand(cfg.Gen)
-	testBin, testArgs := SplitCommand(cfg.Test)
-	buildBin, buildArgs := SplitCommand(cfg.Build)
-	checkBin, checkArgs := SplitCommand(cfg.Check)
-	auditBin, auditArgs := SplitCommand(cfg.Audit)
+	var gates []gate
 
-	gates := []gate{
-		{name: "shengen", cmd: genBin, args: genArgs},
-		{name: "test", cmd: testBin, args: testArgs},
-		{name: "build", cmd: buildBin, args: buildArgs},
-		{name: "shen-check", cmd: checkBin, args: checkArgs},
-		{name: "tcb-audit", cmd: auditBin, args: auditArgs},
+	if cfg.Gates != nil {
+		// Manifest-defined gates: convert each GateDef to a gate.
+		for _, gd := range cfg.Gates {
+			bin, args := SplitCommand(gd.Run)
+			gates = append(gates, gate{
+				name:          gd.Name,
+				kind:          gd.Kind,
+				cmd:           bin,
+				args:          args,
+				parallelGroup: gd.ParallelGroup,
+			})
+		}
+	} else {
+		// Legacy mode: synthesise five gates from Gen/Build/Test/Check/Audit.
+		genBin, genArgs := SplitCommand(cfg.Gen)
+		testBin, testArgs := SplitCommand(cfg.Test)
+		buildBin, buildArgs := SplitCommand(cfg.Build)
+		checkBin, checkArgs := SplitCommand(cfg.Check)
+		auditBin, auditArgs := SplitCommand(cfg.Audit)
+
+		testGroup := ""
+		buildGroup := ""
+		if cfg.Relaxed {
+			testGroup = "build-test"
+			buildGroup = "build-test"
+		}
+
+		gates = []gate{
+			{name: "shengen", kind: GateKindCommand, cmd: genBin, args: genArgs},
+			{name: "test", kind: GateKindCommand, cmd: testBin, args: testArgs, parallelGroup: testGroup},
+			{name: "build", kind: GateKindCommand, cmd: buildBin, args: buildArgs, parallelGroup: buildGroup},
+			{name: "shen-check", kind: GateKindCommand, cmd: checkBin, args: checkArgs},
+			{name: "tcb-audit", kind: GateKindCommand, cmd: auditBin, args: auditArgs},
+		}
 	}
 
-	// Gate 6 — spec-equivalence verification. Only added when the
-	// project has configured at least one [[derive.specs]] entry. The
-	// gate shells out to `sb derive` on the current executable so that
-	// gates.go doesn't need to know about shen-derive internals.
+	// Always append shen-derive gate if configured, regardless of format.
 	if len(cfg.DeriveSpecs) > 0 {
 		if self, err := os.Executable(); err == nil {
 			gates = append(gates, gate{
 				name: "shen-derive",
+				kind: GateKindDerive,
 				cmd:  self,
 				args: []string{"derive"},
 			})
@@ -127,59 +161,72 @@ func buildGateList(cfg *Config) []gate {
 func runOneGate(g gate) gateResult {
 	start := time.Now()
 	cmd := exec.Command(g.cmd, g.args...)
-	out, err := cmd.CombinedOutput()
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	err := cmd.Run()
 	elapsed := time.Since(start)
 
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
+		}
+	}
+
+	stdout := stdoutBuf.String()
+	stderr := stderrBuf.String()
+
 	return gateResult{
-		name:    g.name,
-		passed:  err == nil,
-		output:  string(out),
-		elapsed: elapsed,
+		name:     g.name,
+		kind:     g.kind,
+		passed:   err == nil,
+		exitCode: exitCode,
+		stdout:   stdout,
+		stderr:   stderr,
+		output:   stdout + stderr,
+		elapsed:  elapsed,
 	}
 }
 
-func runGatesStrict(gates []gate) []gateResult {
-	results := make([]gateResult, 0, len(gates))
-	for _, g := range gates {
-		r := runOneGate(g)
-		logGate(r)
-		results = append(results, r)
-	}
-	return results
-}
-
-func runGatesRelaxed(gates []gate) []gateResult {
+// runGateList executes gates in order. Consecutive gates sharing the same
+// non-empty parallelGroup run concurrently; all others run sequentially.
+func runGateList(gates []gate) []gateResult {
 	results := make([]gateResult, len(gates))
-
-	// Gate 0 (shengen) runs first — generates types needed by test and build
-	results[0] = runOneGate(gates[0])
-	logGate(results[0])
-
-	// Gates 1 and 2 (test + build) run in parallel
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	for i := 1; i <= 2 && i < len(gates); i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			r := runOneGate(gates[idx])
-			mu.Lock()
-			results[idx] = r
-			mu.Unlock()
-		}(i)
+	i := 0
+	for i < len(gates) {
+		pg := gates[i].parallelGroup
+		if pg == "" {
+			// Sequential gate.
+			results[i] = runOneGate(gates[i])
+			logGate(results[i])
+			i++
+			continue
+		}
+		// Collect consecutive gates with the same parallelGroup.
+		j := i
+		for j < len(gates) && gates[j].parallelGroup == pg {
+			j++
+		}
+		// Run gates[i:j] concurrently.
+		var wg sync.WaitGroup
+		for idx := i; idx < j; idx++ {
+			wg.Add(1)
+			go func(k int) {
+				defer wg.Done()
+				results[k] = runOneGate(gates[k])
+			}(idx)
+		}
+		wg.Wait()
+		for idx := i; idx < j; idx++ {
+			logGate(results[idx])
+		}
+		i = j
 	}
-	wg.Wait()
-
-	for i := 1; i <= 2 && i < len(gates); i++ {
-		logGate(results[i])
-	}
-
-	// Gates 3+ (shen-check, tcb-audit) run sequentially
-	for i := 3; i < len(gates); i++ {
-		results[i] = runOneGate(gates[i])
-		logGate(results[i])
-	}
-
 	return results
 }
 

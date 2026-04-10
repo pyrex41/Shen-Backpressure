@@ -189,6 +189,54 @@ func ElemType(shenType string) string {
 	return ""
 }
 
+// TypeSummary represents one Shen datatype for context output.
+type TypeSummary struct {
+	ShenName     string   // e.g. "balance-checked"
+	TargetName   string   // e.g. "BalanceChecked" (Go name)
+	Category     string   // "wrapper", "constrained", "composite", "guarded", "alias", "sumtype"
+	Fields       []string // field names for composite/guarded types
+	Constraints  []string // raw constraint expressions for constrained/guarded types
+	Dependencies []string // other Shen type names referenced
+}
+
+// Summary returns a structured overview of all types in the table.
+func (tt *TypeTable) Summary() []TypeSummary {
+	var out []TypeSummary
+	for _, e := range tt.Entries {
+		s := TypeSummary{
+			ShenName:   e.ShenName,
+			TargetName: e.GoName,
+			Category:   string(e.Category),
+		}
+		for _, f := range e.Fields {
+			s.Fields = append(s.Fields, f.ShenName)
+		}
+		s.Constraints = append(s.Constraints, e.Verified...)
+
+		// Collect dependencies: field types that are not primitives.
+		seen := map[string]bool{}
+		for _, f := range e.Fields {
+			if !isPrimitive(f.ShenType) && f.ShenType != "unknown" && !seen[f.ShenType] {
+				s.Dependencies = append(s.Dependencies, f.ShenType)
+				seen[f.ShenType] = true
+			}
+		}
+
+		out = append(out, s)
+	}
+	// Sort for stable output.
+	sortSummaries(out)
+	return out
+}
+
+func sortSummaries(ss []TypeSummary) {
+	for i := 1; i < len(ss); i++ {
+		for j := i; j > 0 && ss[j].ShenName < ss[j-1].ShenName; j-- {
+			ss[j], ss[j-1] = ss[j-1], ss[j]
+		}
+	}
+}
+
 // --- Helpers ---
 
 func isPrimitive(t string) bool {

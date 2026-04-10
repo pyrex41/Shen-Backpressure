@@ -78,6 +78,92 @@ func TestBuildTypeTablePayment(t *testing.T) {
 	}
 }
 
+func TestSummary(t *testing.T) {
+	sf, err := ParseFile(filepath.Clean(paymentSpecPath))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	tt := BuildTypeTable(sf.Datatypes, "example.com/payment/internal/shenguard", "shenguard")
+	summaries := tt.Summary()
+
+	if len(summaries) == 0 {
+		t.Fatal("empty summary")
+	}
+
+	// Build a lookup map for convenience.
+	byName := map[string]TypeSummary{}
+	for _, s := range summaries {
+		byName[s.ShenName] = s
+	}
+
+	// account-id: wrapper
+	if s, ok := byName["account-id"]; !ok {
+		t.Error("missing account-id in summary")
+	} else {
+		if s.Category != "wrapper" {
+			t.Errorf("account-id category: %s", s.Category)
+		}
+		if s.TargetName != "AccountId" {
+			t.Errorf("account-id TargetName: %s", s.TargetName)
+		}
+	}
+
+	// amount: constrained with a constraint
+	if s, ok := byName["amount"]; !ok {
+		t.Error("missing amount in summary")
+	} else {
+		if s.Category != "constrained" {
+			t.Errorf("amount category: %s", s.Category)
+		}
+		if len(s.Constraints) != 1 || s.Constraints[0] != "(>= X 0)" {
+			t.Errorf("amount constraints: %v", s.Constraints)
+		}
+	}
+
+	// transaction: composite with 3 fields
+	if s, ok := byName["transaction"]; !ok {
+		t.Error("missing transaction in summary")
+	} else {
+		if s.Category != "composite" {
+			t.Errorf("transaction category: %s", s.Category)
+		}
+		if len(s.Fields) != 3 {
+			t.Errorf("transaction fields: %v", s.Fields)
+		}
+		// Should have dependencies on amount and account-id
+		if len(s.Dependencies) != 2 {
+			t.Errorf("transaction dependencies: %v", s.Dependencies)
+		}
+	}
+
+	// balance-checked: guarded with constraints
+	if s, ok := byName["balance-checked"]; !ok {
+		t.Error("missing balance-checked in summary")
+	} else {
+		if s.Category != "guarded" {
+			t.Errorf("balance-checked category: %s", s.Category)
+		}
+		if len(s.Constraints) == 0 {
+			t.Error("balance-checked: expected constraints")
+		}
+	}
+}
+
+func TestSummarySorted(t *testing.T) {
+	sf, err := ParseFile(filepath.Clean(paymentSpecPath))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	tt := BuildTypeTable(sf.Datatypes, "", "shenguard")
+	summaries := tt.Summary()
+
+	for i := 1; i < len(summaries); i++ {
+		if summaries[i].ShenName < summaries[i-1].ShenName {
+			t.Errorf("not sorted: %q before %q", summaries[i-1].ShenName, summaries[i].ShenName)
+		}
+	}
+}
+
 func TestGoType(t *testing.T) {
 	sf, err := ParseFile(filepath.Clean(paymentSpecPath))
 	if err != nil {

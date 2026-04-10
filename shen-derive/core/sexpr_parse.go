@@ -223,6 +223,18 @@ func (p *sexprParser) skipWhitespace() {
 			p.pos++
 			continue
 		}
+		// Block comment: \* ... *\ (Shen style)
+		if ch == '\\' && p.pos+1 < len(p.input) && p.input[p.pos+1] == '*' {
+			p.pos += 2
+			for p.pos+1 < len(p.input) {
+				if p.input[p.pos] == '*' && p.input[p.pos+1] == '\\' {
+					p.pos += 2
+					break
+				}
+				p.pos++
+			}
+			continue
+		}
 		// Line comment: \\ ... (Shen style)
 		if ch == '\\' && p.pos+1 < len(p.input) && p.input[p.pos+1] == '\\' {
 			p.pos += 2

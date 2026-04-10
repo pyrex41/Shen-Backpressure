@@ -1,14 +1,17 @@
-// sb — Thin CLI for Shen-Backpressure projects.
+// sb — Engine/orchestrator CLI for Shen-Backpressure projects.
 //
-// Scaffolds projects, runs shengen, executes verification gates, and
-// launches Ralph loops (headless LLM harness). The intelligence lives
-// in the skills (sb/ skill bundle) — this CLI just runs things.
+// Manages the project manifest (sb.toml), runs manifest-defined
+// verification gates, and orchestrates Ralph loops (headless LLM
+// harness with gate feedback). The manifest is the single source of
+// truth for project structure, gate pipeline, and loop configuration.
 //
 // Subcommands:
-//   init     Scaffold a new Shen-backpressure project (specs, scripts, skills)
-//   gen      Run shengen to generate guard types from specs
-//   gates    Run the five verification gates
-//   loop     Launch a Ralph loop (headless LLM + five-gate verification)
+//   init      Scaffold a new Shen-backpressure project (specs, scripts, skills)
+//   gen       Run shengen to generate guard types from specs
+//   gates     Run manifest-defined verification gates
+//   derive    Run spec-equivalence verification
+//   context   Emit project context from the manifest
+//   loop      Launch a Ralph loop (headless LLM + gate verification)
 
 package main
 
@@ -17,7 +20,7 @@ import (
 	"os"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -34,6 +37,8 @@ func main() {
 		cmdGates(os.Args[2:])
 	case "derive":
 		cmdDerive(os.Args[2:])
+	case "context":
+		cmdContext(os.Args[2:])
 	case "loop":
 		cmdLoop(os.Args[2:])
 	case "version", "--version", "-v":
@@ -48,15 +53,16 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `sb — Shen-Backpressure CLI (v%s)
+	fmt.Fprintf(os.Stderr, `sb — Shen-Backpressure engine/orchestrator (v%s)
 
 Usage: sb <command> [flags]
 
 Commands:
   init      Scaffold a new Shen-backpressure project
   gen       Generate guard types from Shen specs
-  gates     Run all five verification gates
-  derive    Run the spec-equivalence verification gate
+  gates     Run manifest-defined verification gates
+  derive    Run spec-equivalence verification
+  context   Emit project context from the manifest
   loop      Launch a Ralph loop (headless LLM + gates)
   version   Print version
 

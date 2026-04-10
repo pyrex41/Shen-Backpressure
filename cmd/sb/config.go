@@ -10,6 +10,22 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// GateKind identifies whether a gate runs a shell command or a derive verification.
+type GateKind string
+
+const (
+	GateKindCommand GateKind = "command"
+	GateKindDerive  GateKind = "derive"
+)
+
+// GateDef is a manifest-defined gate entry from [[gates]] in sb.toml.
+type GateDef struct {
+	Name          string   `toml:"name"`
+	Kind          GateKind `toml:"kind"`
+	Run           string   `toml:"run"`
+	ParallelGroup string   `toml:"parallel_group"`
+}
+
 // Config holds project configuration, loaded from sb.toml or detected by convention.
 type Config struct {
 	Lang    string // "go" or "ts"
@@ -24,6 +40,10 @@ type Config struct {
 	Audit   string // tcb audit command (gate 5)
 	Relaxed bool   // run test+build in parallel
 
+	// Manifest-defined gates (new [[gates]] format). When non-nil the gate
+	// engine uses these instead of synthesising from Gen/Build/Test/Check/Audit.
+	Gates []GateDef
+
 	// Derive config (gate 6 — spec-equivalence verification)
 	DeriveDir   string       // path to shen-derive module (default ../../shen-derive)
 	DeriveSpecs []DeriveSpec // one entry per (define ...) to verify
@@ -35,6 +55,9 @@ type Config struct {
 	Prompt         string // path to main prompt file
 	Plan           string // path to plan file
 }
+
+// HasManifestGates reports whether the config uses the new [[gates]] format.
+func (c *Config) HasManifestGates() bool { return c.Gates != nil }
 
 // DeriveSpec configures one shen-derive verify invocation.
 type DeriveSpec struct {
@@ -60,8 +83,53 @@ type tomlDeriveSpec struct {
 	Seed     int64  `toml:"seed"`
 }
 
-// tomlConfig mirrors the sb.toml file structure.
-type tomlConfig struct {
+// tomlGateDef mirrors a [[gates]] entry in the new sb.toml format.
+type tomlGateDef struct {
+	Name          string `toml:"name"`
+	Kind          string `toml:"kind"`
+	Run           string `toml:"run"`
+	ParallelGroup string `toml:"parallel_group"`
+}
+
+// tomlConfigNew is the new-format schema where `gates` is an array-of-tables
+// and engine settings live under [engine].
+type tomlConfigNew struct {
+	Project struct {
+		Lang string `toml:"lang"`
+		Pkg  string `toml:"pkg"`
+	} `toml:"project"`
+	Paths struct {
+		Spec       string `toml:"spec"`
+		Output     string `toml:"output"`
+		DBWrappers string `toml:"db_wrappers"`
+	} `toml:"paths"`
+	Commands struct {
+		Gen       string `toml:"gen"`
+		Build     string `toml:"build"`
+		Test      string `toml:"test"`
+		ShenCheck string `toml:"shen_check"`
+		Audit     string `toml:"audit"`
+	} `toml:"commands"`
+	Engine struct {
+		Relaxed bool `toml:"relaxed"`
+	} `toml:"engine"`
+	Gates  []tomlGateDef `toml:"gates"`
+	Derive struct {
+		Dir   string           `toml:"dir"`
+		Specs []tomlDeriveSpec `toml:"specs"`
+	} `toml:"derive"`
+	Loop struct {
+		Harness string `toml:"harness"`
+		MaxIter int    `toml:"max_iter"`
+		Timeout string `toml:"timeout"`
+		Prompt  string `toml:"prompt"`
+		Plan    string `toml:"plan"`
+	} `toml:"loop"`
+}
+
+// tomlConfigLegacy is the legacy schema where `gates` is a single table
+// with a `relaxed` field.
+type tomlConfigLegacy struct {
 	Project struct {
 		Lang string `toml:"lang"`
 		Pkg  string `toml:"pkg"`
@@ -109,78 +177,52 @@ func LoadConfig() (*Config, error) {
 		Plan:           "plans/fix_plan.md",
 	}
 
-	// Try loading sb.toml
+	// Try loading sb.toml — two-pass decode to handle both legacy ([gates]
+	// table with relaxed field) and new ([[gates]] array-of-tables) formats.
 	if _, err := os.Stat("sb.toml"); err == nil {
-		var tc tomlConfig
-		if _, err := toml.DecodeFile("sb.toml", &tc); err != nil {
-			return nil, fmt.Errorf("parsing sb.toml: %w", err)
-		}
-		if tc.Project.Lang != "" {
-			cfg.Lang = tc.Project.Lang
-		}
-		if tc.Project.Pkg != "" {
-			cfg.Pkg = tc.Project.Pkg
-		}
-		if tc.Paths.Spec != "" {
-			cfg.Spec = tc.Paths.Spec
-		}
-		if tc.Paths.Output != "" {
-			cfg.Output = tc.Paths.Output
-		}
-		if tc.Paths.DBWrappers != "" {
-			cfg.DBWrap = tc.Paths.DBWrappers
-		}
-		if tc.Commands.Gen != "" {
-			cfg.Gen = tc.Commands.Gen
-		}
-		if tc.Commands.Build != "" {
-			cfg.Build = tc.Commands.Build
-		}
-		if tc.Commands.Test != "" {
-			cfg.Test = tc.Commands.Test
-		}
-		if tc.Commands.ShenCheck != "" {
-			cfg.Check = tc.Commands.ShenCheck
-		}
-		if tc.Commands.Audit != "" {
-			cfg.Audit = tc.Commands.Audit
-		}
-		cfg.Relaxed = tc.Gates.Relaxed
+		var tcNew tomlConfigNew
+		_, errNew := toml.DecodeFile("sb.toml", &tcNew)
 
-		if tc.Derive.Dir != "" {
-			cfg.DeriveDir = tc.Derive.Dir
-		}
-		for _, s := range tc.Derive.Specs {
-			lang := s.Lang
-			if lang == "" {
-				lang = "go"
+		if errNew == nil && len(tcNew.Gates) > 0 {
+			// New format: [[gates]] array-of-tables + [engine]
+			applyProjectPaths(cfg, tcNew.Project.Lang, tcNew.Project.Pkg,
+				tcNew.Paths.Spec, tcNew.Paths.Output, tcNew.Paths.DBWrappers)
+			applyCommands(cfg, tcNew.Commands.Gen, tcNew.Commands.Build,
+				tcNew.Commands.Test, tcNew.Commands.ShenCheck, tcNew.Commands.Audit)
+			cfg.Relaxed = tcNew.Engine.Relaxed
+
+			cfg.Gates = make([]GateDef, len(tcNew.Gates))
+			for i, g := range tcNew.Gates {
+				kind := GateKind(g.Kind)
+				if kind == "" {
+					kind = GateKindCommand
+				}
+				cfg.Gates[i] = GateDef{
+					Name:          g.Name,
+					Kind:          kind,
+					Run:           g.Run,
+					ParallelGroup: g.ParallelGroup,
+				}
 			}
-			cfg.DeriveSpecs = append(cfg.DeriveSpecs, DeriveSpec{
-				Lang:     lang,
-				Path:     s.Path,
-				Func:     s.Func,
-				ImplPkg:  s.ImplPkg,
-				ImplFunc: s.ImplFunc,
-				GuardPkg: s.GuardPkg,
-				OutFile:  s.OutFile,
-				Seed:     s.Seed,
-			})
-		}
 
-		if tc.Loop.Harness != "" {
-			cfg.Harness = tc.Loop.Harness
-		}
-		if tc.Loop.MaxIter > 0 {
-			cfg.MaxIter = tc.Loop.MaxIter
-		}
-		if tc.Loop.Timeout != "" {
-			cfg.HarnessTimeout = tc.Loop.Timeout
-		}
-		if tc.Loop.Prompt != "" {
-			cfg.Prompt = tc.Loop.Prompt
-		}
-		if tc.Loop.Plan != "" {
-			cfg.Plan = tc.Loop.Plan
+			applyDerive(cfg, tcNew.Derive.Dir, tcNew.Derive.Specs)
+			applyLoop(cfg, tcNew.Loop.Harness, tcNew.Loop.MaxIter,
+				tcNew.Loop.Timeout, tcNew.Loop.Prompt, tcNew.Loop.Plan)
+		} else {
+			// Legacy format: [gates] table with relaxed bool
+			var tcLegacy tomlConfigLegacy
+			if _, err := toml.DecodeFile("sb.toml", &tcLegacy); err != nil {
+				return nil, fmt.Errorf("parsing sb.toml: %w", err)
+			}
+			applyProjectPaths(cfg, tcLegacy.Project.Lang, tcLegacy.Project.Pkg,
+				tcLegacy.Paths.Spec, tcLegacy.Paths.Output, tcLegacy.Paths.DBWrappers)
+			applyCommands(cfg, tcLegacy.Commands.Gen, tcLegacy.Commands.Build,
+				tcLegacy.Commands.Test, tcLegacy.Commands.ShenCheck, tcLegacy.Commands.Audit)
+			cfg.Relaxed = tcLegacy.Gates.Relaxed
+
+			applyDerive(cfg, tcLegacy.Derive.Dir, tcLegacy.Derive.Specs)
+			applyLoop(cfg, tcLegacy.Loop.Harness, tcLegacy.Loop.MaxIter,
+				tcLegacy.Loop.Timeout, tcLegacy.Loop.Prompt, tcLegacy.Loop.Plan)
 		}
 	}
 
@@ -239,6 +281,86 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// applyProjectPaths sets the project-level and paths fields from TOML values.
+func applyProjectPaths(cfg *Config, lang, pkg, spec, output, dbWrap string) {
+	if lang != "" {
+		cfg.Lang = lang
+	}
+	if pkg != "" {
+		cfg.Pkg = pkg
+	}
+	if spec != "" {
+		cfg.Spec = spec
+	}
+	if output != "" {
+		cfg.Output = output
+	}
+	if dbWrap != "" {
+		cfg.DBWrap = dbWrap
+	}
+}
+
+// applyCommands sets the gate command fields from TOML values.
+func applyCommands(cfg *Config, gen, build, test, check, audit string) {
+	if gen != "" {
+		cfg.Gen = gen
+	}
+	if build != "" {
+		cfg.Build = build
+	}
+	if test != "" {
+		cfg.Test = test
+	}
+	if check != "" {
+		cfg.Check = check
+	}
+	if audit != "" {
+		cfg.Audit = audit
+	}
+}
+
+// applyDerive sets the derive config from TOML values.
+func applyDerive(cfg *Config, dir string, specs []tomlDeriveSpec) {
+	if dir != "" {
+		cfg.DeriveDir = dir
+	}
+	for _, s := range specs {
+		lang := s.Lang
+		if lang == "" {
+			lang = "go"
+		}
+		cfg.DeriveSpecs = append(cfg.DeriveSpecs, DeriveSpec{
+			Lang:     lang,
+			Path:     s.Path,
+			Func:     s.Func,
+			ImplPkg:  s.ImplPkg,
+			ImplFunc: s.ImplFunc,
+			GuardPkg: s.GuardPkg,
+			OutFile:  s.OutFile,
+			Seed:     s.Seed,
+		})
+	}
+}
+
+// applyLoop sets the loop config from TOML values.
+func applyLoop(cfg *Config, harness string, maxIter int, timeout, prompt, plan string) {
+	if harness != "" {
+		cfg.Harness = harness
+	}
+	if maxIter > 0 {
+		cfg.MaxIter = maxIter
+	}
+	if timeout != "" {
+		cfg.HarnessTimeout = timeout
+	}
+	if prompt != "" {
+		cfg.Prompt = prompt
+	}
+	if plan != "" {
+		cfg.Plan = plan
+	}
 }
 
 // FindShengen locates the shengen binary using the discovery chain:
