@@ -223,40 +223,44 @@ To force a specific backend: `SHEN=/path/to/binary ./bin/shen-check.sh`.
 
 The project provides two complementary tools. Pick per-function based on what fits:
 
-| | **shen-guard** (existing) | **shen-derive** (new) |
+| | **shen-guard** | **shen-derive** |
 |---|---|---|
-| **Best for** | I/O, mutation, glue code | Fold-shaped pure computations |
-| **How it works** | Shen spec → shengen → opaque guard types → constructor validation | Naive spec → algebraic rewrites → side conditions checked heuristically and Shen-validated → Go |
-| **Artifact** | Generated Go types with validated constructors | Derivation transcript + generated Go function |
-| **Proof method** | Shen sequent calculus proves type rules; Go compiler enforces them | Named algebraic laws (Bird-Meertens) with recorded obligations; current side-condition checks are empirical and Shen tc+ validates emitted specs |
-| **When to use** | Code that creates, validates, or passes around domain values | Code that folds, scans, maps, or filters sequences |
+| **Best for** | I/O, mutation, glue code — anywhere domain values cross a boundary | Pure functional computations you want to pin against an obvious-correct spec |
+| **How it works** | Shen spec → shengen → opaque guard types → constructor validation at compile time | Shen `(define ...)` spec acts as the oracle; a generated table-driven Go test asserts the hand-written implementation matches the spec on sampled inputs |
+| **Artifact** | Generated Go types with validated constructors | Generated Go test file (committed to the repo) whose drift is checked by a gate |
+| **Proof method** | Shen sequent calculus proves type rules; Go compiler enforces them | Spec-vs-impl equivalence on sampled inputs — deterministic boundary values + optional seeded random draws; constrained types filter samples against their `verified` predicates |
+| **When to use** | Code that creates, validates, or passes around domain values | Pure functions where the obvious spec is clear and the efficient implementation is not |
 
-Both share the same Shen spec format and five-gate pipeline.
+Both share the same `.shen` spec file format. shen-derive plugs into `sb`
+as a sixth gate (`sb derive`) alongside the existing five.
 
 ### shen-derive quick start
 
 ```bash
 cd shen-derive && go build -o shen-derive .
 
-# Interactive evaluator
-./shen-derive repl
+# Generate a table-driven spec-equivalence test for a (define ...) block.
+./shen-derive verify path/to/spec.shen \
+  --func processable \
+  --impl-pkg your-module/internal/derived \
+  --impl-func Processable \
+  --import your-module/internal/shenguard \
+  --out your/internal/derived/processable_spec_test.go
 
-# Evaluate an expression
-./shen-derive eval 'foldr (+) 0 [1, 2, 3, 4, 5]'
-# → 15
-
-# List available rewrite laws
-./shen-derive laws
-
-# Apply a rewrite that needs a supplemental metavariable binding
-./shen-derive rewrite --bind '?h=\x z -> z - x' 'negate . foldr (+) 0' foldr-fusion
-
-# Type-check
-./shen-derive check '\(x : Int) -> x + 1'
-# → Int -> Int
+# Layer seeded random draws on top of the boundary pool for deeper
+# exploration (the seed is stamped into the generated file).
+./shen-derive verify ... --seed 42 --random-draws 16
 ```
 
-See `shen-derive/demo/payment-derived/` for a full derivation of the payment processor's balance-checking logic, including the derivation transcript.
+The generated test is a regular `go test` file — commit it, then run
+the `sb derive` gate (or your own Makefile) to detect drift between
+the spec, the impl, and the committed test.
+
+See `examples/payment/` for the end-to-end workflow: `specs/core.shen`
+holds a `(define processable ...)` block, `internal/derived/processable.go`
+is the hand-written impl, `internal/derived/processable_spec_test.go`
+is the generated test, `sb.toml` wires up the `[[derive.specs]]` entry,
+and `sb derive` (or `make shen-derive-verify`) runs the gate.
 
 ## Design Decisions
 
