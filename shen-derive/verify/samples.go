@@ -5,6 +5,8 @@ package verify
 
 import (
 	"fmt"
+	"math/rand"
+	"strconv"
 	"strings"
 
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/core"
@@ -19,15 +21,32 @@ type Sample struct {
 	GoExpr string     // used by the generated Go test, e.g. "mustAmount(100)"
 }
 
-// GenSamples returns a small, deterministic set of samples for the given
-// Shen type. The sample count is intentionally tiny — the goal is a handful
-// of meaningful cases, not exhaustive coverage.
+// SampleCtx threads sampling options through the recursive GenSamples
+// calls. A nil Rand means "deterministic, boundary values only".
+type SampleCtx struct {
+	TT          *specfile.TypeTable
+	Rand        *rand.Rand // nil → deterministic
+	RandomDraws int        // ignored when Rand == nil
+}
+
+// GenSamples returns the deterministic boundary-value sample set for the
+// given Shen type. Kept as a convenience wrapper around GenSamplesCtx for
+// back-compat with tests and external callers.
 func GenSamples(shenType string, tt *specfile.TypeTable) ([]Sample, error) {
+	return GenSamplesCtx(&SampleCtx{TT: tt}, shenType)
+}
+
+// GenSamplesCtx generates samples under a provided context. When the
+// context carries a non-nil Rand, primitive types (numbers and strings)
+// produce RandomDraws additional values on top of the deterministic
+// boundary set.
+func GenSamplesCtx(ctx *SampleCtx, shenType string) ([]Sample, error) {
 	shenType = strings.TrimSpace(shenType)
+	tt := ctx.TT
 
 	// list types: (list T)
 	if elemType := specfile.ElemType(shenType); elemType != "" {
-		elemSamples, err := GenSamples(elemType, tt)
+		elemSamples, err := GenSamplesCtx(ctx, elemType)
 		if err != nil {
 			return nil, err
 		}
@@ -37,13 +56,21 @@ func GenSamples(shenType string, tt *specfile.TypeTable) ([]Sample, error) {
 	// primitives
 	switch shenType {
 	case "number":
-		return numberSamples(), nil
+		out := numberSamples()
+		if ctx.Rand != nil && ctx.RandomDraws > 0 {
+			out = append(out, randomNumberSamples(ctx.Rand, ctx.RandomDraws)...)
+		}
+		return out, nil
 	case "string", "symbol":
-		return []Sample{
+		out := []Sample{
 			{Value: core.StringVal(""), GoExpr: `""`},
 			{Value: core.StringVal("alice"), GoExpr: `"alice"`},
 			{Value: core.StringVal("bob"), GoExpr: `"bob"`},
-		}, nil
+		}
+		if ctx.Rand != nil && ctx.RandomDraws > 0 {
+			out = append(out, randomStringSamples(ctx.Rand, ctx.RandomDraws)...)
+		}
+		return out, nil
 	case "boolean":
 		return []Sample{
 			{Value: core.BoolVal(true), GoExpr: "true"},
@@ -59,10 +86,10 @@ func GenSamples(shenType string, tt *specfile.TypeTable) ([]Sample, error) {
 
 	switch entry.Category {
 	case specfile.CatWrapper, specfile.CatConstrained:
-		return wrapperSamples(entry, tt)
+		return wrapperSamplesCtx(ctx, entry)
 
 	case specfile.CatComposite, specfile.CatGuarded:
-		return compositeSamples(entry, tt)
+		return compositeSamplesCtx(ctx, entry)
 
 	case specfile.CatAlias:
 		// Follow the alias: shengen records WrappedType on the first premise.
@@ -78,13 +105,13 @@ func GenSamples(shenType string, tt *specfile.TypeTable) ([]Sample, error) {
 	}
 }
 
-// wrapperSamples samples a wrapper/constrained type by sampling its
+// wrapperSamplesCtx samples a wrapper/constrained type by sampling its
 // underlying primitive and filtering out any samples that would violate
 // the constrained type's verified predicates. The evaluator value is just
 // the primitive (the wrapping is invisible at eval time). The Go
 // expression uses the shengen-generated constructor via a "mustXxx" helper.
-func wrapperSamples(entry *specfile.TypeEntry, tt *specfile.TypeTable) ([]Sample, error) {
-	primSamples, err := GenSamples(entry.ShenPrim, tt)
+func wrapperSamplesCtx(ctx *SampleCtx, entry *specfile.TypeEntry) ([]Sample, error) {
+	primSamples, err := GenSamplesCtx(ctx, entry.ShenPrim)
 	if err != nil {
 		return nil, err
 	}
@@ -121,6 +148,53 @@ func numberSamples() []Sample {
 		{Value: core.FloatVal(2.5), GoExpr: "2.5"},
 		{Value: core.IntVal(100), GoExpr: "100"},
 	}
+}
+
+// randomNumberSamples draws n random number samples from a seeded RNG.
+// Half the draws are integers in [-1000, 1000]; the other half are
+// floats with two decimal places in the same range. The mix is
+// deliberate: fractional draws catch int-vs-float truncation bugs.
+func randomNumberSamples(rnd *rand.Rand, n int) []Sample {
+	out := make([]Sample, 0, n)
+	for i := 0; i < n; i++ {
+		if i%2 == 0 {
+			v := rnd.Intn(2001) - 1000
+			out = append(out, Sample{
+				Value:  core.IntVal(int64(v)),
+				GoExpr: strconv.Itoa(v),
+			})
+		} else {
+			// Two-decimal-place float in [-1000, 1000].
+			cents := rnd.Intn(200001) - 100000
+			v := float64(cents) / 100.0
+			out = append(out, Sample{
+				Value:  core.FloatVal(v),
+				GoExpr: strconv.FormatFloat(v, 'f', -1, 64),
+			})
+		}
+	}
+	return out
+}
+
+// randomStringSamples draws n random lowercase alphanumeric strings.
+// Length varies between 1 and 8 so the tests exercise both short and
+// longer inputs.
+func randomStringSamples(rnd *rand.Rand, n int) []Sample {
+	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+	out := make([]Sample, 0, n)
+	for i := 0; i < n; i++ {
+		length := 1 + rnd.Intn(8)
+		b := make([]byte, length)
+		for j := range b {
+			b[j] = alphabet[rnd.Intn(len(alphabet))]
+		}
+		s := string(b)
+		out = append(out, Sample{
+			Value:  core.StringVal(s),
+			GoExpr: strconv.Quote(s),
+		})
+	}
+	return out
 }
 
 // filterByConstraints removes samples whose value fails any verified
@@ -164,10 +238,10 @@ func filterByConstraints(entry *specfile.TypeEntry, candidates []Sample) []Sampl
 	return out
 }
 
-// compositeSamples builds a small set of samples by picking the first sample
+// compositeSamplesCtx builds a small set of samples by picking the first sample
 // of each field and producing one combined sample, then adding a couple of
 // variations. This keeps cases bounded.
-func compositeSamples(entry *specfile.TypeEntry, tt *specfile.TypeTable) ([]Sample, error) {
+func compositeSamplesCtx(ctx *SampleCtx, entry *specfile.TypeEntry) ([]Sample, error) {
 	if len(entry.Fields) == 0 {
 		return nil, fmt.Errorf("composite %q has no fields", entry.ShenName)
 	}
@@ -175,7 +249,7 @@ func compositeSamples(entry *specfile.TypeEntry, tt *specfile.TypeTable) ([]Samp
 	// Sample each field.
 	fieldSamples := make([][]Sample, len(entry.Fields))
 	for i, f := range entry.Fields {
-		fs, err := GenSamples(f.ShenType, tt)
+		fs, err := GenSamplesCtx(ctx, f.ShenType)
 		if err != nil {
 			return nil, fmt.Errorf("field %s: %w", f.ShenName, err)
 		}
