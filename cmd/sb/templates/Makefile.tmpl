@@ -1,6 +1,22 @@
-.PHONY: all shengen build test shen-check audit run clean
+.PHONY: all gates context context-json shengen build test shen-check audit run clean
 
-all: shengen test build shen-check audit
+# Default target runs the full manifest-driven gate pipeline via sb.
+# Individual gate targets below are thin convenience wrappers for
+# dev workflows — the canonical source of truth for what runs is the
+# [[gates]] table in sb.toml.
+all: gates
+
+gates:
+	sb gates
+
+# Structured project context for agent loops and prompt hydration.
+context:
+	sb context --format markdown
+
+context-json:
+	sb context --format json
+
+# --- Helpers: individual gates for ad-hoc invocation ---------------
 
 shengen:
 	sb gen
@@ -16,9 +32,6 @@ shen-check:
 
 audit:
 	sb audit
-
-gates:
-	sb gates
 
 run:
 	sb gates

@@ -27,6 +27,101 @@ Verification             shengen -> test -> build -> shen tc+ -> tcb audit
 Backpressure             Gate errors fed back (to LLM, CI, or developer)
 ```
 
+## Engine / Orchestrator Architecture
+
+Shen-Backpressure is layered so that each piece answers exactly one
+question:
+
+1. **Core Engine (`sb`)** — rigid, deterministic. Knows how to run gates,
+   diff shen-derive output, emit project context. Zero opinions about
+   LLMs, prompts, or loops. One static binary, stdlib only.
+2. **Project Manifest (`sb.toml`)** — declares *what* a given project's
+   gate topology looks like via `[[gates]]`, `[[derive.specs]]`, and
+   `[engine]`. The engine reads this and does nothing more.
+3. **Agentic Surface (prompts, skills, loops)** — consumes the engine's
+   CLI output (`sb context`, gate exit codes, drift reports). Agents
+   never reach past the CLI boundary; the manifest is the contract.
+
+The rule: `sb` is the canonical source of deterministic knowledge.
+If a prompt wants to know what gates exist or why one failed, it asks
+`sb` — it does not scrape the filesystem or hard-code assumptions.
+
+## Manifest-Driven Gates
+
+Gate topology lives in `sb.toml` as an array of tables. Each `[[gates]]`
+entry names a gate, the shell command that runs it, and an optional
+parallel group so independent gates can fan out. The engine executes
+them in declaration order, respecting groups.
+
+```toml
+[engine]
+relaxed = false  # true = record failures but keep running
+
+[[gates]]
+name = "shengen"
+cmd  = "sb gen"
+
+[[gates]]
+name  = "test"
+cmd   = "go test ./..."
+group = "fast"       # "fast" group runs in parallel
+
+[[gates]]
+name  = "build"
+cmd   = "go build ./..."
+group = "fast"
+
+[[gates]]
+name = "shen-check"
+cmd  = "sb check"
+
+[[gates]]
+name = "audit"
+cmd  = "sb audit"
+```
+
+Projects that still use the legacy `[commands]` block keep working
+unchanged — the parser falls back to the old fixed five-gate pipeline
+when no `[[gates]]` entries are present. Migration is opt-in.
+
+## `sb context`
+
+`sb context` emits structured project context intended for agent
+loops, prompt hydration, and CI diagnostics.
+
+```bash
+sb context --format json       # machine-readable
+sb context --format markdown   # ready for prompt injection
+```
+
+JSON output shape (abridged):
+
+```json
+{
+  "lang": "go",
+  "pkg": "shenguard",
+  "spec": "specs/core.shen",
+  "gates": [
+    { "name": "shengen", "cmd": "sb gen", "group": "" },
+    { "name": "test",    "cmd": "go test ./...", "group": "fast" }
+  ],
+  "derive_specs": [ ... ]
+}
+```
+
+Loops should prefer `sb context --format markdown` over bespoke
+templating — it stays consistent with whatever the manifest declares.
+
+## Migration Guide
+
+- **Old model:** fixed five-gate pipeline hard-coded via `[commands]`.
+- **New model:** `[[gates]]` array of tables in `sb.toml` defines a
+  custom gate topology with optional parallel groups.
+- `[gates] relaxed = true` → `[engine] relaxed = true`.
+- Existing projects work unchanged; migration is opt-in. When you add
+  a `[[gates]]` block, the engine uses it and ignores the legacy
+  `[commands]` section.
+
 ## Install
 
 ### Option A: SKM (recommended)

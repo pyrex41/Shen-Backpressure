@@ -29,6 +29,7 @@ func cmdDerive(args []string) {
 	fs := flag.NewFlagSet("derive", flag.ExitOnError)
 	regen := fs.Bool("regen", false, "write regenerated test files in place instead of diffing")
 	skipTest := fs.Bool("skip-test", false, "skip `go test` on impl packages after the drift check")
+	verbose := fs.Bool("verbose", false, "print each shen-derive and test command before running it")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `sb derive — Spec-equivalence verification gate
 
@@ -147,6 +148,9 @@ Flags:
 
 		if *regen {
 			runArgs = append(runArgs, "--out", absOut)
+			if *verbose {
+				printDeriveCommand(runDir, runCmd, runArgs)
+			}
 			if err := runInDir(runDir, runCmd, runArgs...); err != nil {
 				fmt.Fprintf(os.Stderr, "sb derive: regen %s: %v\n", spec.Func, err)
 				os.Exit(1)
@@ -166,6 +170,9 @@ Flags:
 		defer os.Remove(tmpPath)
 
 		runArgs = append(runArgs, "--out", tmpPath)
+		if *verbose {
+			printDeriveCommand(runDir, runCmd, runArgs)
+		}
 		if err := runInDir(runDir, runCmd, runArgs...); err != nil {
 			fmt.Fprintf(os.Stderr, "sb derive: regen %s: %v\n", spec.Func, err)
 			os.Exit(1)
@@ -207,6 +214,9 @@ Flags:
 	}
 	sort.Strings(goPkgs)
 	for _, p := range goPkgs {
+		if *verbose {
+			printDeriveCommand("", "go", []string{"test", p})
+		}
 		if err := runInDir("", "go", "test", p); err != nil {
 			fmt.Fprintf(os.Stderr, "sb derive: go test %s failed: %v\n", p, err)
 			os.Exit(1)
@@ -215,10 +225,34 @@ Flags:
 	// TS specs → `node --import tsx --test <outfile>` per generated file.
 	sort.Strings(tsTestFiles)
 	for _, f := range tsTestFiles {
-		if err := runInDir("", "node", "--import", "tsx", "--test", f); err != nil {
+		tsArgs := []string{"--import", "tsx", "--test", f}
+		if *verbose {
+			printDeriveCommand("", "node", tsArgs)
+		}
+		if err := runInDir("", "node", tsArgs...); err != nil {
 			fmt.Fprintf(os.Stderr, "sb derive: node --test %s failed: %v\n", f, err)
 			os.Exit(1)
 		}
+	}
+}
+
+// printDeriveCommand prints a shell-pastable representation of the
+// command sb derive is about to run, including the working directory
+// when it is non-empty.
+func printDeriveCommand(dir, name string, args []string) {
+	if dir != "" {
+		fmt.Fprintf(os.Stderr, "+ (cd %s &&", dir)
+	} else {
+		fmt.Fprintf(os.Stderr, "+")
+	}
+	fmt.Fprintf(os.Stderr, " %s", name)
+	for _, a := range args {
+		fmt.Fprintf(os.Stderr, " %s", a)
+	}
+	if dir != "" {
+		fmt.Fprintln(os.Stderr, ")")
+	} else {
+		fmt.Fprintln(os.Stderr)
 	}
 }
 

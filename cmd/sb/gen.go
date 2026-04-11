@@ -10,6 +10,8 @@ import (
 
 func cmdGen(args []string) {
 	fs := flag.NewFlagSet("gen", flag.ExitOnError)
+	verbose := fs.Bool("verbose", false, "print the shengen command before running it")
+	dryRun := fs.Bool("dry-run", false, "print the shengen command without executing it")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `sb gen — Generate guard types from Shen specs
 
@@ -49,12 +51,12 @@ Flags:
 
 	switch cfg.Lang {
 	case "go":
-		if err := runShengenGo(spec, cfg.Pkg, cfg.Output, cfg.DBWrap); err != nil {
+		if err := runShengenGo(spec, cfg.Pkg, cfg.Output, cfg.DBWrap, *verbose, *dryRun); err != nil {
 			fmt.Fprintf(os.Stderr, "sb gen: %v\n", err)
 			os.Exit(1)
 		}
 	case "ts":
-		if err := runShengenTS(spec, cfg.Output); err != nil {
+		if err := runShengenTS(spec, cfg.Output, *verbose, *dryRun); err != nil {
 			fmt.Fprintf(os.Stderr, "sb gen: %v\n", err)
 			os.Exit(1)
 		}
@@ -64,7 +66,7 @@ Flags:
 	}
 }
 
-func runShengenGo(spec, pkg, output, dbWrappers string) error {
+func runShengenGo(spec, pkg, output, dbWrappers string, verbose, dryRun bool) error {
 	shengen, err := FindShengen()
 	if err != nil {
 		return err
@@ -74,6 +76,13 @@ func runShengenGo(spec, pkg, output, dbWrappers string) error {
 	args := []string{"--spec", spec, "--pkg", pkg, "--out", output}
 	if dbWrappers != "" {
 		args = append(args, "--db-wrappers", dbWrappers)
+	}
+
+	if verbose || dryRun {
+		printCommand(shengen, args)
+	}
+	if dryRun {
+		return nil
 	}
 
 	cmd := exec.Command(shengen, args...)
@@ -86,13 +95,21 @@ func runShengenGo(spec, pkg, output, dbWrappers string) error {
 	return nil
 }
 
-func runShengenTS(spec, output string) error {
+func runShengenTS(spec, output string, verbose, dryRun bool) error {
 	tsPath, err := FindShengenTS()
 	if err != nil {
 		return err
 	}
 
-	cmd := exec.Command("npx", "tsx", tsPath, spec, "--out", output)
+	args := []string{"tsx", tsPath, spec, "--out", output}
+	if verbose || dryRun {
+		printCommand("npx", args)
+	}
+	if dryRun {
+		return nil
+	}
+
+	cmd := exec.Command("npx", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -101,4 +118,14 @@ func runShengenTS(spec, output string) error {
 
 	fmt.Fprintf(os.Stderr, "Generated %s from %s\n", output, spec)
 	return nil
+}
+
+// printCommand writes the exact command invocation to stderr so users
+// can copy-paste it, reproducing the environment sb would use.
+func printCommand(name string, args []string) {
+	fmt.Fprintf(os.Stderr, "+ %s", name)
+	for _, a := range args {
+		fmt.Fprintf(os.Stderr, " %s", a)
+	}
+	fmt.Fprintln(os.Stderr)
 }
