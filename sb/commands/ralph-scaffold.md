@@ -1,11 +1,11 @@
 ---
 name: ralph-scaffold
-description: All-in-one setup for a Shen-backpressure project with Ralph loop. Combines /sb:init (specs, shengen, guard types) + /sb:loop (orchestrator, prompt, plan) into a single flow. Goes from zero to running five-gate verification.
+description: All-in-one setup for a Shen-backpressure project with Ralph loop. Combines /sb:init (specs, shengen, guard types, optional shen-derive config) + /sb:loop (orchestrator, prompt, plan) into a single flow. Goes from zero to running the core five gates, with optional spec-equivalence verification when configured.
 ---
 
 # Scaffold — Full Setup in One Command
 
-Combines `/sb:init` + `/sb:loop` into one flow. Goes from "I have a project" to "five-gate formal verification is running with a Ralph loop." If you don't want Ralph, use `/sb:init` instead.
+Combines `/sb:init` + `/sb:loop` into one flow. Goes from "I have a project" to "formal verification is running with a Ralph loop." If you don't want Ralph, use `/sb:init` instead.
 
 You scaffold and verify everything. You do NOT run the loop or implement domain code.
 
@@ -27,6 +27,7 @@ Ask the user:
 3. **LLM harness**: `claude -p` (default), `cursor-agent -p`, `codex -p`, or custom
 4. **Build/test commands**: What builds and tests the project
 5. **Plan items**: What tasks should the loop work through
+6. **Optional derive targets**: Any pure `(define ...)` functions that should become `shen-derive` drift gates
 
 ## Step 2: Create Directories
 
@@ -74,7 +75,9 @@ plan = "plans/fix_plan.md"
 
 **`bin/shenguard-audit.sh`** — Gate 5: TCB audit. Re-runs shengen, diffs output, rejects unexpected files in shenguard package.
 
-**`Makefile`** (optional) — Targets: all, shengen, build, test, shen-check, audit, run, clean.
+**`sb.toml [derive]`** (optional) — If the project has pure `(define ...)` functions to pin against handwritten Go implementations, add `[[derive.specs]]` entries so `sb derive` and `sb gates` can run the spec-equivalence gate.
+
+**`Makefile`** (optional) — Targets: all, shengen, build, test, shen-check, audit, derive, run, clean.
 
 **Project init** (if needed) — `go mod init`, `npm init`, `cargo init`, etc.
 
@@ -86,13 +89,20 @@ bin/shengen
 plans/backpressure.log
 ```
 
-## Step 8: Verify All Five Gates
+## Step 8: Verify All Configured Gates
 
 ```bash
 sb gates
 ```
 
-All gates must pass. Fix any failures before declaring setup complete.
+If derive coverage was configured, initialize or refresh the committed generated tests with:
+
+```bash
+sb derive --regen
+sb derive
+```
+
+All configured gates must pass. Fix any failures before declaring setup complete.
 
 If Gate 4 (shen-check) fails with a timeout or crash, verify shen-sbcl is installed: `shen-sbcl -q -e "(+ 1 1)"`
 
@@ -100,8 +110,9 @@ If Gate 4 (shen-check) fails with a timeout or crash, verify shen-sbcl is instal
 
 Tell the user:
 - What was created and where
-- The five gates and what each catches
+- The core five gates and what each catches
+- Whether the optional `shen-derive` gate was configured
 - The proof chain and how to use guard types
 - How to run: `sb loop` or `sb loop --dry-run` to get the bash script
-- How to modify: specs for types, prompt for instructions, plan for tasks
+- How to modify: specs for types, prompt for instructions, plan for tasks, and `[[derive.specs]]` for spec-equivalence coverage
 - Configuration: `sb.toml [loop]` or env vars `RALPH_HARNESS`, `RALPH_MAX_ITER`, `RALPH_HARNESS_TIMEOUT`

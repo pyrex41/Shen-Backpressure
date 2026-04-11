@@ -1,6 +1,6 @@
 ---
 name: shen-backpressure
-description: Formal backpressure for AI coding through Shen sequent-calculus types and a codegen bridge. Activates when the user mentions formal verification, Shen types, guard types, backpressure, or invariant enforcement. Works with any workflow — Ralph loops, CI, manual dev, or custom orchestrators.
+description: Formal backpressure for AI coding through Shen sequent-calculus types, shengen guard generation, and optional shen-derive spec-equivalence checks. Activates when the user mentions formal verification, Shen types, guard types, backpressure, invariant enforcement, or spec-vs-implementation verification. Works with any workflow — Ralph loops, CI, manual dev, or custom orchestrators.
 user-invocable: false
 ---
 
@@ -34,9 +34,19 @@ This means if a function signature requires `TenantAccess`, the caller **must** 
 
 - `/sb:help` — Show all commands and when to use each one.
 - `/sb:init` — Add Shen backpressure to any project. Specs, guard types, gates. No assumptions about workflow.
-- `/sb:loop` — Configure and launch a Ralph loop (headless LLM + five-gate verification). Requires init first.
+- `/sb:loop` — Configure and launch a Ralph loop (headless LLM + the core five gates, plus optional derive verification). Requires init first.
 - `/sb:ralph-scaffold` — All-in-one: init + Ralph loop in a single flow.
+- `/sb:derive` — Configure or run the optional shen-derive spec-equivalence gate for `(define ...)` functions.
 - `/sb:create-shengen` — Build shengen for a new target language.
+
+## Tooling Conventions
+
+When carrying out these commands, prefer the current toolset explicitly:
+
+- Use `ReadFile` for file reads, `rg` for content search, `Glob` for path discovery, and `Shell` for command execution.
+- Use `ApplyPatch` for focused file edits and use scripts only for clearly mechanical or generated updates.
+- Use `multi_tool_use.parallel` when independent reads or searches can run together.
+- Prefer `sb gates`, `sb derive`, and the repo's `bin/` scripts over ad hoc verification commands once the project is configured.
 
 ## CLI Tool
 
@@ -44,7 +54,8 @@ The `sb` CLI is a thin launcher — the intelligence lives in these skills:
 ```
 sb init      # Scaffold project (specs, scripts, skills)
 sb gen       # Run shengen to generate guard types
-sb gates     # Run all five verification gates
+sb gates     # Run the core five gates, plus shen-derive when configured
+sb derive    # Run spec-equivalence drift checks for configured (define ...) specs
 sb loop      # Launch Ralph loop (headless LLM + gates)
 ```
 
@@ -63,8 +74,13 @@ Application code         Must use constructors — compiler enforces this
 Verification             shengen -> test -> build -> shen tc+ -> tcb audit
 ```
 
+When the project configures any `[[derive.specs]]` entries in `sb.toml`, `sb gates` automatically appends an optional `shen-derive` verification gate after the core five. That gate regenerates a committed spec-derived test, fails on drift, and then runs `go test` on the referenced implementation packages.
+
 ### Gate 5: TCB Audit (`bin/shenguard-audit.sh`)
 Re-runs shengen, diffs output against committed file, and rejects unexpected files in the shenguard package. Ensures the forgery boundary contains only generated code.
+
+### Optional Gate 6: `shen-derive` (`sb derive`)
+When `sb.toml` includes `[[derive.specs]]`, `sb derive` runs `shen-derive verify` for each entry, diffs the regenerated table-driven test against the committed file, and fails on drift. `sb derive --regen` rewrites the committed output when the drift is intentional.
 
 The gates can run via `sb gates`, in a Ralph loop (`sb loop`), a CI pipeline, or manually — the verification is the same regardless of what triggers it. All gate commands are configurable via `sb.toml` or shell scripts in `bin/`.
 
