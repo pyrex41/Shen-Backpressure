@@ -24,6 +24,7 @@ func cmdInit(args []string) {
 	withConfig := fset.Bool("config", false, "generate sb.toml config file")
 	withMakefile := fset.Bool("makefile", false, "generate Makefile with gate targets")
 	noSkills := fset.Bool("no-skills", false, "skip installing Claude Code skills and commands")
+	templateDir := fset.String("template-dir", "", "directory with local template overrides (files here shadow embedded templates by basename)")
 	fset.Usage = func() {
 		fmt.Fprintf(os.Stderr, `sb init — Scaffold a new Shen-backpressure project
 
@@ -81,21 +82,21 @@ Flags:
 	}
 
 	// Write starter spec
-	writeTemplate("specs/core.shen", "templates/core.shen.tmpl", nil)
+	writeTemplate("specs/core.shen", "templates/core.shen.tmpl", nil, *templateDir)
 
 	// Write shell scripts
-	writeEmbedded("bin/shen-check.sh", "templates/shen-check.sh", 0755)
-	writeEmbedded("bin/shengen-codegen.sh", "templates/shengen-codegen.sh", 0755)
-	writeEmbedded("bin/shenguard-audit.sh", "templates/shenguard-audit.sh", 0755)
+	writeEmbedded("bin/shen-check.sh", "templates/shen-check.sh", 0755, *templateDir)
+	writeEmbedded("bin/shengen-codegen.sh", "templates/shengen-codegen.sh", 0755, *templateDir)
+	writeEmbedded("bin/shenguard-audit.sh", "templates/shenguard-audit.sh", 0755, *templateDir)
 
 	// Optional: sb.toml
 	if *withConfig {
-		writeTemplate("sb.toml", "templates/sb.toml.tmpl", cfg)
+		writeTemplate("sb.toml", "templates/sb.toml.tmpl", cfg, *templateDir)
 	}
 
 	// Optional: Makefile
 	if *withMakefile {
-		writeTemplate("Makefile", "templates/Makefile.tmpl", cfg)
+		writeTemplate("Makefile", "templates/Makefile.tmpl", cfg, *templateDir)
 	}
 
 	// Install skills and commands
@@ -181,13 +182,31 @@ func installSkills() {
 	}
 }
 
-func writeTemplate(dest, tmplPath string, data any) {
+// loadTemplateBytes returns the template content, preferring a local
+// override file (overrideDir/<basename>) before falling back to the
+// embedded FS. The returned source string is used for error messages
+// and indicates where the content came from.
+func loadTemplateBytes(tmplPath, overrideDir string) ([]byte, string, error) {
+	if overrideDir != "" {
+		local := filepath.Join(overrideDir, filepath.Base(tmplPath))
+		if b, err := os.ReadFile(local); err == nil {
+			return b, local, nil
+		}
+	}
+	b, err := templates.ReadFile(tmplPath)
+	if err != nil {
+		return nil, tmplPath, err
+	}
+	return b, tmplPath, nil
+}
+
+func writeTemplate(dest, tmplPath string, data any, overrideDir string) {
 	if _, err := os.Stat(dest); err == nil {
 		fmt.Fprintf(os.Stderr, "  skipped %s (already exists)\n", dest)
 		return
 	}
 
-	content, err := templates.ReadFile(tmplPath)
+	content, _, err := loadTemplateBytes(tmplPath, overrideDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sb init: reading template %s: %v\n", tmplPath, err)
 		os.Exit(1)
@@ -219,13 +238,13 @@ func writeTemplate(dest, tmplPath string, data any) {
 	fmt.Fprintf(os.Stderr, "  wrote %s\n", dest)
 }
 
-func writeEmbedded(dest, tmplPath string, perm os.FileMode) {
+func writeEmbedded(dest, tmplPath string, perm os.FileMode, overrideDir string) {
 	if _, err := os.Stat(dest); err == nil {
 		fmt.Fprintf(os.Stderr, "  skipped %s (already exists)\n", dest)
 		return
 	}
 
-	content, err := templates.ReadFile(tmplPath)
+	content, _, err := loadTemplateBytes(tmplPath, overrideDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sb init: reading %s: %v\n", tmplPath, err)
 		os.Exit(1)
