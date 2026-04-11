@@ -77,8 +77,15 @@ func runLoop(cfg *Config) {
 		os.MkdirAll("plans", 0755)
 		os.WriteFile(backpressureLog, []byte(fmt.Sprintf("--- Iteration %d ---\n%s\n", i, gateOutput)), 0644)
 
-		// Build the prompt with backpressure errors injected
-		prompt := buildHarnessPrompt(cfg, gateOutput)
+		// Build live project context (non-fatal on error)
+		ctx, ctxErr := BuildContext(cfg)
+		if ctxErr != nil {
+			fmt.Fprintf(os.Stderr, "sb loop: context generation failed: %v (continuing without live context)\n", ctxErr)
+			ctx = nil
+		}
+
+		// Build the prompt with live context and backpressure errors injected
+		prompt := buildHarnessPrompt(cfg, ctx, gateOutput)
 
 		// Call the harness
 		fmt.Fprintf(os.Stderr, "\nCalling harness: %s\n", cfg.Harness)
@@ -110,7 +117,7 @@ func runGatesForLoop(cfg *Config) (string, bool) {
 	return output.String(), allPassed
 }
 
-func buildHarnessPrompt(cfg *Config, gateErrors string) string {
+func buildHarnessPrompt(cfg *Config, ctx *ProjectContext, gateErrors string) string {
 	// Read the main prompt file
 	promptContent, err := os.ReadFile(cfg.Prompt)
 	if err != nil {
@@ -122,6 +129,11 @@ func buildHarnessPrompt(cfg *Config, gateErrors string) string {
 
 	var prompt strings.Builder
 	prompt.Write(promptContent)
+
+	if ctx != nil {
+		prompt.WriteString("\n\n## Live Project Context\n\n")
+		prompt.WriteString(ctx.RenderMarkdown())
+	}
 
 	if len(planContent) > 0 {
 		prompt.WriteString("\n\n## Current Plan\n\n")
@@ -180,8 +192,12 @@ func buildLoopScript(cfg *Config) string {
 		"  fi\n\n"+
 		"  # Extract failures for backpressure injection\n"+
 		"  grep -E \"^FAIL|^---\" /tmp/ralph-gates.log > \"$BACKPRESSURE_LOG\" 2>/dev/null || true\n\n"+
-		"  # Build prompt with backpressure errors\n"+
+		"  # Capture live project context (non-fatal if unavailable)\n"+
+		"  LIVE_CONTEXT=\"$(sb context --format markdown 2>/dev/null || echo '(context unavailable)')\"\n\n"+
+		"  # Build prompt with live context and backpressure errors\n"+
 		"  FULL_PROMPT=\"$(cat \"$PROMPT\")\n\n"+
+		"## Live Project Context\n\n"+
+		"$LIVE_CONTEXT\n\n"+
 		"## Current Plan\n\n"+
 		"$(cat \"$PLAN\" 2>/dev/null || echo '(no plan)')\n\n"+
 		"## Backpressure Errors (fix these FIRST)\n\n"+
