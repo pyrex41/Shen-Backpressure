@@ -5,16 +5,17 @@ description: Show all Shen Backpressure commands, what they do, and when to use 
 
 # Shen Backpressure — Command Reference
 
-You have four commands and one skill for adding formal verification to AI coding workflows.
+You have five commands and one skill for adding formal verification to AI coding workflows.
 
 ## Quick Start
 
 **New project?** Start here:
 - `/sb:init` — if you want backpressure without a Ralph loop (CI, manual dev, any workflow)
-- `/sb:ralph-scaffold` — if you want the full Ralph loop (autonomous coding with five-gate verification)
+- `/sb:ralph-scaffold` — if you want the full Ralph loop (autonomous coding with the core five gates, plus optional derive coverage)
 
 **Already set up?** Use these:
 - `/sb:loop` — configure and launch a Ralph loop on an existing project
+- `/sb:derive` — run or set up the optional spec-equivalence gate for `(define ...)` functions
 - `/sb:create-shengen` — build shengen for a new language (Rust, Python, Java, etc.)
 
 ## Commands
@@ -27,7 +28,7 @@ You have four commands and one skill for adding formal verification to AI coding
 3. Shows you the specs for confirmation before writing anything
 4. Installs shen-sbcl (Shen on SBCL) for type checking
 5. Generates guard types (Go or TypeScript) with opaque constructors
-6. Sets up shell scripts for all five verification gates
+6. Sets up shell scripts for the core five verification gates
 7. Installs Claude Code skills for ongoing LLM guidance
 
 **Output:** `specs/core.shen`, generated guard types, `bin/` scripts, skills.
@@ -44,7 +45,7 @@ You have four commands and one skill for adding formal verification to AI coding
 3. Generates the prompt, plan, and Makefile
 4. Launches a headless loop: gates → inject errors → call harness → repeat
 
-**The five gates (in order):**
+**The core five gates (in order):**
 1. `shengen` — regenerate guard types from specs (catches spec drift)
 2. `test` — run tests (catches logic errors)
 3. `build` — compile against regenerated types (catches type mismatches)
@@ -57,11 +58,28 @@ You have four commands and one skill for adding formal verification to AI coding
 
 ---
 
+### `/sb:derive` — Configure or Run the Spec-Equivalence Gate
+**When:** You have Shen `(define ...)` functions that should act as an oracle for handwritten Go implementations.
+**What it does:**
+1. Uses `[[derive.specs]]` entries in `sb.toml` to map spec functions to implementation packages
+2. Runs `shen-derive verify` via `go run` in the `shen-derive` module
+3. Diffs the regenerated table-driven test against the committed `out_file`
+4. Fails on drift, or rewrites the committed file with `sb derive --regen`
+5. Runs `go test` on each referenced implementation package after drift checks pass
+
+**Key flags:**
+- `sb derive --regen` — rewrite committed generated tests in place
+- `sb derive --skip-test` — only perform drift checking/regeneration
+
+**How it integrates:** When `sb.toml` has any `[[derive.specs]]` entries, `sb gates` automatically appends `shen-derive` as an optional sixth gate after the core five.
+
+---
+
 ### `/sb:ralph-scaffold` — Full Setup in One Shot
 **When:** Starting from scratch and want Ralph + backpressure together.
 **What it does:** Combines `/sb:init` + `/sb:loop` into a single flow.
 **Smart detection:** If `/sb:init` was already run, skips to the Ralph loop setup automatically.
-**Goes from:** "I have a project" → "five-gate verification is running autonomously"
+**Goes from:** "I have a project" → "formal verification is running autonomously"
 **Does NOT:** Run the loop or implement domain code. It scaffolds and verifies.
 
 ---
@@ -83,11 +101,12 @@ The `sb` CLI is a thin launcher — the intelligence lives in these skills. The 
 ```
 sb init      # Scaffold project (specs, scripts, skills)
 sb gen       # Run shengen to generate guard types
-sb gates     # Run all five verification gates
+sb gates     # Run the core five gates, plus shen-derive when configured
+sb derive    # Run shen-derive drift checks for configured specs
 sb loop      # Launch Ralph loop (headless LLM + gates)
 ```
 
-All gate commands are configurable via `sb.toml` or shell scripts in `bin/`.
+All gate commands are configurable via `sb.toml` or shell scripts in `bin/`. If `[[derive.specs]]` is present, `sb gates` automatically runs a sixth `shen-derive` gate after the core five.
 
 ## Shen Runtime
 

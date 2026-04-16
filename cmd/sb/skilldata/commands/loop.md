@@ -1,11 +1,11 @@
 ---
 name: loop
-description: Configure and launch a Ralph loop — a headless LLM harness in a bash loop with five-gate Shen backpressure. Requires /sb:init first.
+description: Configure and launch a Ralph loop — a headless LLM harness in a bash loop with Shen backpressure, using the core five gates plus optional shen-derive verification when configured. Requires /sb:init first.
 ---
 
 # Ralph Loop — Configure and Launch
 
-You configure and launch a Ralph loop — a headless LLM harness that runs in a loop, validates through five gates, and injects failures back as backpressure. This is ONE way to use Shen backpressure. For CI or manual workflows, see `/sb:init`.
+You configure and launch a Ralph loop — a headless LLM harness that runs in a loop, validates through the core five gates, optionally runs `shen-derive`, and injects failures back as backpressure. This is ONE way to use Shen backpressure. For CI or manual workflows, see `/sb:init`.
 
 **Prerequisite**: Run `/sb:init` first to set up specs, shengen, and guard types.
 **CLI shortcut**: Once configured, `sb loop` runs the loop directly. `sb loop --dry-run` prints the bash script.
@@ -19,6 +19,7 @@ Ralph (outer loop)
   └─> Gate 3: build (compile against regenerated types)
   └─> Gate 4: shen tc+ (verify spec consistency)
   └─> Gate 5: tcb audit (diff generated code, reject unexpected files)
+  └─> Gate 6: shen-derive (optional; spec-equivalence drift gate if configured)
        ├─> ALL PASS → next iteration (or done)
        └─> FAIL → inject errors into prompt → call harness again
 ```
@@ -52,12 +53,13 @@ Ask the user:
 
 Create these files:
 
-**Ralph orchestrator** (e.g., `cmd/ralph/main.go` for Go, `ralph.ts` for TS, or a shell script) — runs five gates in order:
+**Ralph orchestrator** (e.g., `cmd/ralph/main.go` for Go, `ralph.ts` for TS, or a shell script) — runs the core five gates in order, then `sb derive` when configured:
 1. shengen (regenerate guard types)
 2. test
 3. build
 4. shen-check
 5. tcb-audit (diff generated code, reject unexpected files)
+6. `sb derive` if `sb.toml` contains any `[[derive.specs]]` entries
 
 Set the harness command from Step 2.
 - `RALPH_MAX_ITER` env var (default 10)
@@ -74,15 +76,15 @@ Set the harness command from Step 2.
 
 **`plans/fix_plan.md`** — Task plan with `- [ ]` items from Step 2.
 
-**`Makefile`** — Targets: all, shengen, build, test, shen-check, run, clean.
+**`Makefile`** — Targets: all, shengen, build, test, shen-check, audit, derive, run, clean.
 
 ## Step 4: Verify Clean Starting State
 
 ```bash
-make all
+sb gates
 ```
 
-All five gates must pass. Fix any failures before launching.
+All configured gates must pass. Fix any failures before launching.
 
 ## Step 5: Launch
 
@@ -98,6 +100,7 @@ make run
 Options:
 - `sb loop --dry-run` — print the bash script without running
 - `sb gates --relaxed` — test and build in parallel
+- `sb derive --regen` — if the optional derive gate is configured and the committed generated tests need to be refreshed intentionally
 - `RALPH_HARNESS="<cmd>" sb loop` — override harness
 - `RALPH_MAX_ITER=20 sb loop` — max iterations (default 10)
 - `RALPH_HARNESS_TIMEOUT=15m sb loop` — increase harness timeout
@@ -105,3 +108,18 @@ Options:
 Configure via `sb.toml [loop]` section for persistent settings.
 
 The loop runs autonomously. Ctrl+C to stop.
+
+## Live Context Injection
+
+Each iteration, `sb loop` calls `BuildContext` and injects the rendered markdown into the harness prompt under a `## Live Project Context` heading, between the static prompt and the current plan. This replaces the old model where the agent had to discover guard types from files or be told about them in a static prompt.
+
+The prompt assembled per iteration looks like:
+
+1. Static prompt (`prompts/main_prompt.md` — discipline rules, anti-patterns)
+2. `## Live Project Context` — fresh output of `sb context --format markdown`
+3. `## Current Plan` — `plans/fix_plan.md`
+4. `## Backpressure Errors (fix these FIRST)` — last gate failure, if any
+
+The agent consuming the prompt should trust the `## Live Project Context` block as the source of truth for project-specific facts (guard type inventory, constructor signatures, proof chain, configured gates, derive coverage). Context generation failure is non-fatal — the loop logs a warning and continues without the live block. No user action is needed; injection happens automatically per iteration.
+
+`sb loop --dry-run` generates a bash script that shells out to `sb context --format markdown` inside the loop body so the generated script mirrors the in-process behavior.

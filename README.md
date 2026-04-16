@@ -228,30 +228,37 @@ The LLM cannot bypass this — `Amount{v: 50}` won't compile (unexported `v`), `
 
 ## Examples
 
-- **[`examples/payment/`](examples/payment/)** — Payment processor with balance invariants
-- **[`examples/email-crud/`](examples/email-crud/)** — Personalized email campaigns with demographic-based copy
-- **[`examples/multi-tenant-api/`](examples/multi-tenant-api/)** — Cross-tenant access prevention via proof chains
-- **[`examples/dosage-calculator/`](examples/dosage-calculator/)** — Clinical dosage with recursive drug interaction checks
-- **[`examples/shen-web-tools/`](examples/shen-web-tools/)** — Research pipeline with grounded-source enforcement (SBCL/Shen)
-- **[`examples/order-state-machine/`](examples/order-state-machine/)** — State machine with deadlock freedom as a type property
-- **[`examples/llm-hallucination-guard/`](examples/llm-hallucination-guard/)** — Closed enumerations rejecting LLM-hallucinated output
-- **[`examples/pipeline-state-machine/`](examples/pipeline-state-machine/)** — Stage-by-stage pipeline where skipping a stage is a compile error
-- **[`examples/category-showcase/`](examples/category-showcase/)** — All six shengen categories in one spec
-- **[`examples/polyglot-comparison/`](examples/polyglot-comparison/)** — Same spec, five language outputs side by side
-- **[`examples/sum-type-showcase/`](examples/sum-type-showcase/)** — Sum types with closed variant enforcement (Go + TypeScript)
-- **[`examples/relational-constraints/`](examples/relational-constraints/)** — Cross-type field equality invariants
+Six focused examples carry the full story. See [`examples/.archive/README.md`](examples/.archive/README.md) for scoped-out demos.
 
-Polyglot framework starters: [`shen-hono/`](examples/shen-hono/), [`shen-fastapi/`](examples/shen-fastapi/), [`shen-rust-axum/`](examples/shen-rust-axum/), [`shen-go-api/`](examples/shen-go-api/), [`shen-go-advanced/`](examples/shen-go-advanced/), [`shen-prolog-ui/`](examples/shen-prolog-ui/).
+- **[`examples/payment/`](examples/payment/)** — Flagship demo. Payment processor with balance invariants, `shen-derive` gate wired to `processable_spec_test.go`, and reference outputs in Go, TypeScript, Rust, and Python (both standard and hardened modes).
+- **[`examples/multi-tenant-api/`](examples/multi-tenant-api/)** — Live Go HTTP service with a JWT → AuthenticatedUser → TenantAccess → ResourceAccess proof chain. `demo.md` is a curl transcript with real tokens and `go test -v` output.
+- **[`examples/shen-web-tools/`](examples/shen-web-tools/)** — Polyglot research pipeline: Shen/SBCL backend + Arrow.js frontend. Three specs (core, medicare, shen-derive smoke). TS derive gate wired via `sb.toml`.
+- **[`examples/order-state-machine/`](examples/order-state-machine/)** — State machine where invalid transitions are compile errors.
+- **[`examples/shenguard-bolt-on/`](examples/shenguard-bolt-on/)** — Infrastructure story: bolt `shenguard` onto existing Argo + Crossplane to add deductive checks without replacing the control plane.
+- **[`examples/category-showcase/`](examples/category-showcase/)** — Teaching aid: all six shengen categories (wrapper, constrained, composite, guarded, proof-chain, sum type) in a single spec.
+
+### Experimental / WIP
+
+- **Python and Rust shengen** (`cmd/shengen-py/`, `cmd/shengen-rs/`) — reference implementations produced via `/sb:create-shengen`. Not dispatched by `sb gen`; not continuously validated. See each directory's README for status and graduation path. Existing outputs under `examples/payment/reference/py*/` and `examples/payment/reference/rs*/` are the reference artifacts.
+- **Polyglot framework starters** (`shen-hono`, `shen-fastapi`, `shen-rust-axum`, `shen-go-api`, `shen-go-advanced`) — archived under `examples/.archive/` pending Wave-4 framework buildout. Prompts and specs preserved; no end-to-end demos yet.
 
 ## Project Structure
 
 ```
-cmd/shengen/             Codegen tool source (stdlib only)
+cmd/sb/                  Engine CLI (gen, gates, derive, context, loop, init)
+cmd/shengen/             Go codegen (supported)
+cmd/shengen-ts/          TypeScript codegen (supported)
+cmd/shengen-py/          Python codegen (experimental — see cmd/shengen-py/README.md)
+cmd/shengen-rs/          Rust codegen (experimental — see cmd/shengen-rs/README.md)
+cmd/shen-derive-ts/      TS spec-equivalence testing (shen-derive, TS variant)
+shen-derive/             Go shen-derive module
 sb/                      SKM bundle
-  commands/              /sb:ralph-scaffold, /sb:setup, /sb:init, /sb:loop
+  commands/              /sb:ralph-scaffold, /sb:init, /sb:loop, /sb:context, /sb:create-shengen
   skills/                Auto-activated skill description
   AGENT_PROMPT.md        Reference manual for inner LLM harness
-examples/                Working examples and demo projects
+examples/                Six focused examples (see section above)
+examples/.archive/       Scoped-out examples retained for reference
+thoughts/                Research notes, reviews, plans (check-in on demo readiness, etc.)
 ```
 
 ## Supported Harnesses
