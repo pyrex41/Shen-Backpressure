@@ -1,6 +1,6 @@
 ---
 name: shen-backpressure
-description: Formal backpressure for AI coding through Shen sequent-calculus types and a codegen bridge. Activates when the user mentions formal verification, Shen types, guard types, backpressure, or invariant enforcement. Works with any workflow — Ralph loops, CI, manual dev, or custom orchestrators.
+description: Formal backpressure for AI coding through Shen sequent-calculus types, shengen guard generation, and optional shen-derive spec-equivalence checks. Activates when the user mentions formal verification, Shen types, guard types, backpressure, invariant enforcement, or spec-vs-implementation verification. Works with any workflow — Ralph loops, CI, manual dev, or custom orchestrators.
 user-invocable: false
 ---
 
@@ -34,9 +34,19 @@ This means if a function signature requires `TenantAccess`, the caller **must** 
 
 - `/sb:help` — Show all commands and when to use each one.
 - `/sb:init` — Add Shen backpressure to any project. Specs, guard types, gates. No assumptions about workflow.
-- `/sb:loop` — Configure and launch a Ralph loop (headless LLM + five-gate verification). Requires init first.
+- `/sb:loop` — Configure and launch a Ralph loop (headless LLM + the core five gates, plus optional derive verification). Requires init first.
 - `/sb:ralph-scaffold` — All-in-one: init + Ralph loop in a single flow.
+- `/sb:derive` — Configure or run the optional shen-derive spec-equivalence gate for `(define ...)` functions.
 - `/sb:create-shengen` — Build shengen for a new target language.
+
+## Tooling Conventions
+
+When carrying out these commands, prefer the current toolset explicitly:
+
+- Use `ReadFile` for file reads, `rg` for content search, `Glob` for path discovery, and `Shell` for command execution.
+- Use `ApplyPatch` for focused file edits and use scripts only for clearly mechanical or generated updates.
+- Use `multi_tool_use.parallel` when independent reads or searches can run together.
+- Prefer `sb gates`, `sb derive`, and the repo's `bin/` scripts over ad hoc verification commands once the project is configured.
 
 ## CLI Tool
 
@@ -44,7 +54,8 @@ The `sb` CLI is a thin launcher — the intelligence lives in these skills:
 ```
 sb init      # Scaffold project (specs, scripts, skills)
 sb gen       # Run shengen to generate guard types
-sb gates     # Run all five verification gates
+sb gates     # Run the core five gates, plus shen-derive when configured
+sb derive    # Run spec-equivalence drift checks for configured (define ...) specs
 sb loop      # Launch Ralph loop (headless LLM + gates)
 ```
 
@@ -63,8 +74,13 @@ Application code         Must use constructors — compiler enforces this
 Verification             shengen -> test -> build -> shen tc+ -> tcb audit
 ```
 
+When the project configures any `[[derive.specs]]` entries in `sb.toml`, `sb gates` automatically appends an optional `shen-derive` verification gate after the core five. That gate regenerates a committed spec-derived test, fails on drift, and then runs `go test` on the referenced implementation packages.
+
 ### Gate 5: TCB Audit (`bin/shenguard-audit.sh`)
 Re-runs shengen, diffs output against committed file, and rejects unexpected files in the shenguard package. Ensures the forgery boundary contains only generated code.
+
+### Optional Gate 6: `shen-derive` (`sb derive`)
+When `sb.toml` includes `[[derive.specs]]`, `sb derive` runs `shen-derive verify` for each entry, diffs the regenerated table-driven test against the committed file, and fails on drift. `sb derive --regen` rewrites the committed output when the drift is intentional.
 
 The gates can run via `sb gates`, in a Ralph loop (`sb loop`), a CI pipeline, or manually — the verification is the same regardless of what triggers it. All gate commands are configurable via `sb.toml` or shell scripts in `bin/`.
 
@@ -103,10 +119,57 @@ The `--db-wrappers <file>` flag generates proof-carrying DB wrappers that captur
 
 ## Shen Runtime for Gate 4
 
-Gate 4 (shen tc+) needs a Shen implementation. Use **shen-sbcl** (Shen on SBCL/Common Lisp) — most reliable, fastest startup.
+Gate 4 (shen tc+) needs a Shen implementation. Two recommended backends:
 
-Install: `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`
+| Backend | Startup | Compute | Best for |
+|---------|---------|---------|----------|
+| **shen-sbcl** (shen-cl/SBCL) | **0.06s** | 1x | Gate loops, CI (startup-dominated) |
+| **shen-scheme** (Chez Scheme) | 0.44s | **1.6x faster** | Large specs, heavy typechecking |
 
-Do NOT use shen-go — it has known memory allocation crash bugs.
+Install shen-sbcl: `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`
+
+`bin/shen-check.sh` auto-detects whichever is on PATH (prefers shen-sbcl for startup speed). Override with `SHEN=/path/to/binary` to use any backend. Do NOT use shen-go — it has known memory allocation crash bugs.
 
 **Important:** shengen (the codegen tool) is a separate Go/TS program that reads `.shen` files as text and emits guard types. It does NOT run Shen code. Only Gate 4 needs an actual Shen runtime.
+
+## Bypass Prevention & Hardened Mode
+
+Standard guard types prevent **direct construction** (attack A) through module-private fields. Five total bypass vectors exist:
+
+| Attack | What | Standard blocks? |
+|--------|------|-----------------|
+| A. Direct construction | `Amount{v: -5}` | Yes (all languages) |
+| B. Field mutation | `(obj as any)._v = -5` | Go/Rust yes, TS/Py no |
+| C. Zero-value | `var a Amount` (Go) | No |
+| D. Reflection/unsafe | `reflect.NewAt(...)` | No |
+| E. Deserialization | `json.Unmarshal(data, &amt)` | No |
+
+**Hardened mode** (`shengen --mode hardened`) closes these additional vectors per language:
+
+- **Go**: Sealed interfaces (unexported method), zero-value trap (`valid` flag), `UnmarshalJSON` re-validation
+- **Rust**: No Clone/Copy on guarded types (linear proofs), `#[non_exhaustive]`, sealed traits, no Deserialize
+- **TypeScript**: ES2022 `#private` fields (runtime enforcement), branded types (`unique symbol`), `Object.freeze`
+- **Python**: Closure vaults (values in closure scope), HMAC provenance tokens, `__init_subclass__` prevention
+
+The defense-in-depth stack (each layer catches what the previous misses):
+1. Language-level opacity (module privacy)
+2. Brands/sealing (nominal types, sealed interfaces)
+3. Runtime validation (constructors check invariants)
+4. Provenance tokens (HMAC, registries — Python)
+5. Static analysis (lint gates in Gate 5)
+6. TCB audit (hash verification of generated code)
+
+See `/sb:create-shengen` section 13 for full implementation details.
+
+## Target Language Shengen Implementations
+
+Shengen codegen tools exist for multiple languages:
+
+| Language | Tool | Location |
+|----------|------|----------|
+| Go | shengen (Go binary) | `cmd/shengen/main.go` |
+| TypeScript | shengen-ts | `cmd/shengen-ts/shengen.ts` |
+| Rust | shengen-rs (Python script) | `cmd/shengen-rs/shengen.py` |
+| Python | shengen-py (Python script) | `cmd/shengen-py/shengen.py` |
+
+All share the same architecture: Parse → Symbol Table → Resolve → Emit. All support `--mode standard|hardened`. Use `/sb:create-shengen` to build shengen for additional languages.

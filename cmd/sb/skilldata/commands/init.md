@@ -12,6 +12,14 @@ You add Shen sequent-calculus backpressure to the user's project. This means:
 
 You do NOT assume any particular workflow or orchestrator. You set up the foundation — the user decides how to run it.
 
+## Tooling Conventions
+
+Prefer the current toolset explicitly while carrying out this command:
+
+- Use `ReadFile` for file reads, `rg` for content search, `Glob` for path discovery, and `Shell` for command execution.
+- Use `ApplyPatch` for focused file edits and scripts only for clearly mechanical or generated updates.
+- Prefer `sb gates` and `sb derive` over ad hoc verification commands once the project is configured.
+
 ### Why this works — compiler enforcement, not LLM policing
 
 Guard types use the target language's **module-private fields** so the **compiler itself** enforces invariants — not the LLM, not a linter, not a runtime assertion. In Go, struct fields are unexported (lowercase); in TypeScript, fields are `private`; in Rust, fields are non-pub. There is no syntax for constructing a guard type except through its generated constructor, which validates the Shen spec's preconditions.
@@ -34,6 +42,9 @@ Ask the user:
    - `bin/shen-check.sh` — Shen verification wrapper (uses shen-sbcl)
    - `bin/shengen` or `bin/shengen-codegen.sh` — codegen tooling
    - Generated guard types go wherever is idiomatic for the target language
+
+4. **Optional shen-derive coverage** — Are there pure `(define ...)` functions that should become spec-equivalence drift gates?
+   - If yes, capture the function name, impl package, impl function, guard package, and desired generated test path for a future `sb derive` setup
 
 ## Step 2: Draft specs/core.shen
 
@@ -126,15 +137,19 @@ Use `\* comment *\` to document sections.
 
 ### Shen Runtime (for Gate 4: type checking)
 
-Gate 4 runs Shen's type checker (`tc+`) on the spec. **Any Shen port works** — the spec is pure Shen, independent of what language the guard types target. Use **shen-sbcl** (Shen on SBCL/Common Lisp):
+Gate 4 runs Shen's type checker (`tc+`) on the spec. **Any Shen port works** — the spec is pure Shen, independent of what language the guard types target. Two recommended backends:
+
+| Backend | Install | Startup | Compute | Best for |
+|---------|---------|---------|---------|----------|
+| **shen-sbcl** (shen-cl on SBCL) | `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl` | **0.06s** | 1x | Gate loops, CI (startup-dominated) |
+| **shen-scheme** (Chez Scheme) | Build from [shen-scheme](https://github.com/Shen-Language/shen-scheme) | 0.44s | **1.6x faster** | Large specs, heavy typechecking |
+
+The `bin/shen-check.sh` script auto-detects whichever is installed (prefers shen-sbcl). Override with `SHEN=/path/to/binary`.
 
 ```bash
-# Check if shen-sbcl is available
-command -v shen-sbcl || command -v sbcl
+# Check what's available
+command -v shen-sbcl || command -v shen-scheme || command -v shen
 ```
-
-- **If SBCL is installed**: install shen-sbcl via `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`
-- **If neither**: `brew install sbcl` then install shen-sbcl as above
 
 Do NOT use shen-go — it has known memory allocation crash bugs and hangs during cold bootstrap.
 
@@ -150,23 +165,13 @@ If neither exists and the project is based on the Shen-Backpressure repo, check 
 
 ### shen-check.sh
 
-Create `bin/shen-check.sh` using shen-sbcl. The script must:
-- Accept a spec path argument (default: `specs/core.shen`)
-- Enable type checking (`(tc +)`)
-- Load the spec file
-- Exit 0 with `RESULT: PASS` on success
-- Exit 1 with `RESULT: FAIL` on type error
-- Include a timeout (30 seconds) to prevent hangs
-
-
-```bash
-#!/bin/bash
-set -euo pipefail
-SPEC="${1:-specs/core.shen}"
-[ -f "$SPEC" ] || { echo "ERROR: $SPEC not found"; exit 1; }
-timeout 30 shen-sbcl -q -e "(tc +)" -l "$SPEC" 2>&1 || { echo "RESULT: FAIL"; exit 1; }
-echo "RESULT: PASS"
-```
+Copy `bin/shen-check.sh` from the Shen-Backpressure repo. It auto-detects the Shen backend (`shen-sbcl` > `shen-scheme` > `shen`) and can be overridden with `$SHEN`. It:
+- Accepts a spec path argument (default: `specs/core.shen`)
+- Enables type checking (`(tc +)`)
+- Loads the spec file
+- Exits 0 with `RESULT: PASS` on success
+- Exits 1 with `RESULT: FAIL` on type error
+- Includes a timeout (30 seconds) to prevent hangs
 
 Make executable: `chmod +x bin/shen-check.sh`
 
@@ -202,9 +207,41 @@ This produces `<ProofType>DB` structs (e.g., `TenantAccessDB`) that capture the 
 
 If shen-check.sh times out or crashes, verify shen-sbcl is installed and working: `shen-sbcl -q -e "(+ 1 1)"`
 
+## Step 6c (Optional): Configure `shen-derive`
+
+If the user wants spec-equivalence checks for pure `(define ...)` functions, add derive config to `sb.toml`:
+
+```toml
+[derive]
+dir = "../../shen-derive"
+
+[[derive.specs]]
+path      = "specs/core.shen"
+func      = "processable"
+impl_pkg  = "your-module/internal/derived"
+impl_func = "Processable"
+guard_pkg = "your-module/internal/shenguard"
+out_file  = "internal/derived/processable_spec_test.go"
+```
+
+Then initialize the committed generated test once:
+
+```bash
+sb derive --regen
+```
+
+After that, `sb derive` becomes a drift gate, and `sb gates` will automatically append `shen-derive` after the core five gates whenever `[[derive.specs]]` is configured.
+
 ## Step 7: Verify
 
-Run all gates:
+Run all configured gates:
+
+```bash
+sb gates
+```
+
+If you have not wired `sb gates` yet, the underlying core pipeline is still:
+
 ```bash
 ./bin/shengen-codegen.sh specs/core.shen ...  # Gate 1: regenerate
 # Gate 2: test (go test, npm test, cargo test, etc.)
@@ -213,7 +250,7 @@ Run all gates:
 ./bin/shenguard-audit.sh                       # Gate 5: TCB audit
 ```
 
-All gates must pass. Fix and regenerate if there are errors.
+All configured gates must pass. Fix and regenerate if there are errors.
 
 ## Step 8: Report
 
@@ -227,9 +264,12 @@ Tell the user:
   3. Build — compile against regenerated types
   4. `shen-check` — verify spec consistency (`tc +`)
   5. `shenguard-audit` — TCB audit (catches tampering and unexpected files)
+- If they configured derive coverage, the optional sixth gate:
+  6. `sb derive` / `shen-derive` — regenerate spec-derived tests, fail on drift, then run `go test` on referenced impl packages
 
 Then suggest next steps based on their workflow:
 - **Ralph loop**: "Run `/sb:loop` or `sb loop` to launch an autonomous coding loop with these gates"
 - **CI**: "Add `sb gates` as a CI step, or run the individual scripts from `bin/`"
 - **Manual dev**: "Run `sb gates` after changing specs or domain code to verify everything holds"
-- **Custom orchestrator**: "Wire the five gate scripts (`bin/`) into your build system in order"
+- **Spec-equivalence**: "If you have pure `(define ...)` functions to pin against Go implementations, add `[[derive.specs]]` and run `/sb:derive` or `sb derive`"
+- **Custom orchestrator**: "Wire the core five gate scripts (`bin/`) into your build system in order, and add `sb derive` when derive coverage is configured"
