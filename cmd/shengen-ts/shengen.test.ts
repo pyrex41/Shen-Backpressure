@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import {
   SymbolTable,
   parseFileString,
+  parseSpecString,
   parseSExpr,
   isCall,
   isAtom,
@@ -23,6 +24,9 @@ import {
   inferTargetFields,
   structuralMatchFallback,
   mergeDatatypeGroups,
+  parseDefine,
+  parseSignature,
+  splitPatterns,
   type VerifiedPremise,
   type FieldInfo,
 } from "./shengen.ts";
@@ -756,6 +760,152 @@ test("mergeDatatypeGroups: a file referenced twice is not a redefinition", () =>
   // check is purely about cross-file *conflicts*. Within-file semantics are
   // parseFile's responsibility, not mergeDatatypeGroups'.
   assert.equal(merged.length, 2);
+});
+
+// ============================================================================
+// §2.1 — (define …) parser, translator, and helper emission.
+// ============================================================================
+
+test("parseSignature: arrow-chain signatures parse into ordered parts", () => {
+  assert.deepEqual(parseSignature("{string --> boolean}"), ["string", "boolean"]);
+  assert.deepEqual(
+    parseSignature("{amount --> (list transaction) --> boolean}"),
+    ["amount", "(list transaction)", "boolean"]
+  );
+  assert.deepEqual(parseSignature("garbage"), []);
+  assert.deepEqual(parseSignature("{}"), []);
+});
+
+test("splitPatterns: respects bracket nesting", () => {
+  assert.deepEqual(splitPatterns("X Y"), ["X", "Y"]);
+  assert.deepEqual(splitPatterns("[Med | Meds]"), ["[Med | Meds]"]);
+  assert.deepEqual(splitPatterns("X [[A B] | Rest]"), ["X", "[[A B] | Rest]"]);
+});
+
+test("parseDefine: single-clause, all-variable patterns", () => {
+  const block = `(define roundtrip?
+  {site-data --> boolean}
+  S -> (= S (decode (encode S))))`;
+  const def = parseDefine(block);
+  assert.ok(def, "should parse");
+  assert.equal(def!.name, "roundtrip?");
+  assert.deepEqual(def!.signature, ["site-data", "boolean"]);
+  assert.equal(def!.clauses.length, 1);
+  assert.deepEqual(def!.clauses[0].patterns, ["S"]);
+  assert.equal(def!.clauses[0].result, "(= S (decode (encode S)))");
+  assert.equal(def!.clauses[0].guard, "");
+});
+
+test("parseDefine: multi-clause with literal and variable patterns", () => {
+  const block = `(define base64url?
+  {string --> boolean}
+  "" -> true
+  X -> (and (base64url-char? (head-char X))
+            (base64url? (tail-chars X))))`;
+  const def = parseDefine(block);
+  assert.ok(def);
+  assert.equal(def!.clauses.length, 2);
+  assert.deepEqual(def!.clauses[0].patterns, [`""`]);
+  assert.equal(def!.clauses[0].result, "true");
+  assert.deepEqual(def!.clauses[1].patterns, ["X"]);
+  assert.ok(
+    def!.clauses[1].result.startsWith("(and"),
+    `unexpected result: ${def!.clauses[1].result}`
+  );
+});
+
+test("parseSpecString: returns both datatypes and defines", () => {
+  const src = `(datatype amount
+  X : number;
+  ====================
+  X : amount;)
+
+(define positive?
+  {number --> boolean}
+  X -> (>= X 0))`;
+  const spec = parseSpecString(src);
+  assert.equal(spec.datatypes.length, 1);
+  assert.equal(spec.datatypes[0].name, "amount");
+  assert.equal(spec.defines.length, 1);
+  assert.equal(spec.defines[0].name, "positive?");
+});
+
+test("generateTs: single-clause define emits an exported function", () => {
+  const src = `(datatype site-data
+  S : string;
+  ==============
+  S : site-data;)
+
+(define roundtrip?
+  {site-data --> boolean}
+  S -> (= S (decode (encode S))))`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "t.shen");
+
+  assert.ok(
+    /export function roundtrip\(s: SiteData\): boolean \{\s*return \(s === decode\(encode\(s\)\)\);\s*\}/m.test(out),
+    `expected roundtrip helper; got:\n${out}`
+  );
+});
+
+test("generateTs: multi-clause define with \"\" literal emits if-chain", () => {
+  const src = `(define base64url?
+  {string --> boolean}
+  "" -> true
+  X -> (and (base64url-char? (head-char X))
+            (base64url? (tail-chars X))))`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "t.shen");
+
+  assert.ok(
+    /export function base64url\(x: string\): boolean/.test(out),
+    "missing base64url function signature"
+  );
+  assert.ok(
+    /if \(x === ""\)/.test(out),
+    "missing empty-string check"
+  );
+  assert.ok(
+    /return \(base64urlChar\(headChar\(x\)\) && base64url\(tailChars\(x\)\)\)/.test(out),
+    "missing recursive body translation"
+  );
+});
+
+test("verifiedToTs: (define …) calls dispatch as function calls in guards", () => {
+  // A constrained type that uses a user-defined predicate in its :verified
+  // premise. The helper emitter proves the predicate exists; verifiedToTs
+  // routes the guard to the helper's TS name.
+  const src = `(define positive?
+  {number --> boolean}
+  X -> (>= X 0))
+
+(datatype amount
+  X : number;
+  (positive? X) : verified;
+  ====================
+  X : amount;)`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "t.shen");
+
+  // The constrained amount's createOrThrow should call `positive(...)`, not
+  // emit a `/* TODO */` placeholder.
+  assert.ok(
+    !/TODO:.*positive/.test(out),
+    "amount should not emit a TODO for positive? check"
+  );
+  assert.ok(
+    /if \(!\(positive\(x\)\)\) throw/.test(out),
+    `amount should guard with positive(x); got:\n${out}`
+  );
 });
 
 test("generateTs: wrapper-only spec has no constrained/guarded checks or imports", () => {

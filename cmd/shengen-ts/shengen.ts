@@ -45,6 +45,29 @@ export interface Datatype {
   rules: Rule[];
 }
 
+// --- (define ...) blocks ---
+// A Shen define is a (possibly multi-clause, possibly guarded) helper function.
+// In specs it appears as `(define name {t1 --> ... --> ret} pat1 pat2 -> body ...)`
+// with clauses separated by ` -> ` transitions. See cmd/shengen/main.go:90-99
+// for the Go reference shape.
+
+export interface DefineClause {
+  patterns: string[]; // raw pattern per parameter ("_", "X", "[]", "[H | T]")
+  result: string; // raw result expression (atom or balanced s-expr source)
+  guard: string; // raw guard source after `where`, or "" when absent
+}
+
+export interface Define {
+  name: string; // Shen name, including any trailing `?`
+  signature: string[]; // parsed `{t1 --> t2 --> ret}` into [t1, t2, …, ret]; empty if unparseable
+  clauses: DefineClause[];
+}
+
+export interface Spec {
+  datatypes: Datatype[];
+  defines: Define[];
+}
+
 // ============================================================================
 // Symbol Table
 // ============================================================================
@@ -68,6 +91,11 @@ export class SymbolTable {
   types: Map<string, TypeInfo> = new Map();
   concCount: Map<string, number> = new Map();
   sumTypes: Map<string, string[]> = new Map();
+  defines: Map<string, Define> = new Map();
+
+  registerDefines(defs: Define[]): void {
+    for (const d of defs) this.defines.set(d.name, d);
+  }
 
   build(datatypes: Datatype[]): void {
     // Pass 1: count conclusion type producers
@@ -432,12 +460,13 @@ export function verifiedToTs(
   const expr = parseSExpr(v.raw);
   if (!isCall(expr)) return [`/* TODO: ${v.raw} */ true`, "unhandled"];
 
-  switch (op(expr)) {
+  const fname = op(expr);
+  switch (fname) {
     case ">=":
     case "<=":
     case ">":
     case "<":
-      return translateCmp(st, expr, varMap, op(expr));
+      return translateCmp(st, expr, varMap, fname);
     case "=":
       return translateEq(st, expr, varMap);
     case "not":
@@ -445,7 +474,19 @@ export function verifiedToTs(
     case "element?":
       return translateElement(st, expr, varMap);
   }
-  return [`/* TODO: ${v.raw} */ true`, `unhandled op: ${op(expr)}`];
+  // User-defined predicate call via (define …). The resolved TS name mirrors
+  // what generateDefineHelpers emits — `${toCamelCase(name sans ?)}(…args)`.
+  if (st.defines.has(fname)) {
+    const args = expr.children!.slice(1).map((c) =>
+      translateDefineExpr(c, varMap, st)
+    );
+    const callee = definePascalName(fname);
+    return [
+      `${callee}(${args.join(", ")})`,
+      `${fname} check failed`,
+    ];
+  }
+  return [`/* TODO: ${v.raw} */ true`, `unhandled op: ${fname}`];
 }
 
 function translateCmp(
@@ -683,6 +724,50 @@ export function parseFile(path: string): Datatype[] {
   return parseFileString(readFileSync(path, "utf-8"));
 }
 
+// parseSpecString returns both datatype blocks and (define …) helpers. Callers
+// that only need datatypes can keep using parseFileString.
+export function parseSpecString(source: string): Spec {
+  const datatypes = parseFileString(source);
+  const defines: Define[] = [];
+  for (const block of extractBlocks(source, "(define ")) {
+    const def = parseDefine(block);
+    if (def) defines.push(def);
+  }
+  return { datatypes, defines };
+}
+
+export function parseSpecFile(path: string): Spec {
+  return parseSpecString(readFileSync(path, "utf-8"));
+}
+
+// mergeSpecs concatenates specs parsed from multiple files and rejects
+// redefinitions (both datatypes and defines) with a pointed error.
+export function mergeSpecs(
+  groups: Array<{ path: string; spec: Spec }>
+): Spec {
+  const dtGroups = groups.map((g) => ({
+    path: g.path,
+    datatypes: g.spec.datatypes,
+  }));
+  const datatypes = mergeDatatypeGroups(dtGroups);
+  const seenDefine = new Map<string, string>();
+  const defines: Define[] = [];
+  for (const { path, spec } of groups) {
+    for (const def of spec.defines) {
+      const prev = seenDefine.get(def.name);
+      if (prev !== undefined && prev !== path) {
+        throw new Error(
+          `define "${def.name}" declared in both ${prev} and ${path}; ` +
+            `rename one or remove the duplicate`
+        );
+      }
+      seenDefine.set(def.name, path);
+      defines.push(def);
+    }
+  }
+  return { datatypes, defines };
+}
+
 // mergeDatatypeGroups concatenates parsed datatype groups from multiple source
 // files and rejects cross-file redefinitions. Within-file duplicates (if any)
 // flow through unchanged — parseFile's behavior is preserved. This is the
@@ -747,6 +832,172 @@ export function parseDatatype(block: string): Datatype | null {
   }
   flush();
   return dt.rules.length > 0 ? dt : null;
+}
+
+// extractBalancedParen pulls the first balanced parenthesized expression
+// from `s` (which must start with `(`), returning [expr, indexPastEnd].
+// Port of Go main.go:1369-1385.
+function extractBalancedParen(s: string): [string, number] {
+  if (s.length === 0 || s[0] !== "(") return ["", 0];
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "(") depth++;
+    else if (s[i] === ")") {
+      depth--;
+      if (depth === 0) return [s.slice(0, i + 1), i + 1];
+    }
+  }
+  return [s, s.length];
+}
+
+// splitPatterns tokenizes a pattern string respecting bracket nesting, so
+// "[Med | Meds]" stays one token and "[[X Y] | Rest]" stays one token.
+// Port of Go main.go:1334-1365.
+export function splitPatterns(s: string): string[] {
+  const patterns: string[] = [];
+  let current = "";
+  let depth = 0;
+  for (const ch of s) {
+    if (ch === "[") {
+      depth++;
+      current += ch;
+    } else if (ch === "]") {
+      depth--;
+      current += ch;
+      if (depth === 0 && current.length > 0) {
+        patterns.push(current);
+        current = "";
+      }
+    } else if (ch === " " || ch === "\t") {
+      if (depth > 0) {
+        current += ch;
+      } else if (current.length > 0) {
+        patterns.push(current);
+        current = "";
+      }
+    } else {
+      current += ch;
+    }
+  }
+  if (current.length > 0) patterns.push(current);
+  return patterns;
+}
+
+// parseSignature turns `{t1 --> t2 --> ret}` into ["t1", "t2", "ret"].
+// Parameterized types like `(list ...)` stay as a single element. Returns [] if
+// the input is not a brace-wrapped arrow chain.
+export function parseSignature(raw: string): string[] {
+  const src = raw.trim();
+  if (!src.startsWith("{") || !src.endsWith("}")) return [];
+  const inner = src.slice(1, -1).trim();
+  // Split on ` --> ` while respecting paren depth (for (list foo) etc.).
+  const parts: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    if (depth === 0 && inner.startsWith(" --> ", i)) {
+      parts.push(cur.trim());
+      cur = "";
+      i += 4; // skip over "--> " (loop's i++ consumes the leading space)
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim()) parts.push(cur.trim());
+  return parts;
+}
+
+// parseDefine ports cmd/shengen/main.go:1242-1330. Handles multi-clause
+// `(define name {sig} pat... -> result [where guard] pat... -> result ...)`
+// syntax with balanced-paren result expressions.
+export function parseDefine(block: string): Define | null {
+  // extractBlocks hands us the balanced `(define …)` with outer parens intact.
+  // Strip exactly the `(define ` prefix and the single matching trailing `)`;
+  // anything greedier corrupts bodies that legitimately end in `)))`.
+  if (!block.startsWith("(define ") || !block.endsWith(")")) return null;
+  let rest = block.slice("(define ".length, -1);
+  const nlIdx = rest.indexOf("\n");
+  if (nlIdx === -1) return null;
+  const name = rest.slice(0, nlIdx).trim();
+  // Trim trailing whitespace — any unbalanced parens would indicate a
+  // malformed input upstream, not something we should silently absorb.
+  const body = rest.slice(nlIdx).replace(/\s+$/, "");
+
+  // Normalize whitespace to a single line so the arrow-splitter below
+  // sees consistent ` -> ` separators.
+  const bodyOneLine = body.split(/\s+/).filter(Boolean).join(" ");
+
+  // Optional first part is a type signature `{t1 --> ... --> ret}`.
+  let signature: string[] = [];
+  let rhs = bodyOneLine;
+  if (rhs.startsWith("{")) {
+    const closeIdx = rhs.indexOf("}");
+    if (closeIdx !== -1) {
+      signature = parseSignature(rhs.slice(0, closeIdx + 1));
+      rhs = rhs.slice(closeIdx + 1).trim();
+    }
+  }
+
+  const segments = rhs.split(" -> ");
+  if (segments.length < 2) return null;
+
+  const clauses: DefineClause[] = [];
+  let currentPatterns = segments[0];
+
+  for (let i = 1; i < segments.length; i++) {
+    let seg = segments[i];
+    let result = "";
+    let guard = "";
+    let nextPatterns = "";
+    // When result is harvested as a balanced paren expression we trust the
+    // extractor's bookkeeping; only bare-atom results need later cleanup.
+    let resultCameFromBalancedParen = false;
+
+    const whereIdx = seg.indexOf(" where ");
+    if (whereIdx !== -1) {
+      result = seg.slice(0, whereIdx).trim();
+      if (result.startsWith("(")) resultCameFromBalancedParen = true;
+      const afterWhere = seg.slice(whereIdx + 7).trim();
+      if (afterWhere.startsWith("(")) {
+        const [g, endIdx] = extractBalancedParen(afterWhere);
+        guard = g;
+        nextPatterns = afterWhere.slice(endIdx).trim();
+      } else {
+        guard = afterWhere;
+      }
+    } else {
+      seg = seg.trim();
+      if (seg.startsWith("(")) {
+        const [expr, endIdx] = extractBalancedParen(seg);
+        result = expr;
+        resultCameFromBalancedParen = true;
+        nextPatterns = seg.slice(endIdx).trim();
+      } else {
+        const tokens = seg.split(/\s+/);
+        result = tokens[0];
+        if (tokens.length > 1) nextPatterns = tokens.slice(1).join(" ");
+      }
+    }
+
+    // Bare-atom results (e.g. `true`, `42`, `"foo"`) may carry a trailing
+    // close-paren from the enclosing (define …) frame's segment-joining;
+    // trim that. Balanced s-exprs are already correct.
+    if (!resultCameFromBalancedParen) {
+      result = result.replace(/\)+$/, "").trim();
+    }
+
+    const patterns = splitPatterns(currentPatterns);
+    if (patterns.length > 0) {
+      clauses.push({ patterns, result, guard });
+    }
+    currentPatterns = nextPatterns;
+  }
+
+  if (clauses.length === 0) return null;
+  return { name, signature, clauses };
 }
 
 function buildRule(premLines: string[], concLines: string[]): Rule | null {
@@ -899,6 +1150,8 @@ export function generateTs(
       lines.push("");
     }
   }
+
+  lines.push(...generateDefineHelpers(st));
   return lines.join("\n") + "\n";
 }
 
@@ -1077,6 +1330,370 @@ function genAlias(gt: GeneratedType): string[] {
 }
 
 // ============================================================================
+// (define …) body translation
+// ============================================================================
+//
+// Scope of this port (minimum viable, §2.1 of the parity handoff):
+//   - Single-clause defines with all-variable patterns emit cleanly.
+//   - Multi-clause defines with literal patterns (string, number, bool, "")
+//     plus a fallthrough variable clause emit an if-chain.
+//   - Destructuring patterns (`[H | T]`, `[[X Y] | Rest]`) are not yet
+//     translated — they emit a TODO stub.
+//   - Guards (`where (pred ...)`) are not yet translated either.
+//
+// Body translation covers: comparisons (>=, <=, >, <, =, !=), arithmetic
+// (+, -, *, /, %, shen.mod), boolean (and, or, not, if), list ops (head,
+// tail, length, cons, concat, empty?), wrapper unwrap (val), higher-order
+// (lambda, foldr, foldl, scanl, map, filter). User-defined calls dispatch
+// to generated helpers (camelCase, `?` trimmed) or user-provided impl
+// functions (same shape — users must define any unreferenced symbols).
+
+function definePascalName(shenName: string): string {
+  return toCamelCase(shenName.replace(/\?$/, ""));
+}
+
+function translateDefineBodyRaw(
+  raw: string,
+  varMap: Map<string, string>,
+  st: SymbolTable
+): string {
+  const trimmed = raw.trim();
+  // Raw atoms bypass parseSExpr so literal strings keep their quotes verbatim.
+  if (!trimmed.startsWith("(")) {
+    return translateDefineAtom(trimmed, varMap, st);
+  }
+  const expr = parseSExpr(raw);
+  return translateDefineExpr(expr, varMap, st);
+}
+
+function translateDefineAtom(
+  atom: string,
+  varMap: Map<string, string>,
+  _st: SymbolTable
+): string {
+  if (atom === "true" || atom === "false") return atom;
+  if (atom === "[]") return "[]";
+  if (isNumericLiteral(atom)) return atom;
+  if (/^".*"$/.test(atom)) return atom;
+  if (varMap.has(atom)) return toCamelCase(atom);
+  // Unknown identifier — emit as-is (user-provided dep or later-registered name).
+  return toCamelCase(atom);
+}
+
+function translateDefineExpr(
+  expr: SExpr,
+  varMap: Map<string, string>,
+  st: SymbolTable
+): string {
+  if (!isCall(expr)) {
+    return translateDefineAtom(expr.atom ?? "", varMap, st);
+  }
+  const fname = op(expr);
+  const args = expr.children!.slice(1);
+  const tx = (e: SExpr): string => translateDefineExpr(e, varMap, st);
+
+  switch (fname) {
+    case ">=":
+    case "<=":
+    case ">":
+    case "<":
+      return `(${tx(args[0])} ${fname} ${tx(args[1])})`;
+    case "=":
+      return `(${tx(args[0])} === ${tx(args[1])})`;
+    case "!=":
+      return `(${tx(args[0])} !== ${tx(args[1])})`;
+    case "and":
+      return `(${tx(args[0])} && ${tx(args[1])})`;
+    case "or":
+      return `(${tx(args[0])} || ${tx(args[1])})`;
+    case "not":
+      return `!(${tx(args[0])})`;
+    case "+":
+    case "-":
+    case "*":
+    case "/":
+    case "%":
+      return `(${tx(args[0])} ${fname} ${tx(args[1])})`;
+    case "shen.mod":
+      return `(Math.trunc(${tx(args[0])}) % ${tx(args[1])})`;
+    case "if":
+      return `(${tx(args[0])} ? ${tx(args[1])} : ${tx(args[2])})`;
+    case "head":
+      return `${tx(args[0])}[0]`;
+    case "tail":
+      return `${tx(args[0])}.slice(1)`;
+    case "length":
+      return `${tx(args[0])}.length`;
+    case "cons":
+      return `[${tx(args[0])}, ...${tx(args[1])}]`;
+    case "concat":
+      return `${tx(args[0])}.concat(${tx(args[1])})`;
+    case "empty?":
+      return `(${tx(args[0])}.length === 0)`;
+    case "val":
+      return `${tx(args[0])}.val()`;
+    case "lambda": {
+      // (lambda X body) → (x: any) => <body>
+      if (args.length !== 2 || !isAtom(args[0])) {
+        return "/* bad lambda */ () => undefined";
+      }
+      const param = args[0].atom ?? "";
+      const inner = new Map(varMap);
+      inner.set(param, "any"); // propagate binding so body translator recognizes it
+      const body = translateDefineExpr(args[1], inner, st);
+      return `(${toCamelCase(param)}: any) => ${body}`;
+    }
+    case "foldr":
+      // Shen foldr is right-fold with curried f: f(x)(acc). Wrap the f
+      // translation in parens so an inline lambda doesn't bind to the outer
+      // arrow's RHS.
+      return `${tx(args[2])}.reduceRight((acc: any, x: any) => (${tx(args[0])})(x)(acc), ${tx(args[1])})`;
+    case "foldl":
+      return `${tx(args[2])}.reduce((acc: any, x: any) => (${tx(args[0])})(acc)(x), ${tx(args[1])})`;
+    case "scanl":
+      return `__scanl(${tx(args[0])}, ${tx(args[1])}, ${tx(args[2])})`;
+    case "map":
+      return `${tx(args[1])}.map((x: any) => (${tx(args[0])})(x))`;
+    case "filter":
+      return `${tx(args[1])}.filter((x: any) => (${tx(args[0])})(x))`;
+  }
+
+  // User-defined predicate / function call, or an accessor-style call like
+  // (amount Tx) meaning Tx.amount(). Accessor dispatch: if there's exactly one
+  // argument, that argument is a known-type variable, and fname matches a
+  // field accessor on that type — emit method-call form.
+  if (args.length === 1 && isAtom(args[0])) {
+    const argAtom = args[0].atom ?? "";
+    const argType = varMap.get(argAtom);
+    if (argType) {
+      const info = st.lookup(argType);
+      if (info) {
+        const target = info.fields.find(
+          (f) => toCamelCase(f.shenName) === toCamelCase(fname)
+        );
+        if (target) {
+          return `${toCamelCase(argAtom)}.${toCamelCase(target.shenName)}()`;
+        }
+      }
+    }
+  }
+
+  // Otherwise: emit a function call. Both user-defined helpers and unresolved
+  // references share this shape; at type-check time, unresolved names turn
+  // into TS errors that the user satisfies by providing the impl.
+  const callee = definePascalName(fname);
+  return `${callee}(${args.map(tx).join(", ")})`;
+}
+
+// generateDefineHelpers emits one TS function per (define …) in the symbol
+// table's registry. Returns the helper source plus a `__scanl` prelude when
+// any define uses scanl.
+function generateDefineHelpers(st: SymbolTable): string[] {
+  if (st.defines.size === 0) return [];
+  const lines: string[] = [];
+  const bodies: string[] = [];
+  let needsScanl = false;
+
+  for (const [, def] of st.defines) {
+    const emitted = generateOneDefine(def, st);
+    if (emitted.usesScanl) needsScanl = true;
+    bodies.push(...emitted.lines);
+  }
+
+  lines.push("// --- helpers derived from (define …) blocks ---");
+  if (needsScanl) {
+    lines.push(
+      "// scanl: left-scan matching Shen semantics. Emits intermediate",
+      "// accumulator values, returning [init, f(init, l[0]), f(f(init, l[0]), l[1]), …].",
+      "function __scanl<A, T>(f: (a: A) => (t: T) => A, init: A, list: T[]): A[] {",
+      "  const out: A[] = [init];",
+      "  let acc: A = init;",
+      "  for (const x of list) { acc = f(acc)(x); out.push(acc); }",
+      "  return out;",
+      "}"
+    );
+  }
+  lines.push("");
+  lines.push(...bodies);
+  return lines;
+}
+
+interface DefineEmission {
+  lines: string[];
+  usesScanl: boolean;
+}
+
+function generateOneDefine(def: Define, st: SymbolTable): DefineEmission {
+  const lines: string[] = [];
+  const tsName = definePascalName(def.name);
+
+  // Param count is the maximum across clauses. For well-formed defines it
+  // matches the signature length - 1 (return is the last entry).
+  const paramCount = Math.max(...def.clauses.map((c) => c.patterns.length), 0);
+  const sigParams = def.signature.slice(0, Math.max(def.signature.length - 1, 0));
+  const returnShen =
+    def.signature.length > 0 ? def.signature[def.signature.length - 1] : "";
+  const returnTs = returnShen ? shenTypeToTs(returnShen) : "any";
+
+  // Choose a canonical param name per index: first clause whose pattern there
+  // is a plain variable (uppercase binder). Fall back to arg<i>.
+  const paramNames: string[] = [];
+  for (let i = 0; i < paramCount; i++) {
+    let chosen: string | null = null;
+    for (const c of def.clauses) {
+      const pat = c.patterns[i];
+      if (!pat) continue;
+      if (
+        pat !== "_" &&
+        !pat.startsWith("[") &&
+        pat !== "[]" &&
+        !/^".*"$/.test(pat) &&
+        pat !== "true" &&
+        pat !== "false" &&
+        !isNumericLiteral(pat)
+      ) {
+        chosen = pat;
+        break;
+      }
+    }
+    paramNames.push(chosen ? toCamelCase(chosen) : `arg${i}`);
+  }
+
+  const paramSig = paramNames
+    .map((p, i) => `${p}: ${sigParams[i] ? shenTypeToTs(sigParams[i]) : "any"}`)
+    .join(", ");
+
+  lines.push(`// ${tsName} is generated from Shen define ${def.name}`);
+  lines.push(`export function ${tsName}(${paramSig}): ${returnTs} {`);
+
+  let usesScanl = false;
+
+  // If every clause has all-variable patterns, fuse them into a single body —
+  // they're semantically identical as long as the variable names align.
+  const allVarPatterns = def.clauses.every((c) =>
+    c.patterns.every(
+      (p) =>
+        p === "_" ||
+        (!p.startsWith("[") &&
+          !/^".*"$/.test(p) &&
+          p !== "true" &&
+          p !== "false" &&
+          !isNumericLiteral(p))
+    )
+  );
+
+  if (allVarPatterns && def.clauses.length === 1) {
+    const clause = def.clauses[0];
+    const varMap = new Map<string, string>();
+    for (let i = 0; i < clause.patterns.length; i++) {
+      const pat = clause.patterns[i];
+      if (pat === "_") continue;
+      const shenTy = sigParams[i] ?? "any";
+      varMap.set(pat, shenTy);
+      // Alias the Shen-cased name to the canonical TS param so body references
+      // translate cleanly. Only needed when the names diverge after camelCase.
+      if (toCamelCase(pat) !== paramNames[i]) {
+        lines.push(`  const ${toCamelCase(pat)} = ${paramNames[i]};`);
+      }
+    }
+    const bodySrc = clause.result;
+    if (/scanl/.test(bodySrc)) usesScanl = true;
+    const body = translateDefineBodyRaw(bodySrc, varMap, st);
+    lines.push(`  return ${body};`);
+  } else {
+    // Multi-clause: emit an if-chain guarded by literal pattern checks. If a
+    // clause's pattern for any position isn't a recognized literal/variable,
+    // fall back to a TODO stub.
+    let fellThrough = false;
+    for (const clause of def.clauses) {
+      const checks: string[] = [];
+      const varMap = new Map<string, string>();
+      let supported = true;
+
+      for (let i = 0; i < clause.patterns.length; i++) {
+        const pat = clause.patterns[i];
+        const paramName = paramNames[i];
+        if (pat === "_" ) continue;
+        if (pat.startsWith("[") || pat === "[]") {
+          supported = false;
+          break;
+        }
+        if (
+          /^".*"$/.test(pat) ||
+          pat === "true" ||
+          pat === "false" ||
+          isNumericLiteral(pat)
+        ) {
+          checks.push(`${paramName} === ${pat}`);
+          continue;
+        }
+        // Variable pattern — alias if distinct from param.
+        const shenTy = sigParams[i] ?? "any";
+        varMap.set(pat, shenTy);
+        if (toCamelCase(pat) !== paramName) {
+          // Surfaced as a `const` below.
+        }
+      }
+
+      if (!supported) {
+        lines.push(
+          `  // TODO: destructuring clause — patterns=${JSON.stringify(clause.patterns)} result=${JSON.stringify(clause.result)}`
+        );
+        fellThrough = true;
+        continue;
+      }
+
+      // Emit aliases for variable bindings whose name differs from the param.
+      const aliases: string[] = [];
+      for (let i = 0; i < clause.patterns.length; i++) {
+        const pat = clause.patterns[i];
+        const paramName = paramNames[i];
+        if (
+          pat === "_" ||
+          pat.startsWith("[") ||
+          /^".*"$/.test(pat) ||
+          pat === "true" ||
+          pat === "false" ||
+          isNumericLiteral(pat)
+        ) {
+          continue;
+        }
+        if (toCamelCase(pat) !== paramName) {
+          aliases.push(`    const ${toCamelCase(pat)} = ${paramName};`);
+        }
+      }
+
+      const bodySrc = clause.result;
+      if (/scanl/.test(bodySrc)) usesScanl = true;
+      const body = translateDefineBodyRaw(bodySrc, varMap, st);
+
+      if (checks.length === 0) {
+        // Variable-only (catch-all) clause.
+        lines.push(...aliases);
+        lines.push(`  return ${body};`);
+        fellThrough = false;
+        break;
+      }
+      lines.push(`  if (${checks.join(" && ")}) {`);
+      lines.push(...aliases);
+      lines.push(`    return ${body};`);
+      lines.push(`  }`);
+    }
+    if (fellThrough) {
+      // If the only clauses that fit were guarded, emit a throw so the
+      // function is well-typed and surfaces the gap at runtime.
+      lines.push(
+        `  throw new Error("shengen-ts: unhandled pattern in ${def.name} (destructuring not yet translated)");`
+      );
+    }
+  }
+
+  lines.push(`}`);
+  lines.push("");
+  return { lines, usesScanl };
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -1131,10 +1748,15 @@ function main(): void {
   }
   if (specPaths.length === 0) specPaths.push("specs/core.shen");
 
-  const groups = specPaths.map((path) => ({ path, datatypes: parseFile(path) }));
-  const types = mergeDatatypeGroups(groups);
+  const specGroups = specPaths.map((path) => ({
+    path,
+    spec: parseSpecFile(path),
+  }));
+  const spec = mergeSpecs(specGroups);
+  const types = spec.datatypes;
   const st = new SymbolTable();
   st.build(types);
+  st.registerDefines(spec.defines);
 
   const originLabel = specPaths.length === 1 ? specPaths[0] : specPaths.join(", ");
   printSymbolTable(types, st, originLabel);
