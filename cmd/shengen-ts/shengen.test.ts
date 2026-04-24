@@ -382,10 +382,10 @@ test("generateTs: payment spec produces classes with the expected shape", () => 
     "AccountId should store a private string"
   );
 
-  // Constrained: static create for Amount taking number.
+  // Constrained: static createOrThrow for Amount taking number.
   assert.ok(
-    output.includes("static create(x: number): Amount"),
-    "missing Amount static create"
+    output.includes("static createOrThrow(x: number): Amount"),
+    "missing Amount static createOrThrow"
   );
 
   // Composite: private fields with underscore prefix, accessor methods.
@@ -557,6 +557,101 @@ test("structuralMatchFallback: picks the tail-targeted pair, not the first share
     !(code.includes("l.user") || code.includes("r.owner")),
     `fallback should not pick the field-0 user-ref pair; got ${code}`
   );
+});
+
+// ============================================================================
+// §3.2 + §2.2 regressions: createOrThrow/tryCreate + must* exports
+// ============================================================================
+
+test("generateTs: emits createOrThrow + tryCreate (not the old `create`) and mustX free functions", () => {
+  const types = parseFileString(paymentSpec);
+  const st = new SymbolTable();
+  st.build(types);
+  const out = generateTs(types, st, "specs/core.shen");
+
+  // Old infallible `static create` must be gone across all categories.
+  assert.ok(
+    !out.match(/static create\(/),
+    `legacy static create(...) signature should no longer appear; output was:\n${out}`
+  );
+
+  // Each category carries the new API pair.
+  assert.ok(
+    out.includes("static createOrThrow(x: number): Amount"),
+    "Amount.createOrThrow missing"
+  );
+  assert.ok(
+    out.includes("static tryCreate(x: number): Amount | Error"),
+    "Amount.tryCreate should return Amount | Error"
+  );
+  assert.ok(
+    out.includes("static createOrThrow(x: string): AccountId"),
+    "AccountId.createOrThrow missing"
+  );
+  assert.ok(
+    out.includes("static tryCreate(x: string): AccountId | Error"),
+    "AccountId.tryCreate should return AccountId | Error"
+  );
+  assert.ok(
+    /static createOrThrow\(amount: Amount, from: AccountId, to: AccountId\): Transaction/.test(out),
+    "Transaction.createOrThrow should take positional composite fields"
+  );
+  assert.ok(
+    /static tryCreate\(amount: Amount, from: AccountId, to: AccountId\): Transaction \| Error/.test(out),
+    "Transaction.tryCreate should return Transaction | Error"
+  );
+
+  // Free-function must* exports at module level.
+  assert.ok(
+    out.includes("export function mustAmount(x: number): Amount"),
+    "mustAmount free function missing"
+  );
+  assert.ok(
+    out.includes("export function mustAccountId(x: string): AccountId"),
+    "mustAccountId free function missing"
+  );
+  assert.ok(
+    /export function mustTransaction\(amount: Amount, from: AccountId, to: AccountId\): Transaction/.test(out),
+    "mustTransaction should take positional composite fields"
+  );
+  assert.ok(
+    /export function mustBalanceChecked\(bal: number, tx: Transaction\): BalanceChecked/.test(out),
+    "mustBalanceChecked should take guarded fields"
+  );
+});
+
+test("generated code: createOrThrow throws on failing constraint; tryCreate returns Error", async () => {
+  // Compile a tiny spec to TS, write it to a temp file, and import it. This is
+  // the closest-to-real check that the runtime contract actually holds.
+  const { writeFileSync, mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const spec = `(datatype positive
+  X : number;
+  (>= X 0) : verified;
+  =====================
+  X : positive;)`;
+  const types = parseFileString(spec);
+  const st = new SymbolTable();
+  st.build(types);
+  const source = generateTs(types, st, "positive.shen");
+
+  const dir = mkdtempSync(join(tmpdir(), "shengen-ts-test-"));
+  const file = join(dir, "positive.ts");
+  writeFileSync(file, source);
+
+  const mod: { Positive: { createOrThrow(x: number): unknown; tryCreate(x: number): unknown }; mustPositive(x: number): unknown } = await import(file);
+  // Happy path: createOrThrow returns a Positive.
+  const v = mod.Positive.createOrThrow(5);
+  assert.ok(v, "createOrThrow(5) should return a value");
+  // Failing path: createOrThrow throws.
+  assert.throws(() => mod.Positive.createOrThrow(-1));
+  // tryCreate returns an Error for invalid inputs, not throws.
+  const err = mod.Positive.tryCreate(-1);
+  assert.ok(err instanceof Error, "tryCreate(-1) should return an Error instance");
+  // mustPositive is createOrThrow in disguise — throws on invalid.
+  assert.throws(() => mod.mustPositive(-1));
+  assert.ok(mod.mustPositive(7));
 });
 
 test("generateTs: wrapper-only spec has no constrained/guarded checks or imports", () => {
