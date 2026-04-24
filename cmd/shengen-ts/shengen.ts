@@ -13,33 +13,34 @@
 //   4. Emit: TypeScript classes with guarded constructors
 
 import { readFileSync, writeFileSync } from "fs";
+import { fileURLToPath } from "url";
 
 // ============================================================================
 // AST
 // ============================================================================
 
-interface Premise {
+export interface Premise {
   varName: string;
   typeName: string;
 }
 
-interface VerifiedPremise {
+export interface VerifiedPremise {
   raw: string;
 }
 
-interface Conclusion {
+export interface Conclusion {
   fields: string[];
   typeName: string;
   isWrapped: boolean;
 }
 
-interface Rule {
+export interface Rule {
   premises: Premise[];
   verified: VerifiedPremise[];
   conc: Conclusion;
 }
 
-interface Datatype {
+export interface Datatype {
   name: string;
   rules: Rule[];
 }
@@ -48,13 +49,13 @@ interface Datatype {
 // Symbol Table
 // ============================================================================
 
-interface FieldInfo {
+export interface FieldInfo {
   index: number;
   shenName: string;
   shenType: string;
 }
 
-interface TypeInfo {
+export interface TypeInfo {
   shenName: string;
   tsName: string;
   category: "wrapper" | "constrained" | "composite" | "guarded" | "alias" | "sumtype";
@@ -63,7 +64,7 @@ interface TypeInfo {
   wrappedType: string | null;
 }
 
-class SymbolTable {
+export class SymbolTable {
   types: Map<string, TypeInfo> = new Map();
   concCount: Map<string, number> = new Map();
   sumTypes: Map<string, string[]> = new Map();
@@ -187,22 +188,22 @@ class SymbolTable {
 // S-Expression Parser
 // ============================================================================
 
-interface SExpr {
+export interface SExpr {
   atom: string | null;
   children: SExpr[] | null;
 }
 
-function isAtom(e: SExpr): boolean {
+export function isAtom(e: SExpr): boolean {
   return e.atom !== null;
 }
-function isCall(e: SExpr): boolean {
+export function isCall(e: SExpr): boolean {
   return e.children !== null && e.children.length > 0;
 }
-function op(e: SExpr): string {
+export function op(e: SExpr): string {
   if (isCall(e) && e.children![0].atom) return e.children![0].atom;
   return "";
 }
-function sexprToString(e: SExpr): string {
+export function sexprToString(e: SExpr): string {
   if (!isCall(e)) return e.atom ?? "";
   return "(" + e.children!.map(sexprToString).join(" ") + ")";
 }
@@ -249,7 +250,7 @@ function parseTokens(
   return [{ atom: tokens[pos], children: null }, pos + 1];
 }
 
-function parseSExpr(input: string): SExpr {
+export function parseSExpr(input: string): SExpr {
   const tokens = tokenize(input.trim());
   if (tokens.length === 0) return { atom: "", children: null };
   const [expr] = parseTokens(tokens, 0);
@@ -260,7 +261,7 @@ function parseSExpr(input: string): SExpr {
 // Accessor Chain Resolution
 // ============================================================================
 
-interface ResolvedExpr {
+export interface ResolvedExpr {
   code: string;
   tsType: string;
   shenType: string;
@@ -268,7 +269,7 @@ interface ResolvedExpr {
   fields?: FieldInfo[];
 }
 
-function resolveExpr(
+export function resolveExpr(
   st: SymbolTable,
   expr: SExpr,
   varMap: Map<string, string>
@@ -415,7 +416,7 @@ function unwrap(st: SymbolTable, r: ResolvedExpr): string {
 // Verified Premise → TypeScript
 // ============================================================================
 
-function verifiedToTs(
+export function verifiedToTs(
   st: SymbolTable,
   v: VerifiedPremise,
   varMap: Map<string, string>
@@ -549,7 +550,7 @@ function extractBaseVar(expr: SExpr): string | null {
   return null;
 }
 
-function structuralMatchFallback(
+export function structuralMatchFallback(
   st: SymbolTable,
   expr: SExpr,
   varMap: Map<string, string>
@@ -586,12 +587,11 @@ function structuralMatchFallback(
 // Parser
 // ============================================================================
 
-function parseFile(path: string): Datatype[] {
-  let content = readFileSync(path, "utf-8");
-  const types: Datatype[] = [];
-
+export function extractBlocks(source: string, marker: string): string[] {
+  const blocks: string[] = [];
+  let content = source;
   while (true) {
-    const idx = content.indexOf("(datatype ");
+    const idx = content.indexOf(marker);
     if (idx === -1) break;
     content = content.slice(idx);
 
@@ -609,15 +609,26 @@ function parseFile(path: string): Datatype[] {
     }
     if (end === -1) break;
 
-    const block = content.slice(0, end);
+    blocks.push(content.slice(0, end));
     content = content.slice(end);
+  }
+  return blocks;
+}
+
+export function parseFileString(source: string): Datatype[] {
+  const types: Datatype[] = [];
+  for (const block of extractBlocks(source, "(datatype ")) {
     const dt = parseDatatype(block);
     if (dt) types.push(dt);
   }
   return types;
 }
 
-function parseDatatype(block: string): Datatype | null {
+export function parseFile(path: string): Datatype[] {
+  return parseFileString(readFileSync(path, "utf-8"));
+}
+
+export function parseDatatype(block: string): Datatype | null {
   block = block.replace(/^\(datatype /, "");
   const nlIdx = block.indexOf("\n");
   if (nlIdx === -1) return null;
@@ -697,7 +708,7 @@ function buildRule(premLines: string[], concLines: string[]): Rule | null {
 // Helpers
 // ============================================================================
 
-function shenTypeToTs(t: string): string {
+export function shenTypeToTs(t: string): string {
   // Handle parameterized types like (list search-hit) → SearchHit[]
   const listMatch = t.match(/^\(list\s+(.+)\)$/);
   if (listMatch) {
@@ -718,23 +729,23 @@ function shenTypeToTs(t: string): string {
   }
 }
 
-function toPascalCase(s: string): string {
+export function toPascalCase(s: string): string {
   return s
     .split(/[-_]/)
     .map((p) => (p.length > 0 ? p[0].toUpperCase() + p.slice(1) : ""))
     .join("");
 }
 
-function toCamelCase(s: string): string {
+export function toCamelCase(s: string): string {
   const pc = toPascalCase(s);
   return pc.length > 0 ? pc[0].toLowerCase() + pc.slice(1) : pc;
 }
 
-function isPrimitive(t: string): boolean {
+export function isPrimitive(t: string): boolean {
   return t === "string" || t === "number" || t === "boolean" || t === "symbol";
 }
 
-function isNumericLiteral(s: string): boolean {
+export function isNumericLiteral(s: string): boolean {
   if (!s) return false;
   return !isNaN(parseFloat(s)) && isFinite(Number(s));
 }
@@ -743,7 +754,7 @@ function isNumericLiteral(s: string): boolean {
 // TypeScript Code Generator
 // ============================================================================
 
-function generateTs(types: Datatype[], st: SymbolTable, specPath: string): string {
+export function generateTs(types: Datatype[], st: SymbolTable, specPath: string): string {
   const lines: string[] = [];
   lines.push(`// Code generated by shengen-ts from ${specPath}. DO NOT EDIT.`);
   lines.push("//");
@@ -792,14 +803,14 @@ function generateTs(types: Datatype[], st: SymbolTable, specPath: string): strin
   return lines.join("\n") + "\n";
 }
 
-interface GeneratedType {
+export interface GeneratedType {
   name: string;
   tsName: string;
   category: string;
   rule: Rule;
 }
 
-function classify(dt: Datatype, st: SymbolTable): GeneratedType[] {
+export function classify(dt: Datatype, st: SymbolTable): GeneratedType[] {
   const out: GeneratedType[] = [];
   for (const r of dt.rules) {
     let typeName = r.conc.typeName;
@@ -945,34 +956,41 @@ function printSymbolTable(types: Datatype[], st: SymbolTable, path: string): voi
   process.stderr.write("\n");
 }
 
-// CLI
-const args = process.argv.slice(2);
-let specPath = "specs/core.shen";
-let outFile: string | null = null;
-let dryRun = false;
+// CLI — only run when invoked as the entry script (not when imported from tests).
+function main(): void {
+  const args = process.argv.slice(2);
+  let specPath = "specs/core.shen";
+  let outFile: string | null = null;
+  let dryRun = false;
 
-for (let i = 0; i < args.length; i++) {
-  if (args[i] === "--out" && i + 1 < args.length) {
-    outFile = args[++i];
-  } else if (args[i] === "--dry-run") {
-    dryRun = true;
-  } else if (!args[i].startsWith("--")) {
-    specPath = args[i];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--out" && i + 1 < args.length) {
+      outFile = args[++i];
+    } else if (args[i] === "--dry-run") {
+      dryRun = true;
+    } else if (!args[i].startsWith("--")) {
+      specPath = args[i];
+    }
+  }
+
+  const types = parseFile(specPath);
+  const st = new SymbolTable();
+  st.build(types);
+
+  printSymbolTable(types, st, specPath);
+
+  if (!dryRun) {
+    const output = generateTs(types, st, specPath);
+    if (outFile) {
+      writeFileSync(outFile, output);
+      process.stderr.write(`Generated ${outFile} from ${specPath}\n`);
+    } else {
+      process.stdout.write(output);
+    }
   }
 }
 
-const types = parseFile(specPath);
-const st = new SymbolTable();
-st.build(types);
-
-printSymbolTable(types, st, specPath);
-
-if (!dryRun) {
-  const output = generateTs(types, st, specPath);
-  if (outFile) {
-    writeFileSync(outFile, output);
-    process.stderr.write(`Generated ${outFile} from ${specPath}\n`);
-  } else {
-    process.stdout.write(output);
-  }
+const entry = process.argv[1] ? fileURLToPath(import.meta.url) === process.argv[1] : false;
+if (entry) {
+  main();
 }
