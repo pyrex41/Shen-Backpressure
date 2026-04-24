@@ -947,9 +947,102 @@ test("generateTs: multi-clause define with \"\" literal emits if-chain", () => {
     /if \(x === ""\)/.test(out),
     "missing empty-string check"
   );
+  // `head-char` and `tail-chars` are recognized primitives — they translate
+  // to inline `x[0] ?? ""` / `x.slice(1)` rather than function calls.
   assert.ok(
-    /return \(base64urlChar\(headChar\(x\)\) && base64url\(tailChars\(x\)\)\)/.test(out),
-    "missing recursive body translation"
+    /base64urlChar\(\(x\[0\] \?\? ""\)\)/.test(out),
+    `missing (head-char x) → (x[0] ?? "") translation; got:\n${out}`
+  );
+  assert.ok(
+    /base64url\(x\.slice\(1\)\)/.test(out),
+    `missing (tail-chars x) → x.slice(1) translation; got:\n${out}`
+  );
+});
+
+test("translateDefineExpr: in-range? emits lexical bounds check", () => {
+  // `(in-range? C A B)` is a char-range alphabet check (A-Z, 0-9, …).
+  // TypeScript string comparison is lexicographic, which matches the
+  // intended single-char semantics.
+  const src = `(define upper-alpha?
+  {string --> boolean}
+  C -> (in-range? C "A" "Z"))`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "t.shen");
+  assert.ok(
+    /\(c >= "A" && c <= "Z"\)/.test(out),
+    `expected lexical A..Z check; got:\n${out}`
+  );
+});
+
+test("generateTs: filterUnreferencedDefines=true drops derivation-target defines", () => {
+  // `roundtrip?` is a classic derive target — it calls the consumer's real
+  // `encode`/`decode`, which don't exist in the spec. When the filter flag
+  // is set, such defines must be skipped so the emitted TS stays compilable.
+  const src = `(datatype amount
+  X : number;
+  (>= X 0) : verified;
+  ====================
+  X : amount;)
+
+(define roundtrip?
+  {amount --> boolean}
+  X -> (= X (decode (encode X))))`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+
+  const filtered = generateTs(spec.datatypes, st, "t.shen", {
+    filterUnreferencedDefines: true,
+  });
+  assert.ok(
+    !/export function roundtrip\b/.test(filtered),
+    `roundtrip? should be dropped with filter on; got:\n${filtered}`
+  );
+
+  const unfiltered = generateTs(spec.datatypes, st, "t.shen");
+  assert.ok(
+    /export function roundtrip\b/.test(unfiltered),
+    "roundtrip? should still emit without the filter (default behavior)"
+  );
+});
+
+test("generateTs: filterUnreferencedDefines keeps transitively-reached defines", () => {
+  // `base64url?` is reached from the `base64url` datatype's :verified premise;
+  // `base64url-char?` is reached transitively through base64url?'s body. Both
+  // must survive the filter.
+  const src = `(define base64url-char?
+  {string --> boolean}
+  C -> (in-range? C "A" "Z"))
+
+(define base64url?
+  {string --> boolean}
+  "" -> true
+  X -> (and (base64url-char? (head-char X))
+            (base64url? (tail-chars X))))
+
+(datatype base64url
+  X : string;
+  (base64url? X) : verified;
+  ============================
+  X : base64url;)`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "t.shen", {
+    filterUnreferencedDefines: true,
+  });
+  assert.ok(
+    /export function base64url\b/.test(out),
+    "base64url? (directly referenced) should survive filter"
+  );
+  assert.ok(
+    /export function base64urlChar\b/.test(out),
+    "base64url-char? (transitively referenced) should survive filter"
   );
 });
 
@@ -1287,6 +1380,112 @@ test("translateDefineExpr: member? emits .includes()", () => {
   assert.ok(
     /return l\.includes\(x\);/.test(out),
     `expected member? to translate to .includes; got:\n${out}`
+  );
+});
+
+// ============================================================================
+// Type inference inside fold/scan/map/filter curried lambdas.
+// ============================================================================
+
+test("translateDefineExpr: scanl element type propagates into inner lambda (accessor dispatch)", () => {
+  // Spec: fold over a (list transaction) with a curried `(lambda Acc (lambda Tx …))`.
+  // The inner lambda's Tx must resolve to `transaction`, so `(amount Tx)` —
+  // which is an accessor on the transaction composite — emits `tx.amount()`,
+  // not the user-function-call fallback `amount(tx)`.
+  const src = `(datatype account-id
+  X : string;
+  ==============
+  X : account-id;)
+
+(datatype amount
+  X : number;
+  (>= X 0) : verified;
+  ====================
+  X : amount;)
+
+(datatype transaction
+  Amount : amount;
+  From : account-id;
+  To : account-id;
+  ===================================
+  [Amount From To] : transaction;)
+
+(define total-out
+  {(list transaction) --> number}
+  Txs -> (foldr (lambda Tx (lambda Acc (+ (val (amount Tx)) Acc)))
+                0
+                Txs))`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "test.shen");
+  assert.ok(
+    /tx\.amount\(\)/.test(out),
+    `foldr element type should dispatch (amount Tx) to tx.amount(); got:\n${out}`
+  );
+  assert.ok(
+    !/\bamount\(tx\)\b/.test(out),
+    `should NOT fall back to amount(tx); got:\n${out}`
+  );
+});
+
+test("translateDefineExpr: map element type propagates into lambda", () => {
+  const src = `(datatype account-id
+  X : string;
+  ==============
+  X : account-id;)
+
+(datatype amount
+  X : number;
+  (>= X 0) : verified;
+  ====================
+  X : amount;)
+
+(datatype transaction
+  Amount : amount;
+  From : account-id;
+  To : account-id;
+  ===================================
+  [Amount From To] : transaction;)
+
+(define amounts-of
+  {(list transaction) --> (list amount)}
+  Txs -> (map (lambda Tx (amount Tx)) Txs))`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "test.shen");
+  assert.ok(
+    /txs\.map\(\(x: any\) => \(\(tx: any\) => tx\.amount\(\)\)\(x\)\)/.test(out),
+    `map's element type should propagate into the lambda so (amount Tx) → tx.amount(); got:\n${out}`
+  );
+});
+
+test("translateDefineExpr: foldl/scanl accumulator stays untyped while element resolves", () => {
+  // Regression check: scanl and foldl curry as f(acc)(x). Only the INNER
+  // lambda (x) should get the element type; the outer lambda (acc) stays
+  // untyped since we can't reliably infer it from spec context.
+  const src = `(datatype item
+  N : number;
+  =============
+  N : item;)
+
+(define scan-doubles
+  {(list item) --> (list number)}
+  Xs -> (scanl (lambda Acc (lambda I (+ Acc (val I)))) 0 Xs))`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "test.shen");
+  // `(val I)` on a primitive-wrapped `item` emits `__val(i)` — the __val
+  // helper handles either side, so we just verify the lambda structure is
+  // there and doesn't fall through to user-function dispatch on `val`.
+  assert.ok(
+    /__scanl\(\(acc: any\) => \(i: any\) => \(acc \+ __val\(i\)\)/.test(out),
+    `scanl lambda shape wrong; got:\n${out}`
   );
 });
 
