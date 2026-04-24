@@ -654,6 +654,42 @@ test("generated code: createOrThrow throws on failing constraint; tryCreate retu
   assert.ok(mod.mustPositive(7));
 });
 
+// ============================================================================
+// §2.3 regression: --pkg annotates the header, does not change class emission.
+// ============================================================================
+
+test("generateTs: --pkg option annotates the header comment only", () => {
+  const spec = `(datatype name
+  X : string;
+  ===========
+  X : name;)`;
+  const types = parseFileString(spec);
+  const st = new SymbolTable();
+  st.build(types);
+
+  const withoutPkg = generateTs(types, st, "t.shen");
+  const withPkg = generateTs(types, st, "t.shen", { pkg: "guards" });
+
+  assert.ok(!withoutPkg.includes("Logical package:"));
+  assert.ok(withPkg.includes("// Logical package: guards"));
+  assert.ok(
+    withPkg.includes('import as `import * as guards from "./…"`'),
+    `header should hint how to import — got:\n${withPkg.slice(0, 500)}`
+  );
+
+  // pkg must NOT leak into emitted class/function signatures.
+  const stripHeader = (s: string): string =>
+    s
+      .split("\n")
+      .filter((line) => !line.startsWith("//"))
+      .join("\n");
+  assert.equal(
+    stripHeader(withoutPkg),
+    stripHeader(withPkg),
+    "--pkg should only affect the header comment, not code emission"
+  );
+});
+
 test("generateTs: wrapper-only spec has no constrained/guarded checks or imports", () => {
   const spec = `(datatype name
   X : string;
