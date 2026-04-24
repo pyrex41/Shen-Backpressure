@@ -1188,6 +1188,108 @@ test("generated code: destructure + guard define executes correctly at runtime",
   assert.equal(mod.contraOf("warfarin", []), false);
 });
 
+// ============================================================================
+// Tokenizer list-sugar + premise-var alias regressions.
+// ============================================================================
+
+test("parseSExpr: `[H | T]` body expression parses as (__cons H T)", () => {
+  const expr = parseSExpr("[H | T]");
+  assert.ok(isCall(expr), "[H | T] should parse as a call");
+  assert.equal(op(expr), "__cons");
+  assert.equal(expr.children!.length, 3);
+  assert.equal(expr.children![1].atom, "H");
+  assert.equal(expr.children![2].atom, "T");
+});
+
+test("parseSExpr: `[a b c]` parses as (__list a b c)", () => {
+  const expr = parseSExpr("[a b c]");
+  assert.ok(isCall(expr));
+  assert.equal(op(expr), "__list");
+  assert.deepEqual(
+    expr.children!.slice(1).map((c) => c.atom),
+    ["a", "b", "c"]
+  );
+});
+
+test("parseSExpr: `[]` parses as (__nil)", () => {
+  const expr = parseSExpr("[]");
+  assert.ok(isCall(expr));
+  assert.equal(op(expr), "__nil");
+});
+
+test("generateTs: define body using `[H | Visited]` translates to cons spread", () => {
+  // Regression: the previous tokenizer treated `[`, `]`, `|` as regular
+  // characters, so `[(content-address-of-node Root) | Visited]` in a define
+  // body emitted `[, contentAddressOfNode(root), |, visited]` — invalid TS.
+  const src = `(datatype site-node
+  X : string;
+  ==================
+  X : site-node;)
+
+(define note-cons?
+  {site-node --> (list string) --> boolean}
+  Root Visited -> (member? Root [Root | Visited]))`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "test.shen");
+  assert.ok(
+    /\[root, \.\.\.visited\]/.test(out),
+    `expected cons-sugar body to emit [root, ...visited]; got:\n${out}`
+  );
+  assert.ok(
+    !/\[,\s+root,\s+\|,\s+visited\]/.test(out),
+    "raw [ | ] tokens must not leak into the output"
+  );
+});
+
+test("generateTs: constrained class aliases the Shen premise variable onto x", () => {
+  // Regression: a spec like `E : encoded-fragment; (has-no-refs? E) : verified`
+  // used to emit `if (!(hasNoRefs(e))) ...` against a constructor whose param
+  // was `x` — leaving `e` unbound. Now the generator inserts `const e = x;`
+  // when the premise variable's camelCase differs from `x`.
+  const src = `(datatype encoded-fragment
+  X : string;
+  ==================
+  X : encoded-fragment;)
+
+(define has-no-refs?
+  {encoded-fragment --> boolean}
+  E -> (>= 0 0))
+
+(datatype leaf-node
+  E : encoded-fragment;
+  (has-no-refs? E) : verified;
+  ==========================
+  E : leaf-node;)`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "test.shen");
+  // The constrained class should alias e := x.
+  assert.ok(
+    /static createOrThrow\(x: EncodedFragment\): LeafNode \{[\s\S]*?const e = x;[\s\S]*?if \(!\(hasNoRefs\(e\)\)\) throw/.test(out),
+    `expected premise-alias + call against e; got:\n${out}`
+  );
+});
+
+test("translateDefineExpr: member? emits .includes()", () => {
+  const src = `(define contains-self?
+  {string --> (list string) --> boolean}
+  X L -> (member? X L))`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "test.shen");
+  assert.ok(
+    /return l\.includes\(x\);/.test(out),
+    `expected member? to translate to .includes; got:\n${out}`
+  );
+});
+
 test("generateTs: wrapper-only spec has no constrained/guarded checks or imports", () => {
   const spec = `(datatype name
   X : string;
