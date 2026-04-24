@@ -22,6 +22,7 @@ import {
   isNumericLiteral,
   inferTargetFields,
   structuralMatchFallback,
+  mergeDatatypeGroups,
   type VerifiedPremise,
   type FieldInfo,
 } from "./shengen.ts";
@@ -688,6 +689,73 @@ test("generateTs: --pkg option annotates the header comment only", () => {
     stripHeader(withPkg),
     "--pkg should only affect the header comment, not code emission"
   );
+});
+
+// ============================================================================
+// §2.4 regression: multi-file spec input via mergeDatatypeGroups.
+// ============================================================================
+
+test("mergeDatatypeGroups: concatenates distinct datatypes from multiple files", () => {
+  const a = parseFileString(`(datatype amount
+  X : number;
+  (>= X 0) : verified;
+  ====================
+  X : amount;)`);
+  const b = parseFileString(`(datatype account-id
+  X : string;
+  ==============
+  X : account-id;)`);
+
+  const merged = mergeDatatypeGroups([
+    { path: "a.shen", datatypes: a },
+    { path: "b.shen", datatypes: b },
+  ]);
+  assert.equal(merged.length, 2);
+  const names = merged.map((d) => d.name).sort();
+  assert.deepEqual(names, ["account-id", "amount"]);
+
+  // Both should land in the same symbol table cleanly.
+  const st = new SymbolTable();
+  st.build(merged);
+  assert.equal(st.lookup("amount")!.category, "constrained");
+  assert.equal(st.lookup("account-id")!.category, "wrapper");
+});
+
+test("mergeDatatypeGroups: rejects cross-file redefinitions", () => {
+  const a = parseFileString(`(datatype amount
+  X : number;
+  ====================
+  X : amount;)`);
+  const b = parseFileString(`(datatype amount
+  X : string;
+  ====================
+  X : amount;)`);
+  assert.throws(
+    () =>
+      mergeDatatypeGroups([
+        { path: "a.shen", datatypes: a },
+        { path: "b.shen", datatypes: b },
+      ]),
+    /declared in both a\.shen and b\.shen/
+  );
+});
+
+test("mergeDatatypeGroups: a file referenced twice is not a redefinition", () => {
+  // The same source path appears twice — common when a wrapper script or
+  // user accidentally duplicates a --spec flag. The validator should only
+  // reject true cross-file conflicts, not harmless repeats.
+  const a = parseFileString(`(datatype amount
+  X : number;
+  ====================
+  X : amount;)`);
+  const merged = mergeDatatypeGroups([
+    { path: "a.shen", datatypes: a },
+    { path: "a.shen", datatypes: a },
+  ]);
+  // Note: datatypes still appear twice in the merged array (no de-dup); the
+  // check is purely about cross-file *conflicts*. Within-file semantics are
+  // parseFile's responsibility, not mergeDatatypeGroups'.
+  assert.equal(merged.length, 2);
 });
 
 test("generateTs: wrapper-only spec has no constrained/guarded checks or imports", () => {
