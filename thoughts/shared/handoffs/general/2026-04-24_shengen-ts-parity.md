@@ -6,9 +6,9 @@ branch: main
 repository: pyrex41/Shen-Backpressure
 topic: "shengen-ts parity with Go reference"
 tags: [handoff, shengen, shengen-ts, typescript, port, parity]
-status: ready
+status: completed
 last_updated: 2026-04-24
-last_updated_by: reuben
+last_updated_by: claude
 type: implementation_prompt
 ---
 
@@ -385,3 +385,79 @@ and this handoff is complete.
 - The parity view from the merkle-nowhere side:
   `/Users/reuben/projects/nw/merkle/notes/shengen-ts-parity.md`.
   Update it if your work changes priorities.
+
+## Completion status (2026-04-24, session addendum)
+
+Landed on `main` across 12 commits (`3c3b983..e4505be`). Full merkle-
+nowhere spec suite (5 files, 54 classes, 26 define helpers, ~1400 LOC
+of generated TS) now compiles with zero structural errors. All 51
+remaining `tsc` diagnostics are `Cannot find name` on user-provided
+impl functions — the downstream author's contract, not something
+shengen-ts can generate.
+
+### What shipped
+
+| Section | Commit | Notes |
+|---------|--------|-------|
+| §1 — scaffolding | `3c3b983` | package.json/tsconfig.json for both TS cmds; bin/shengen-ts + bin/shen-derive-ts shell wrappers using Node's `--experimental-strip-types` (no runtime tsx dep); fixed pre-existing `build-shen-derive` Makefile breakage. |
+| Test port | `1f89666` | 22 tests ported from `main_test.go`, internals exported, CLI guarded via `import.meta.url`. |
+| §3.1 + §3.3 | `ec8cc8e` | `!isSumVariant` guard in alias classification; `inferTargetFields` ported into `structuralMatchFallback`. |
+| §3.2 + §2.2 | `64889cf` | `static create` → `createOrThrow` + `tryCreate`; `must<Type>` free-function exports that shen-derive-ts's harness calls. |
+| §2.3 — `--pkg` | `9564929` | Documents logical package name in the header; does not alter class emission. |
+| §2.4 — multi-file | `c3e8a74` | `--spec` repeatable; `mergeDatatypeGroups` / `mergeSpecs` reject cross-file redefinitions. |
+| §2.1 — `(define …)` | `ffbb5dc` | Parser + single-clause / literal-multi-clause body translation + `must*` dispatch. |
+| Destructure + guards | `8fe07b7` | `[H \| T]`, `[[X Y] \| Rest]`, `where` guards (with fix for a latent Go parser bug that attached the guard to the wrong clause), defensive `__val` runtime helper. |
+| Codegen polish | `227e9ce` | Wrapped-non-primitive with `:verified` → `constrained` (was silently becoming alias and dropping the check); `element?` quote hygiene; `(A --> B)` arrow-type signatures. |
+| Tokenizer + premise alias | `52b8d54` | `[`/`]`/`\|` and quoted strings are now first-class tokens; synthetic `__cons` / `__list` / `__nil` forms in body exprs; `member?` → `.includes()`; constrained constructors alias the Shen premise var onto `x`. |
+| Element-type hints | `cd1cfba` | Propagate list element type from `foldr`/`foldl`/`scanl`/`map`/`filter` arg into the curried lambda's binding (bare-variable list args only). |
+| Real type propagator | `e4505be` | Full `inferShenType` over the body grammar. Nested calls like `(foldr … (scanl … Txs))` resolve end-to-end — dropped merkle TS errors 95 → 51. |
+
+### Deviations from the handoff
+
+- **Runtime model:** chose Node's native `--experimental-strip-types`
+  over tsx (§1 suggested tsx). tsx isn't on the system; Node's support
+  is stable enough that the bin wrappers exec Node directly. Updates
+  documented in `cmd/shen-derive-ts/README.md`.
+- **§3.2:** chose option 2 (rename to `createOrThrow` + add
+  `tryCreate`) rather than option 1 (union return). Matches the
+  user's expressed preference; keeps the runtime-throw happy path
+  intact, adds a type-honest fallible variant.
+- **§4 (ts-payment end-to-end example):** deferred. Every piece
+  landed is wired into the merkle-nowhere path — the remaining
+  adoption proof can come in a follow-up if useful.
+
+### Known limitations
+
+- **Destructuring patterns:** support `_`, `[]`, variables, literal
+  atoms (`"x"`, `42`, `true`), `[H | T]`, and `[[X Y …] | Rest]`.
+  Deeper nested cons patterns (e.g. `[[[A B] | Inner] | Rest]`) emit
+  a TODO-throw stub. No real-world spec I saw needs them.
+- **Type inference scope:** `inferShenType` handles every op in the
+  body grammar plus user-define calls via signature. It doesn't
+  propagate through accumulator-body back-edges in fold/scan — those
+  lambdas get accumulator types as `any` (element type is resolved
+  correctly). Accessor dispatch still fires on elements, which is
+  where the readability win lives.
+- **Emission style for `val`:** uses a defensive `__val` helper at
+  runtime so `(val X)` on a primitive is identity. This shadows the
+  cleaner `.val()` emission the guard-path uses when the type is
+  known. Mixing is intentional: guard paths have full symbol-table
+  info, define bodies sometimes don't.
+
+### Done-signal deltas
+
+Handoff §8's command sequence is satisfied except the ts-payment
+example (deferred). Replacement proof:
+
+```
+cd ~/projects/Shen-Backpressure
+make build-all                                  # green
+cd cmd/shengen-ts && npm test                   # 65/65 green
+cd ../shen-derive-ts && npm test                # 182 pass / 1 skipped (pre-existing orphan)
+./bin/shengen-ts examples/payment/specs/core.shen --pkg guards --out /tmp/p.ts
+                                                # emits classes + must* + processable
+```
+
+For the merkle-nowhere end of the contract, point shengen-ts at the
+five spec files and compile the output — zero structural errors,
+remaining unresolved names are the project's user-impl surface.
