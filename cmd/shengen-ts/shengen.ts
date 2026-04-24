@@ -153,13 +153,23 @@ export class SymbolTable {
         } else if (
           r.conc.isWrapped &&
           verified.length > 0 &&
-          prems.length >= 1 &&
-          isPrimitive(prems[0].typeName)
+          prems.length >= 1
         ) {
+          // A single-field wrapped conclusion with at least one `:verified`
+          // premise is `constrained` regardless of whether the inner type is
+          // primitive. For non-primitive inners (e.g. `bounded-base64url`
+          // wrapping `base64url`) we still need a class with a runtime check,
+          // not a bare type alias — otherwise the length/range guard silently
+          // evaporates.
           info.category = "constrained";
-          info.wrappedPrim = prems[0].typeName;
+          if (isPrimitive(prems[0].typeName)) {
+            info.wrappedPrim = prems[0].typeName;
+          } else {
+            info.wrappedType = prems[0].typeName;
+          }
         } else if (
           r.conc.isWrapped &&
+          verified.length === 0 &&
           prems.length === 1 &&
           !isPrimitive(prems[0].typeName) &&
           !isSumVariant
@@ -571,7 +581,12 @@ function translateElement(
   }
   if (elements.length > 0) {
     const val = unwrap(st, resolved);
-    const setLiteral = `new Set([${elements.map((e) => `"${e}"`).join(", ")}])`;
+    // Shen literal strings come through already quoted (`"foo"` stays
+    // `"foo"`); symbols are bare tokens we need to JSON-quote. Detect the
+    // former by checking for an outer pair of double quotes.
+    const setLiteral = `new Set([${elements
+      .map((e) => (e.startsWith('"') && e.endsWith('"') ? e : `"${e}"`))
+      .join(", ")}])`;
     return [
       `${setLiteral}.has(${val})`,
       `${resolved.code} must be in the valid set`,
@@ -1049,12 +1064,45 @@ function buildRule(premLines: string[], concLines: string[]): Rule | null {
 // ============================================================================
 
 export function shenTypeToTs(t: string): string {
-  // Handle parameterized types like (list search-hit) → SearchHit[]
-  const listMatch = t.match(/^\(list\s+(.+)\)$/);
+  const trimmed = t.trim();
+  // Handle parameterized list types: (list X) → X[]
+  const listMatch = trimmed.match(/^\(list\s+(.+)\)$/);
   if (listMatch) {
     return shenTypeToTs(listMatch[1]) + "[]";
   }
-  switch (t) {
+  // Handle function arrow types: (A --> B) → (a0: A) => B
+  // Also (A --> B --> C) → (a0: A, a1: B) => C (curried in Shen, flattened in TS).
+  if (
+    trimmed.startsWith("(") &&
+    trimmed.endsWith(")") &&
+    trimmed.includes(" --> ")
+  ) {
+    const inner = trimmed.slice(1, -1).trim();
+    const parts: string[] = [];
+    let depth = 0;
+    let cur = "";
+    for (let i = 0; i < inner.length; i++) {
+      const ch = inner[i];
+      if (ch === "(") depth++;
+      else if (ch === ")") depth--;
+      if (depth === 0 && inner.startsWith(" --> ", i)) {
+        parts.push(cur.trim());
+        cur = "";
+        i += 4;
+        continue;
+      }
+      cur += ch;
+    }
+    if (cur.trim()) parts.push(cur.trim());
+    if (parts.length >= 2) {
+      const ret = shenTypeToTs(parts[parts.length - 1]);
+      const args = parts
+        .slice(0, -1)
+        .map((p, i) => `a${i}: ${shenTypeToTs(p)}`);
+      return `(${args.join(", ")}) => ${ret}`;
+    }
+  }
+  switch (trimmed) {
     case "string":
     case "symbol":
       return "string";
@@ -1065,7 +1113,7 @@ export function shenTypeToTs(t: string): string {
     case "":
       return "unknown";
     default:
-      return toPascalCase(t);
+      return toPascalCase(trimmed);
   }
 }
 

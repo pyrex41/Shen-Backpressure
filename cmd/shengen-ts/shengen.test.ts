@@ -225,6 +225,82 @@ test("symbolTable: single non-primitive premise produces an alias", () => {
   assert.equal(info!.wrappedType, "unknown-profile");
 });
 
+test("symbolTable: wrapped non-primitive with verified premise is constrained, not alias", () => {
+  // Regression: bounded-base64url wraps base64url (non-primitive) plus a
+  // length cap. Before the fix the classifier called this `alias` and the
+  // runtime `length <= 100000` check silently disappeared.
+  const spec = `(datatype base64url
+  X : string;
+  (>= (length X) 0) : verified;
+  =========================
+  X : base64url;)
+
+(datatype bounded-base64url
+  X : base64url;
+  (<= (length X) 100000) : verified;
+  ====================================
+  X : bounded-base64url;)`;
+  const st = new SymbolTable();
+  st.build(parseFileString(spec));
+  const info = st.lookup("bounded-base64url");
+  assert.ok(info);
+  assert.equal(info!.category, "constrained");
+  assert.equal(info!.wrappedType, "base64url");
+});
+
+test("generateTs: wrapped-non-primitive constrained emits class with runtime check", () => {
+  const spec = `(datatype base64url
+  X : string;
+  (>= (length X) 0) : verified;
+  =========================
+  X : base64url;)
+
+(datatype bounded-base64url
+  X : base64url;
+  (<= (length X) 100000) : verified;
+  ====================================
+  X : bounded-base64url;)`;
+  const types = parseFileString(spec);
+  const st = new SymbolTable();
+  st.build(types);
+  const out = generateTs(types, st, "test.shen");
+  assert.ok(
+    out.includes("export class BoundedBase64url"),
+    "BoundedBase64url must be emitted as a class, not a type alias"
+  );
+  assert.ok(
+    out.includes("x.val().length <= 100000"),
+    "length check must appear in the generated code"
+  );
+  assert.ok(
+    !out.includes("export type BoundedBase64url"),
+    "must not emit a type alias for bounded-base64url"
+  );
+});
+
+test("verifiedToTs: element? with quoted string atoms emits singly-quoted set literal", () => {
+  // Regression: source `(element? X ["s" "e" "m"])` used to produce
+  // `new Set([""s"", ""e"", ""m""])` — invalid TS. Atoms that already carry
+  // surrounding `"` chars must pass through the generator unchanged.
+  const spec = `(datatype tag
+  X : string;
+  (element? X ["s" "e" "m"]) : verified;
+  =========================================
+  X : tag;)`;
+  const types = parseFileString(spec);
+  const st = new SymbolTable();
+  st.build(types);
+  const out = generateTs(types, st, "test.shen");
+  assert.ok(
+    out.includes('new Set(["s", "e", "m"])'),
+    `set literal should be new Set(["s", "e", "m"]); got:\n${out}`
+  );
+  assert.ok(
+    !out.includes('""s""'),
+    "must not emit doubled quotes on element? atoms"
+  );
+});
+
 // ============================================================================
 // S-Expression Parser Tests
 // ============================================================================
