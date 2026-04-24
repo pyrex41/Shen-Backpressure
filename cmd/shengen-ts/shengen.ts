@@ -257,23 +257,36 @@ export function sexprToString(e: SExpr): string {
 function tokenize(s: string): string[] {
   const tokens: string[] = [];
   let cur = "";
-  for (const ch of s) {
-    if (ch === "(" || ch === ")") {
-      if (cur) {
-        tokens.push(cur);
-        cur = "";
-      }
+  let inString = false;
+  const flush = () => {
+    if (cur) {
+      tokens.push(cur);
+      cur = "";
+    }
+  };
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    // Shen string literal — preserve verbatim including surrounding quotes.
+    // A backslash-escape doesn't toggle the state.
+    if (ch === '"' && !(inString && i > 0 && s[i - 1] === "\\")) {
+      cur += ch;
+      inString = !inString;
+      continue;
+    }
+    if (inString) {
+      cur += ch;
+      continue;
+    }
+    if (ch === "(" || ch === ")" || ch === "[" || ch === "]") {
+      flush();
       tokens.push(ch);
     } else if (ch === " " || ch === "\t" || ch === "\n") {
-      if (cur) {
-        tokens.push(cur);
-        cur = "";
-      }
+      flush();
     } else {
       cur += ch;
     }
   }
-  if (cur) tokens.push(cur);
+  flush();
   return tokens;
 }
 
@@ -282,7 +295,8 @@ function parseTokens(
   pos: number
 ): [SExpr, number] {
   if (pos >= tokens.length) return [{ atom: "", children: null }, pos];
-  if (tokens[pos] === "(") {
+  const t = tokens[pos];
+  if (t === "(") {
     pos++;
     const children: SExpr[] = [];
     while (pos < tokens.length && tokens[pos] !== ")") {
@@ -293,7 +307,61 @@ function parseTokens(
     if (pos < tokens.length) pos++;
     return [{ atom: null, children }, pos];
   }
-  return [{ atom: tokens[pos], children: null }, pos + 1];
+  if (t === "[") {
+    // Shen list forms. `[]` → (__nil); `[a b c]` → (__list a b c);
+    // `[h | t]` → (__cons h t). We synthesize a call with a sentinel head
+    // so the body translator can dispatch on the same SExpr shape it uses
+    // for any other op.
+    pos++;
+    const elements: SExpr[] = [];
+    let sawPipe = false;
+    let tailExpr: SExpr | null = null;
+    while (pos < tokens.length && tokens[pos] !== "]") {
+      if (tokens[pos] === "|") {
+        sawPipe = true;
+        pos++;
+        // The token after `|` is the tail pattern/expression.
+        if (pos < tokens.length && tokens[pos] !== "]") {
+          const [child, np] = parseTokens(tokens, pos);
+          tailExpr = child;
+          pos = np;
+        }
+        continue;
+      }
+      const [child, np] = parseTokens(tokens, pos);
+      elements.push(child);
+      pos = np;
+    }
+    if (pos < tokens.length) pos++; // consume ]
+
+    if (sawPipe && tailExpr && elements.length === 1) {
+      return [
+        {
+          atom: null,
+          children: [
+            { atom: "__cons", children: null },
+            elements[0],
+            tailExpr,
+          ],
+        },
+        pos,
+      ];
+    }
+    if (elements.length === 0 && !sawPipe) {
+      return [
+        { atom: null, children: [{ atom: "__nil", children: null }] },
+        pos,
+      ];
+    }
+    return [
+      {
+        atom: null,
+        children: [{ atom: "__list", children: null }, ...elements],
+      },
+      pos,
+    ];
+  }
+  return [{ atom: t, children: null }, pos + 1];
 }
 
 export function parseSExpr(input: string): SExpr {
@@ -570,14 +638,23 @@ function translateElement(
   const resolved = resolveExpr(st, expr.children[1], varMap);
   if (!resolved)
     return ["/* TODO: element? */ true", "could not resolve element?"];
-  // Collect set elements from remaining children.
-  // Shen list [a b c] tokenizes as atoms with brackets attached,
-  // e.g. "[a", "b", "c]" — strip brackets to get clean element names.
+  // Collect set elements. After the tokenizer update, Shen list literals
+  // like `[a b c]` parse as a single `(__list a b c)` call. Extract the
+  // child atoms from there. Fall back to the legacy bracket-attached-atom
+  // shape for any call site that still passes raw atoms.
   const elements: string[] = [];
-  for (let i = 2; i < expr.children.length; i++) {
-    let atom = expr.children[i].atom ?? "";
-    atom = atom.replace(/^\[/, "").replace(/\]$/, "");
-    if (atom) elements.push(atom);
+  const arg = expr.children[2];
+  if (isCall(arg) && op(arg) === "__list") {
+    for (const child of arg.children!.slice(1)) {
+      const atom = child.atom ?? "";
+      if (atom) elements.push(atom);
+    }
+  } else {
+    for (let i = 2; i < expr.children.length; i++) {
+      let atom = expr.children[i].atom ?? "";
+      atom = atom.replace(/^\[/, "").replace(/\]$/, "");
+      if (atom) elements.push(atom);
+    }
   }
   if (elements.length > 0) {
     const val = unwrap(st, resolved);
@@ -1296,7 +1373,17 @@ function genWrapper(gt: GeneratedType): string[] {
 function genConstrained(gt: GeneratedType, st: SymbolTable): string[] {
   const tsType = shenTypeToTs(gt.rule.premises[0].typeName);
   const varMap = new Map(gt.rule.premises.map((p) => [p.varName, p.typeName]));
+  const premiseVar = gt.rule.premises[0].varName;
+  const premiseCamel = toCamelCase(premiseVar);
+  // The verified-premise translator emits references using the Shen variable
+  // name (camelCased) — e.g. `(has-no-refs? E)` → `hasNoRefs(e)`. The
+  // constructor's parameter is always `x`, so alias `e = x` up front when
+  // they differ, otherwise the check references an undefined identifier.
+  const needsAlias = premiseCamel !== "x";
   const checks: string[] = [];
+  if (needsAlias) {
+    checks.push(`    const ${premiseCamel} = x;`);
+  }
   for (const v of gt.rule.verified) {
     const [code, msg] = verifiedToTs(st, v, varMap);
     checks.push(`    if (!(${code})) throw new Error(\`${msg.replace(/`/g, "\\`")}: \${x}\`);`);
@@ -1627,10 +1714,22 @@ function translateDefineExpr(
       return `${tx(args[0])}.length`;
     case "cons":
       return `[${tx(args[0])}, ...${tx(args[1])}]`;
+    case "__cons":
+      // Bracket-sugar `[H | T]` — emitted by the tokenizer as this synthetic
+      // head so body translation can share the cons-building branch.
+      return `[${tx(args[0])}, ...${tx(args[1])}]`;
+    case "__list":
+      // `[a b c]` → `[a, b, c]`.
+      return `[${args.map(tx).join(", ")}]`;
+    case "__nil":
+      return `[]`;
     case "concat":
       return `${tx(args[0])}.concat(${tx(args[1])})`;
     case "empty?":
       return `(${tx(args[0])}.length === 0)`;
+    case "member?":
+      // (member? needle haystack) → haystack.includes(needle).
+      return `${tx(args[1])}.includes(${tx(args[0])})`;
     case "val":
       // Shen `val` projects a wrapped value. The spec sometimes applies it to
       // an already-unwrapped primitive (e.g. a scanl accumulator seeded with
