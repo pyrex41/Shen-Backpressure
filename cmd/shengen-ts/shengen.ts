@@ -946,54 +946,62 @@ export function parseDefine(block: string): Define | null {
 
   const clauses: DefineClause[] = [];
   let currentPatterns = segments[0];
+  // The `where` token appearing in segment[i] binds to the NEXT clause's
+  // guard (built in iteration i+1), not the clause whose result is parsed
+  // out of segment[i]. Buffer it across iterations.
+  let pendingGuard = "";
 
   for (let i = 1; i < segments.length; i++) {
-    let seg = segments[i];
+    let seg = segments[i].trim();
+
+    // Step 1: peel the prev-clause's RESULT from the start of seg.
     let result = "";
-    let guard = "";
-    let nextPatterns = "";
-    // When result is harvested as a balanced paren expression we trust the
-    // extractor's bookkeeping; only bare-atom results need later cleanup.
+    let remaining = "";
     let resultCameFromBalancedParen = false;
 
-    const whereIdx = seg.indexOf(" where ");
-    if (whereIdx !== -1) {
-      result = seg.slice(0, whereIdx).trim();
-      if (result.startsWith("(")) resultCameFromBalancedParen = true;
-      const afterWhere = seg.slice(whereIdx + 7).trim();
-      if (afterWhere.startsWith("(")) {
-        const [g, endIdx] = extractBalancedParen(afterWhere);
-        guard = g;
-        nextPatterns = afterWhere.slice(endIdx).trim();
-      } else {
-        guard = afterWhere;
-      }
+    if (seg.startsWith("(")) {
+      const [expr, endIdx] = extractBalancedParen(seg);
+      result = expr;
+      resultCameFromBalancedParen = true;
+      remaining = seg.slice(endIdx).trim();
     } else {
-      seg = seg.trim();
-      if (seg.startsWith("(")) {
-        const [expr, endIdx] = extractBalancedParen(seg);
-        result = expr;
-        resultCameFromBalancedParen = true;
-        nextPatterns = seg.slice(endIdx).trim();
+      const match = seg.match(/^(\S+)\s*(.*)$/);
+      if (match) {
+        result = match[1];
+        remaining = match[2].trim();
       } else {
-        const tokens = seg.split(/\s+/);
-        result = tokens[0];
-        if (tokens.length > 1) nextPatterns = tokens.slice(1).join(" ");
+        result = seg;
       }
     }
-
-    // Bare-atom results (e.g. `true`, `42`, `"foo"`) may carry a trailing
-    // close-paren from the enclosing (define …) frame's segment-joining;
-    // trim that. Balanced s-exprs are already correct.
     if (!resultCameFromBalancedParen) {
       result = result.replace(/\)+$/, "").trim();
     }
 
+    // Step 2: what remains is the NEXT clause's patterns, possibly followed
+    // by its `where (…)` guard. Split on the top-level ` where `.
+    let nextPatterns = remaining;
+    let nextGuard = "";
+    const whereIdx = remaining.indexOf(" where ");
+    if (whereIdx !== -1) {
+      nextPatterns = remaining.slice(0, whereIdx).trim();
+      const afterWhere = remaining.slice(whereIdx + 7).trim();
+      if (afterWhere.startsWith("(")) {
+        const [g] = extractBalancedParen(afterWhere);
+        nextGuard = g;
+      } else {
+        nextGuard = afterWhere;
+      }
+    }
+
+    // Step 3: build the CURRENT clause (patterns from currentPatterns, guard
+    // from whatever the previous segment buffered, result from this segment).
     const patterns = splitPatterns(currentPatterns);
     if (patterns.length > 0) {
-      clauses.push({ patterns, result, guard });
+      clauses.push({ patterns, result, guard: pendingGuard });
     }
+
     currentPatterns = nextPatterns;
+    pendingGuard = nextGuard;
   }
 
   if (clauses.length === 0) return null;
@@ -1352,6 +1360,151 @@ function definePascalName(shenName: string): string {
   return toCamelCase(shenName.replace(/\?$/, ""));
 }
 
+// listElemType pulls X out of `(list X)`, respecting nested parens. Returns
+// null when the type isn't a parameterized list.
+function listElemType(shenType: string): string | null {
+  const trimmed = shenType.trim();
+  if (!trimmed.startsWith("(list ") || !trimmed.endsWith(")")) return null;
+  return trimmed.slice("(list ".length, -1).trim();
+}
+
+// findTopLevelPipe scans a string for the first `|` that isn't nested inside
+// `[]`. Used to split cons patterns `[HEAD | TAIL]`.
+function findTopLevelPipe(s: string): number {
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "[") depth++;
+    else if (ch === "]") depth--;
+    else if (ch === "|" && depth === 0) return i;
+  }
+  return -1;
+}
+
+interface PatternBinding {
+  name: string; // camelCase TS identifier
+  expr: string; // source expression (e.g. "list[0]")
+  shenType: string;
+}
+
+interface PatternAnalysis {
+  supported: boolean;
+  checks: string[];
+  bindings: PatternBinding[];
+}
+
+// analyzePattern turns one Shen pattern string into match checks + bindings.
+// Covers `_`, literals (string/number/bool/[]), variable binders, and the two
+// most common destructuring shapes: `[H | T]` and `[[X Y …] | Rest]`.
+function analyzePattern(
+  pat: string,
+  paramName: string,
+  paramShenType: string,
+  st: SymbolTable,
+  paramIdx: number
+): PatternAnalysis {
+  if (pat === "_") return { supported: true, checks: [], bindings: [] };
+  if (pat === "[]") {
+    return {
+      supported: true,
+      checks: [`${paramName}.length === 0`],
+      bindings: [],
+    };
+  }
+  if (
+    /^".*"$/.test(pat) ||
+    pat === "true" ||
+    pat === "false" ||
+    isNumericLiteral(pat)
+  ) {
+    return {
+      supported: true,
+      checks: [`${paramName} === ${pat}`],
+      bindings: [],
+    };
+  }
+
+  // Cons pattern [HEAD | TAIL]
+  if (pat.startsWith("[") && pat.endsWith("]") && pat.includes("|")) {
+    const inner = pat.slice(1, -1).trim();
+    const pipeIdx = findTopLevelPipe(inner);
+    if (pipeIdx === -1) return { supported: false, checks: [], bindings: [] };
+    const headPat = inner.slice(0, pipeIdx).trim();
+    const tailPat = inner.slice(pipeIdx + 1).trim();
+    const elemType = listElemType(paramShenType) ?? "any";
+
+    const checks = [`${paramName}.length > 0`];
+    const bindings: PatternBinding[] = [];
+
+    // Head: wildcard, bare variable, or nested destructure [A B C …].
+    if (headPat === "_") {
+      // nothing to bind
+    } else if (/^[A-Za-z_][A-Za-z0-9_-]*$/.test(headPat)) {
+      bindings.push({
+        name: toCamelCase(headPat),
+        expr: `${paramName}[0]`,
+        shenType: elemType,
+      });
+    } else if (headPat.startsWith("[") && headPat.endsWith("]")) {
+      const innerVars = headPat
+        .slice(1, -1)
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+      const elemInfo = st.lookup(elemType);
+      if (!elemInfo || elemInfo.fields.length < innerVars.length) {
+        return { supported: false, checks: [], bindings: [] };
+      }
+      // Intermediate head binding so nested accessors reference it once.
+      const headHandle = `__p${paramIdx}Head`;
+      bindings.push({
+        name: headHandle,
+        expr: `${paramName}[0]`,
+        shenType: elemType,
+      });
+      for (let i = 0; i < innerVars.length; i++) {
+        const v = innerVars[i];
+        if (v === "_") continue;
+        const field = elemInfo.fields[i];
+        bindings.push({
+          name: toCamelCase(v),
+          expr: `${headHandle}.${toCamelCase(field.shenName)}()`,
+          shenType: field.shenType,
+        });
+      }
+    } else {
+      return { supported: false, checks: [], bindings: [] };
+    }
+
+    // Tail: wildcard or bare variable.
+    if (tailPat === "_") {
+      // nothing to bind
+    } else if (/^[A-Za-z_][A-Za-z0-9_-]*$/.test(tailPat)) {
+      bindings.push({
+        name: toCamelCase(tailPat),
+        expr: `${paramName}.slice(1)`,
+        shenType: paramShenType,
+      });
+    } else {
+      return { supported: false, checks: [], bindings: [] };
+    }
+
+    return { supported: true, checks, bindings };
+  }
+
+  // Plain variable pattern — alias paramName to the binder's camelCase form.
+  if (/^[A-Z_][A-Za-z0-9_-]*$/.test(pat)) {
+    const camel = toCamelCase(pat);
+    const bindings: PatternBinding[] =
+      camel === paramName
+        ? []
+        : [{ name: camel, expr: paramName, shenType: paramShenType }];
+    return { supported: true, checks: [], bindings };
+  }
+
+  return { supported: false, checks: [], bindings: [] };
+}
+
 function translateDefineBodyRaw(
   raw: string,
   varMap: Map<string, string>,
@@ -1431,7 +1584,11 @@ function translateDefineExpr(
     case "empty?":
       return `(${tx(args[0])}.length === 0)`;
     case "val":
-      return `${tx(args[0])}.val()`;
+      // Shen `val` projects a wrapped value. The spec sometimes applies it to
+      // an already-unwrapped primitive (e.g. a scanl accumulator seeded with
+      // `(val B0)` that then re-unwraps `B` inside the lambda). Dispatch to a
+      // defensive helper so primitives flow through unchanged.
+      return `__val(${tx(args[0])})`;
     case "lambda": {
       // (lambda X body) → (x: any) => <body>
       if (args.length !== 2 || !isAtom(args[0])) {
@@ -1493,14 +1650,26 @@ function generateDefineHelpers(st: SymbolTable): string[] {
   const lines: string[] = [];
   const bodies: string[] = [];
   let needsScanl = false;
+  let needsVal = false;
 
   for (const [, def] of st.defines) {
     const emitted = generateOneDefine(def, st);
     if (emitted.usesScanl) needsScanl = true;
+    if (emitted.usesVal) needsVal = true;
     bodies.push(...emitted.lines);
   }
 
   lines.push("// --- helpers derived from (define …) blocks ---");
+  if (needsVal) {
+    lines.push(
+      "// __val defensively projects a wrapped value. On primitives it is the",
+      "// identity, because Shen specs occasionally apply `val` to already-",
+      "// unwrapped accumulators (e.g. scanl seeded with `(val B0)`).",
+      "function __val(x: any): any {",
+      "  return (x && typeof x.val === \"function\") ? x.val() : x;",
+      "}"
+    );
+  }
   if (needsScanl) {
     lines.push(
       "// scanl: left-scan matching Shen semantics. Emits intermediate",
@@ -1521,37 +1690,35 @@ function generateDefineHelpers(st: SymbolTable): string[] {
 interface DefineEmission {
   lines: string[];
   usesScanl: boolean;
+  usesVal: boolean;
 }
 
 function generateOneDefine(def: Define, st: SymbolTable): DefineEmission {
   const lines: string[] = [];
   const tsName = definePascalName(def.name);
 
-  // Param count is the maximum across clauses. For well-formed defines it
-  // matches the signature length - 1 (return is the last entry).
   const paramCount = Math.max(...def.clauses.map((c) => c.patterns.length), 0);
-  const sigParams = def.signature.slice(0, Math.max(def.signature.length - 1, 0));
+  const sigParams = def.signature.slice(
+    0,
+    Math.max(def.signature.length - 1, 0)
+  );
   const returnShen =
     def.signature.length > 0 ? def.signature[def.signature.length - 1] : "";
   const returnTs = returnShen ? shenTypeToTs(returnShen) : "any";
 
-  // Choose a canonical param name per index: first clause whose pattern there
-  // is a plain variable (uppercase binder). Fall back to arg<i>.
+  // Canonical param name per index: pick the first top-level variable binder
+  // that appears across clauses. Destructure patterns deliberately don't
+  // contribute candidates — mining their tail variable (e.g. `[_ | Rest]`)
+  // for the whole-list name would clash with the binding we emit inside the
+  // clause body (`const rest = rest.slice(1)` hits the TDZ). Fall back to
+  // `arg<i>` when no top-level binder exists.
   const paramNames: string[] = [];
   for (let i = 0; i < paramCount; i++) {
     let chosen: string | null = null;
     for (const c of def.clauses) {
       const pat = c.patterns[i];
       if (!pat) continue;
-      if (
-        pat !== "_" &&
-        !pat.startsWith("[") &&
-        pat !== "[]" &&
-        !/^".*"$/.test(pat) &&
-        pat !== "true" &&
-        pat !== "false" &&
-        !isNumericLiteral(pat)
-      ) {
+      if (pat !== "_" && /^[A-Z][A-Za-z0-9_-]*$/.test(pat)) {
         chosen = pat;
         break;
       }
@@ -1567,130 +1734,141 @@ function generateOneDefine(def: Define, st: SymbolTable): DefineEmission {
   lines.push(`export function ${tsName}(${paramSig}): ${returnTs} {`);
 
   let usesScanl = false;
+  let usesVal = false;
+  let anyUnsupported = false;
+  let sawUnconditionalReturn = false;
 
-  // If every clause has all-variable patterns, fuse them into a single body —
-  // they're semantically identical as long as the variable names align.
-  const allVarPatterns = def.clauses.every((c) =>
-    c.patterns.every(
-      (p) =>
-        p === "_" ||
-        (!p.startsWith("[") &&
-          !/^".*"$/.test(p) &&
-          p !== "true" &&
-          p !== "false" &&
-          !isNumericLiteral(p))
-    )
-  );
+  for (const clause of def.clauses) {
+    if (sawUnconditionalReturn) break; // a catch-all earlier already ended all paths
 
-  if (allVarPatterns && def.clauses.length === 1) {
-    const clause = def.clauses[0];
-    const varMap = new Map<string, string>();
-    for (let i = 0; i < clause.patterns.length; i++) {
-      const pat = clause.patterns[i];
-      if (pat === "_") continue;
-      const shenTy = sigParams[i] ?? "any";
-      varMap.set(pat, shenTy);
-      // Alias the Shen-cased name to the canonical TS param so body references
-      // translate cleanly. Only needed when the names diverge after camelCase.
-      if (toCamelCase(pat) !== paramNames[i]) {
-        lines.push(`  const ${toCamelCase(pat)} = ${paramNames[i]};`);
-      }
-    }
-    const bodySrc = clause.result;
-    if (/scanl/.test(bodySrc)) usesScanl = true;
-    const body = translateDefineBodyRaw(bodySrc, varMap, st);
-    lines.push(`  return ${body};`);
-  } else {
-    // Multi-clause: emit an if-chain guarded by literal pattern checks. If a
-    // clause's pattern for any position isn't a recognized literal/variable,
-    // fall back to a TODO stub.
-    let fellThrough = false;
-    for (const clause of def.clauses) {
-      const checks: string[] = [];
-      const varMap = new Map<string, string>();
-      let supported = true;
-
-      for (let i = 0; i < clause.patterns.length; i++) {
-        const pat = clause.patterns[i];
-        const paramName = paramNames[i];
-        if (pat === "_" ) continue;
-        if (pat.startsWith("[") || pat === "[]") {
-          supported = false;
-          break;
-        }
-        if (
-          /^".*"$/.test(pat) ||
-          pat === "true" ||
-          pat === "false" ||
-          isNumericLiteral(pat)
-        ) {
-          checks.push(`${paramName} === ${pat}`);
-          continue;
-        }
-        // Variable pattern — alias if distinct from param.
-        const shenTy = sigParams[i] ?? "any";
-        varMap.set(pat, shenTy);
-        if (toCamelCase(pat) !== paramName) {
-          // Surfaced as a `const` below.
-        }
-      }
-
-      if (!supported) {
-        lines.push(
-          `  // TODO: destructuring clause — patterns=${JSON.stringify(clause.patterns)} result=${JSON.stringify(clause.result)}`
-        );
-        fellThrough = true;
-        continue;
-      }
-
-      // Emit aliases for variable bindings whose name differs from the param.
-      const aliases: string[] = [];
-      for (let i = 0; i < clause.patterns.length; i++) {
-        const pat = clause.patterns[i];
-        const paramName = paramNames[i];
-        if (
-          pat === "_" ||
-          pat.startsWith("[") ||
-          /^".*"$/.test(pat) ||
-          pat === "true" ||
-          pat === "false" ||
-          isNumericLiteral(pat)
-        ) {
-          continue;
-        }
-        if (toCamelCase(pat) !== paramName) {
-          aliases.push(`    const ${toCamelCase(pat)} = ${paramName};`);
-        }
-      }
-
-      const bodySrc = clause.result;
-      if (/scanl/.test(bodySrc)) usesScanl = true;
-      const body = translateDefineBodyRaw(bodySrc, varMap, st);
-
-      if (checks.length === 0) {
-        // Variable-only (catch-all) clause.
-        lines.push(...aliases);
-        lines.push(`  return ${body};`);
-        fellThrough = false;
+    // Analyze every positional pattern.
+    const perParam: PatternAnalysis[] = [];
+    let clauseSupported = true;
+    for (let i = 0; i < paramCount; i++) {
+      const pat = clause.patterns[i] ?? "_";
+      const paramShenType = sigParams[i] ?? "any";
+      const analysis = analyzePattern(
+        pat,
+        paramNames[i],
+        paramShenType,
+        st,
+        i
+      );
+      if (!analysis.supported) {
+        clauseSupported = false;
         break;
       }
-      lines.push(`  if (${checks.join(" && ")}) {`);
-      lines.push(...aliases);
-      lines.push(`    return ${body};`);
-      lines.push(`  }`);
+      perParam.push(analysis);
     }
-    if (fellThrough) {
-      // If the only clauses that fit were guarded, emit a throw so the
-      // function is well-typed and surfaces the gap at runtime.
+
+    if (!clauseSupported) {
       lines.push(
-        `  throw new Error("shengen-ts: unhandled pattern in ${def.name} (destructuring not yet translated)");`
+        `  // TODO: unsupported pattern shape — patterns=${JSON.stringify(clause.patterns)}`
       );
+      anyUnsupported = true;
+      continue;
     }
+
+    // Flatten match checks + bindings + build varMap for body/guard translation.
+    const checks: string[] = [];
+    const bindings: PatternBinding[] = [];
+    const varMap = new Map<string, string>();
+    for (const a of perParam) {
+      checks.push(...a.checks);
+      bindings.push(...a.bindings);
+    }
+    // Reverse-lookup: varMap keys are the Shen-side variable names in the
+    // pattern, values are Shen types. We derive those from clause.patterns
+    // rather than from bindings (whose names are camelCase-TS form).
+    for (let i = 0; i < paramCount; i++) {
+      const pat = clause.patterns[i] ?? "_";
+      const paramShenType = sigParams[i] ?? "any";
+      if (/^[A-Z_][A-Za-z0-9_-]*$/.test(pat)) {
+        varMap.set(pat, paramShenType);
+      } else if (pat.startsWith("[") && pat.endsWith("]") && pat.includes("|")) {
+        const inner = pat.slice(1, -1).trim();
+        const pipeIdx = findTopLevelPipe(inner);
+        if (pipeIdx === -1) continue;
+        const headPat = inner.slice(0, pipeIdx).trim();
+        const tailPat = inner.slice(pipeIdx + 1).trim();
+        const elemType = listElemType(paramShenType) ?? "any";
+        if (/^[A-Z_][A-Za-z0-9_-]*$/.test(headPat)) {
+          varMap.set(headPat, elemType);
+        } else if (headPat.startsWith("[") && headPat.endsWith("]")) {
+          const innerVars = headPat
+            .slice(1, -1)
+            .trim()
+            .split(/\s+/)
+            .filter(Boolean);
+          const elemInfo = st.lookup(elemType);
+          for (let j = 0; j < innerVars.length; j++) {
+            const v = innerVars[j];
+            if (v === "_") continue;
+            const fieldShenTy =
+              elemInfo && j < elemInfo.fields.length
+                ? elemInfo.fields[j].shenType
+                : "any";
+            varMap.set(v, fieldShenTy);
+          }
+        }
+        if (/^[A-Z_][A-Za-z0-9_-]*$/.test(tailPat)) {
+          varMap.set(tailPat, paramShenType);
+        }
+      }
+    }
+
+    // Optional `where` guard becomes an additional predicate on the clause.
+    let guardCode: string | null = null;
+    if (clause.guard && clause.guard.trim()) {
+      if (/scanl/.test(clause.guard)) usesScanl = true;
+      if (/\bval\b/.test(clause.guard)) usesVal = true;
+      guardCode = translateDefineBodyRaw(clause.guard, varMap, st);
+    }
+
+    const bodySrc = clause.result;
+    if (/scanl/.test(bodySrc)) usesScanl = true;
+    if (/\bval\b/.test(bodySrc)) usesVal = true;
+    const bodyCode = translateDefineBodyRaw(bodySrc, varMap, st);
+
+    const emitBindings = bindings.map((b) => `    const ${b.name} = ${b.expr};`);
+    const hasChecks = checks.length > 0;
+
+    if (!hasChecks && guardCode === null) {
+      // Unconditional clause — emit at the top level and stop processing
+      // further clauses; they're dead code behind this catch-all.
+      lines.push(...bindings.map((b) => `  const ${b.name} = ${b.expr};`));
+      lines.push(`  return ${bodyCode};`);
+      sawUnconditionalReturn = true;
+      continue;
+    }
+
+    const openCond = hasChecks ? `if (${checks.join(" && ")})` : `if (true)`;
+    lines.push(`  ${openCond} {`);
+    lines.push(...emitBindings);
+    if (guardCode !== null) {
+      lines.push(`    if (${guardCode}) {`);
+      lines.push(`      return ${bodyCode};`);
+      lines.push(`    }`);
+    } else {
+      lines.push(`    return ${bodyCode};`);
+    }
+    lines.push(`  }`);
+  }
+
+  if (!sawUnconditionalReturn) {
+    // No catch-all clause returned. Emit a throw so the function satisfies
+    // its declared return type and a runtime mismatch is loud, not silent.
+    const reason = anyUnsupported
+      ? "unsupported pattern in a clause (destructuring/guards beyond current support)"
+      : "no clause matched";
+    lines.push(
+      `  throw new Error("shengen-ts: ${reason} in ${def.name}");`
+    );
   }
 
   lines.push(`}`);
   lines.push("");
-  return { lines, usesScanl };
+  return { lines, usesScanl, usesVal };
 }
 
 // ============================================================================
