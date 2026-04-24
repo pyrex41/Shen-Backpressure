@@ -107,6 +107,13 @@ export class SymbolTable {
         const prems = r.premises;
         const verified = r.verified;
 
+        // A rule is a sum-type variant when its conclusion type has more than
+        // one producer — i.e. other (datatype ...) blocks also conclude it.
+        // Variants must retain their own identity (class), not be erased into
+        // a type alias of the single inner premise. Mirrors Go main.go:159.
+        const isSumVariant =
+          (this.concCount.get(r.conc.typeName) ?? 0) > 1;
+
         if (
           r.conc.isWrapped &&
           verified.length === 0 &&
@@ -126,7 +133,8 @@ export class SymbolTable {
         } else if (
           r.conc.isWrapped &&
           prems.length === 1 &&
-          !isPrimitive(prems[0].typeName)
+          !isPrimitive(prems[0].typeName) &&
+          !isSumVariant
         ) {
           info.category = "alias";
           info.wrappedType = prems[0].typeName;
@@ -550,6 +558,26 @@ function extractBaseVar(expr: SExpr): string | null {
   return null;
 }
 
+// inferTargetFields estimates which fields a head/tail chain is targeting
+// by counting tail operations (which drop leading fields).
+// Port of Go main.go:606-626.
+export function inferTargetFields(
+  expr: SExpr,
+  fields: FieldInfo[]
+): FieldInfo[] {
+  let tailCount = 0;
+  let current = expr;
+  while (isCall(current) && current.children!.length === 2) {
+    const o = op(current);
+    if (o === "tail") tailCount++;
+    else if (o !== "head") break;
+    current = current.children![1];
+  }
+  if (fields.length === 0) return fields;
+  if (tailCount >= fields.length) return fields.slice(fields.length - 1);
+  return fields.slice(tailCount);
+}
+
 export function structuralMatchFallback(
   st: SymbolTable,
   expr: SExpr,
@@ -566,17 +594,44 @@ export function structuralMatchFallback(
 
   const lhsInfo = st.lookup(lhsType);
   const rhsInfo = st.lookup(rhsType);
-  if (!lhsInfo || !rhsInfo) return null;
+  if (
+    !lhsInfo ||
+    !rhsInfo ||
+    lhsInfo.fields.length === 0 ||
+    rhsInfo.fields.length === 0
+  ) {
+    return null;
+  }
 
+  // Narrow each side to the fields the head/tail chain is actually targeting.
+  // Without this step the scan picks the first shared-type pair by position,
+  // which is wrong when the chain's tail-depth is pointing at a later field.
+  const lhsTarget = inferTargetFields(expr.children[1], lhsInfo.fields);
+  const rhsTarget = inferTargetFields(expr.children[2], rhsInfo.fields);
+
+  const emit = (lf: FieldInfo, rf: FieldInfo): [string, string] => {
+    const l = `${toCamelCase(lhsVar)}.${toCamelCase(lf.shenName)}()`;
+    const r = `${toCamelCase(rhsVar)}.${toCamelCase(rf.shenName)}()`;
+    return [
+      `${l} === ${r}`,
+      `${toCamelCase(lhsVar)}.${toCamelCase(lf.shenName)} must equal ${toCamelCase(rhsVar)}.${toCamelCase(rf.shenName)}`,
+    ];
+  };
+
+  // First pass: only within the targeted subsets.
+  for (const lf of lhsTarget) {
+    for (const rf of rhsTarget) {
+      if (lf.shenType === rf.shenType && !isPrimitive(lf.shenType)) {
+        return emit(lf, rf);
+      }
+    }
+  }
+
+  // Last resort: any shared non-primitive field type anywhere.
   for (const lf of lhsInfo.fields) {
     for (const rf of rhsInfo.fields) {
       if (lf.shenType === rf.shenType && !isPrimitive(lf.shenType)) {
-        const l = `${toCamelCase(lhsVar)}.${toCamelCase(lf.shenName)}()`;
-        const r = `${toCamelCase(rhsVar)}.${toCamelCase(rf.shenName)}()`;
-        return [
-          `${l} === ${r}`,
-          `${toCamelCase(lhsVar)}.${toCamelCase(lf.shenName)} must equal ${toCamelCase(rhsVar)}.${toCamelCase(rf.shenName)}`,
-        ];
+        return emit(lf, rf);
       }
     }
   }

@@ -20,7 +20,10 @@ import {
   verifiedToTs,
   generateTs,
   isNumericLiteral,
+  inferTargetFields,
+  structuralMatchFallback,
   type VerifiedPremise,
+  type FieldInfo,
 } from "./shengen.ts";
 
 // ============================================================================
@@ -409,6 +412,150 @@ test("generateTs: payment spec produces classes with the expected shape", () => 
   assert.ok(
     output.includes("bal(): number { return this._bal; }"),
     "missing bal() accessor on BalanceChecked"
+  );
+});
+
+// ============================================================================
+// §3.1 regression: sum-type variants must not be misclassified as aliases.
+// ============================================================================
+
+test("symbolTable: sum-type variant wrapping a non-primitive is not an alias", () => {
+  // Two datatype blocks both conclude `tx-outcome` — so tx-outcome is a sum type.
+  // `transaction-success` has a single non-primitive premise (transaction).
+  // Before the isSumVariant guard landed, it was misclassified as an alias and
+  // the generator emitted `export type TransactionSuccess = Transaction`,
+  // erasing the variant tag.
+  const spec = `(datatype transaction-success
+  Tx : transaction;
+  ==========================
+  Tx : tx-outcome;)
+
+(datatype transaction-failure
+  Err : string;
+  ==========================
+  Err : tx-outcome;)`;
+  const types = parseFileString(spec);
+  const st = new SymbolTable();
+  st.build(types);
+
+  const success = st.lookup("transaction-success");
+  assert.ok(success, "transaction-success should be in the symbol table");
+  assert.notEqual(
+    success!.category,
+    "alias",
+    "sum-type variant must not be classified as alias"
+  );
+});
+
+test("generateTs: sum-type variant emits a class, not a type alias", () => {
+  const spec = `(datatype transaction-success
+  Tx : transaction;
+  ==========================
+  Tx : tx-outcome;)
+
+(datatype transaction-failure
+  Err : string;
+  ==========================
+  Err : tx-outcome;)`;
+  const types = parseFileString(spec);
+  const st = new SymbolTable();
+  st.build(types);
+  const out = generateTs(types, st, "test.shen");
+
+  assert.ok(
+    !out.includes("export type TransactionSuccess ="),
+    `variant TransactionSuccess should not emit as type alias; output was:\n${out}`
+  );
+  assert.ok(
+    out.includes("export class TransactionSuccess"),
+    `variant TransactionSuccess should emit as a class; output was:\n${out}`
+  );
+});
+
+// ============================================================================
+// §3.3 regression: inferTargetFields + precise structuralMatchFallback.
+// ============================================================================
+
+test("inferTargetFields: no head/tail leaves all fields", () => {
+  const fields: FieldInfo[] = [
+    { index: 0, shenName: "A", shenType: "alpha" },
+    { index: 1, shenName: "B", shenType: "beta" },
+    { index: 2, shenName: "C", shenType: "gamma" },
+  ];
+  const expr = parseSExpr("X");
+  assert.deepEqual(inferTargetFields(expr, fields), fields);
+});
+
+test("inferTargetFields: tail drops the first field", () => {
+  const fields: FieldInfo[] = [
+    { index: 0, shenName: "A", shenType: "alpha" },
+    { index: 1, shenName: "B", shenType: "beta" },
+    { index: 2, shenName: "C", shenType: "gamma" },
+  ];
+  const result = inferTargetFields(parseSExpr("(tail X)"), fields);
+  assert.equal(result.length, 2);
+  assert.equal(result[0].shenName, "B");
+  assert.equal(result[1].shenName, "C");
+});
+
+test("inferTargetFields: two tails drop two fields; head preserves the index", () => {
+  const fields: FieldInfo[] = [
+    { index: 0, shenName: "A", shenType: "alpha" },
+    { index: 1, shenName: "B", shenType: "beta" },
+    { index: 2, shenName: "C", shenType: "gamma" },
+  ];
+  const result = inferTargetFields(parseSExpr("(head (tail (tail X)))"), fields);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].shenName, "C");
+});
+
+test("inferTargetFields: tail depth beyond field count falls back to last field", () => {
+  const fields: FieldInfo[] = [
+    { index: 0, shenName: "A", shenType: "alpha" },
+    { index: 1, shenName: "B", shenType: "beta" },
+  ];
+  const result = inferTargetFields(parseSExpr("(tail (tail (tail X)))"), fields);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].shenName, "B");
+});
+
+test("structuralMatchFallback: picks the tail-targeted pair, not the first shared non-primitive", () => {
+  // Two composites sharing `user-ref` at field 0 AND `demographics` at field 2.
+  // (= (tail (tail L)) (tail (tail R))) clearly points at field 2 on each side.
+  // Without inferTargetFields the scan picked L.user == R.owner (the user-ref
+  // pair at index 0). With the fix it targets L.demo == R.info.
+  const spec = `(datatype lhs-struct
+  User : user-ref;
+  Name : string;
+  Demo : demographics;
+  ==========================
+  [User Name Demo] : lhs-struct;)
+
+(datatype rhs-struct
+  Owner : user-ref;
+  Label : string;
+  Info : demographics;
+  ==========================
+  [Owner Label Info] : rhs-struct;)`;
+  const types = parseFileString(spec);
+  const st = new SymbolTable();
+  st.build(types);
+
+  const varMap = new Map([
+    ["L", "lhs-struct"],
+    ["R", "rhs-struct"],
+  ]);
+  const expr = parseSExpr("(= (tail (tail L)) (tail (tail R)))");
+  const result = structuralMatchFallback(st, expr, varMap);
+  assert.ok(result, "fallback should return a result");
+  const [code] = result!;
+  assert.ok(
+    code.includes("l.demo") && code.includes("r.info"),
+    `expected tail-targeted pair l.demo === r.info, got ${code}`
+  );
+  assert.ok(
+    !(code.includes("l.user") || code.includes("r.owner")),
+    `fallback should not pick the field-0 user-ref pair; got ${code}`
   );
 });
 
