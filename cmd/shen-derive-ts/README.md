@@ -4,9 +4,12 @@ TypeScript port of `shen-derive`. Given a `.shen` spec file containing a
 `(define ...)` block, generates a TypeScript test file that asserts a
 hand-written implementation matches the spec pointwise on sampled inputs.
 
-Parallel to `cmd/shengen-ts/` — same `npx tsx` / ESM / `node:test` module
-style, no build step, no npm install at this directory. Consumers invoke
-via a relative path.
+Parallel to `cmd/shengen-ts/` — same ESM / `node:test` module style.
+Runtime is zero-install: Node 22.6+ strips TypeScript types on the fly
+(`--experimental-strip-types`), and `./bin/shen-derive-ts` wraps the
+entry point. `npm install` at this directory pulls in `typescript` +
+`@types/node` strictly for `npm run typecheck` / `npm test`; the
+generated wrapper never needs the installed deps at runtime.
 
 See `shen-derive/DESIGN.md` for the overall design and
 `site/content/posts/how-shen-derive-works/index.md` for the mechanism-level
@@ -15,7 +18,7 @@ walkthrough. The Go version at `shen-derive/` is the reference.
 ## Usage
 
 ```
-npx tsx cmd/shen-derive-ts/shen-derive.ts verify <spec.shen> \
+./bin/shen-derive-ts verify <spec.shen> \
   --func <shen-define-name> \
   --impl-module <relative TS path, e.g. ./processable> \
   --impl-func <exported TS function name> \
@@ -33,6 +36,10 @@ TS imports by relative file path.
 
 ## Tests
 
+From this directory:
+
 ```
-npx tsx --test cmd/shen-derive-ts/core/*.test.ts cmd/shen-derive-ts/specfile/*.test.ts cmd/shen-derive-ts/verify/*.test.ts
+npm install   # once, for dev deps (typescript + @types/node)
+npm test      # runs node --test --experimental-strip-types on *.test.ts
+npm run typecheck
 ```

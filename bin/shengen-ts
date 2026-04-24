@@ -1,0 +1,21 @@
+#!/bin/bash
+set -euo pipefail
+
+# shengen-ts — Wrapper for the TypeScript port of shengen.
+# Runs cmd/shengen-ts/shengen.ts directly via node's type-stripping mode.
+#
+# Requires Node 22.6+ (for --experimental-strip-types) or Node 23+ where
+# the flag is enabled by default for .ts files under type-stripping.
+#
+# Usage: ./bin/shengen-ts [shengen.ts args]
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ENTRY="$REPO_ROOT/cmd/shengen-ts/shengen.ts"
+
+if ! command -v node >/dev/null 2>&1; then
+    echo "ERROR: node not found on PATH" >&2
+    exit 1
+fi
+
+exec node --experimental-strip-types --no-warnings=ExperimentalWarning "$ENTRY" "$@"
