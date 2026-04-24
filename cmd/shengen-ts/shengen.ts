@@ -683,6 +683,32 @@ export function parseFile(path: string): Datatype[] {
   return parseFileString(readFileSync(path, "utf-8"));
 }
 
+// mergeDatatypeGroups concatenates parsed datatype groups from multiple source
+// files and rejects cross-file redefinitions. Within-file duplicates (if any)
+// flow through unchanged — parseFile's behavior is preserved. This is the
+// minimum viable multi-spec story (§2.4 of the parity handoff); a richer
+// (import "other.shen") directive can come later.
+export function mergeDatatypeGroups(
+  groups: Array<{ path: string; datatypes: Datatype[] }>
+): Datatype[] {
+  const seen = new Map<string, string>();
+  const all: Datatype[] = [];
+  for (const { path, datatypes } of groups) {
+    for (const dt of datatypes) {
+      const prev = seen.get(dt.name);
+      if (prev !== undefined && prev !== path) {
+        throw new Error(
+          `datatype "${dt.name}" declared in both ${prev} and ${path}; ` +
+            `rename one or remove the duplicate`
+        );
+      }
+      seen.set(dt.name, path);
+      all.push(dt);
+    }
+  }
+  return all;
+}
+
 export function parseDatatype(block: string): Datatype | null {
   block = block.replace(/^\(datatype /, "");
   const nlIdx = block.indexOf("\n");
@@ -1085,34 +1111,39 @@ function printSymbolTable(types: Datatype[], st: SymbolTable, path: string): voi
 // CLI — only run when invoked as the entry script (not when imported from tests).
 function main(): void {
   const args = process.argv.slice(2);
-  let specPath = "specs/core.shen";
+  const specPaths: string[] = [];
   let outFile: string | null = null;
   let dryRun = false;
   let pkg: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--out" && i + 1 < args.length) {
+    if (args[i] === "--spec" && i + 1 < args.length) {
+      specPaths.push(args[++i]);
+    } else if (args[i] === "--out" && i + 1 < args.length) {
       outFile = args[++i];
     } else if (args[i] === "--pkg" && i + 1 < args.length) {
       pkg = args[++i];
     } else if (args[i] === "--dry-run") {
       dryRun = true;
     } else if (!args[i].startsWith("--")) {
-      specPath = args[i];
+      specPaths.push(args[i]);
     }
   }
+  if (specPaths.length === 0) specPaths.push("specs/core.shen");
 
-  const types = parseFile(specPath);
+  const groups = specPaths.map((path) => ({ path, datatypes: parseFile(path) }));
+  const types = mergeDatatypeGroups(groups);
   const st = new SymbolTable();
   st.build(types);
 
-  printSymbolTable(types, st, specPath);
+  const originLabel = specPaths.length === 1 ? specPaths[0] : specPaths.join(", ");
+  printSymbolTable(types, st, originLabel);
 
   if (!dryRun) {
-    const output = generateTs(types, st, specPath, { pkg });
+    const output = generateTs(types, st, originLabel, { pkg });
     if (outFile) {
       writeFileSync(outFile, output);
-      process.stderr.write(`Generated ${outFile} from ${specPath}\n`);
+      process.stderr.write(`Generated ${outFile} from ${originLabel}\n`);
     } else {
       process.stdout.write(output);
     }
