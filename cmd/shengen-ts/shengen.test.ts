@@ -908,6 +908,210 @@ test("verifiedToTs: (define …) calls dispatch as function calls in guards", ()
   );
 });
 
+// ============================================================================
+// §2.1 follow-up: destructuring patterns + `where` guards.
+// ============================================================================
+
+test("generateTs: [H | T] cons destructure binds head and tail", () => {
+  const src = `(define all-positive?
+  {(list number) --> boolean}
+  [] -> true
+  [H | T] -> (and (>= H 0) (all-positive? T)))`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "t.shen");
+
+  // No top-level variable across clauses, so the param falls back to arg0.
+  assert.ok(
+    /export function allPositive\(arg0: number\[\]\): boolean/.test(out),
+    `expected allPositive signature with arg0 fallback; got:\n${out}`
+  );
+  assert.ok(/if \(arg0\.length === 0\) \{\s+return true;/m.test(out));
+  // Head bound as h, tail bound as t (from the pattern variable), both
+  // visible to the recursive body.
+  assert.ok(out.includes("const h = arg0[0];"));
+  assert.ok(out.includes("const t = arg0.slice(1);"));
+  assert.ok(
+    /return \(\(h >= 0\) && allPositive\(t\)\);/.test(out),
+    `recursive tail call should use the bound t; got:\n${out}`
+  );
+});
+
+test("generateTs: [[A B] | Rest] nested destructure binds composite fields", () => {
+  const src = `(datatype contraindication
+  DrugA : string;
+  DrugB : string;
+  =====================
+  [DrugA DrugB] : contraindication;)
+
+(define contra-of?
+  {string --> (list contraindication) --> boolean}
+  _ [] -> false
+  D [[A B] | Rest] -> (or (= D A) (= D B))
+  D [_ | Rest] -> (contra-of? D Rest))`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "t.shen");
+
+  // Param 0 is `d` from the top-level D binder. Param 1 has no top-level
+  // variable across clauses (all destructures), so it falls back to arg1.
+  assert.ok(
+    /export function contraOf\(d: string, arg1: Contraindication\[\]\): boolean/.test(out),
+    `expected contraOf signature; got:\n${out}`
+  );
+  assert.ok(
+    /if \(arg1\.length === 0\) \{\s+return false;/m.test(out),
+    `expected empty-list clause; got:\n${out}`
+  );
+  assert.ok(
+    /const __p1Head = arg1\[0\];/.test(out),
+    `expected head binding; got:\n${out}`
+  );
+  assert.ok(
+    /const a = __p1Head\.drugA\(\);/.test(out),
+    `expected A to bind to drugA(); got:\n${out}`
+  );
+  assert.ok(
+    /const b = __p1Head\.drugB\(\);/.test(out),
+    `expected B to bind to drugB(); got:\n${out}`
+  );
+  assert.ok(
+    /return \(\(d === a\) \|\| \(d === b\)\);/.test(out),
+    `expected body expansion; got:\n${out}`
+  );
+});
+
+test("generateTs: `where` guards turn into an inner if-condition", () => {
+  // Same shape as contra-of?, but now the matching logic lives in a where
+  // guard so the clause only fires when the guard passes.
+  const src = `(datatype contraindication
+  DrugA : string;
+  DrugB : string;
+  =====================
+  [DrugA DrugB] : contraindication;)
+
+(define contra-of?
+  {string --> (list contraindication) --> boolean}
+  _ [] -> false
+  D [[A B] | Rest] where (or (= D A) (= D B)) -> true
+  D [_ | Rest] -> (contra-of? D Rest))`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "t.shen");
+
+  // Guard should show up as an inner if. `true` body.
+  assert.ok(
+    /if \(\(\(d === a\) \|\| \(d === b\)\)\) \{\s+return true;/m.test(out),
+    `expected guard-wrapped true-return; got:\n${out}`
+  );
+  // Fallthrough clause recurses on the sliced tail (bound as `rest`).
+  assert.ok(
+    /const rest = arg1\.slice\(1\);[\s\S]*?return contraOf\(d, rest\)/.test(out),
+    `expected fallthrough recursion; got:\n${out}`
+  );
+});
+
+test("generateTs: `val` in define bodies routes through defensive __val helper", async () => {
+  // Specs in the wild sometimes apply `(val X)` to values that might already
+  // be primitives (e.g. a scanl accumulator seeded with `(val B0)` that then
+  // re-unwraps `B` inside the body). Emit `__val(x)` so primitives flow
+  // through unchanged instead of crashing at runtime.
+  const src = `(datatype amount
+  X : number;
+  ====================
+  X : amount;)
+
+(define double-unwrap?
+  {amount --> boolean}
+  A -> (>= (val A) 0))`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "t.shen");
+
+  assert.ok(
+    /return \(__val\(a\) >= 0\);/.test(out),
+    `expected __val(a) wrapping in body; got:\n${out}`
+  );
+  assert.ok(/function __val\(x: any\): any/.test(out), "missing __val helper");
+
+  // Runtime: passing a wrapper unwraps; passing a primitive passes through.
+  const { writeFileSync, mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "shengen-ts-val-"));
+  const file = join(dir, "val-defensive.ts");
+  writeFileSync(file, out);
+  const mod: {
+    mustAmount(x: number): { val(): number };
+    doubleUnwrap(a: unknown): boolean;
+  } = await import(file);
+  assert.equal(mod.doubleUnwrap(mod.mustAmount(5)), true);
+  assert.equal(mod.doubleUnwrap(5), true, "primitive should pass through __val");
+  assert.equal(mod.doubleUnwrap(mod.mustAmount(-1)), false);
+});
+
+test("generated code: destructure + guard define executes correctly at runtime", async () => {
+  // End-to-end: compile the spec, import the generated module, and exercise
+  // the emitted function. This is the runtime contract the string-matching
+  // tests can only hint at.
+  const { writeFileSync, mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const src = `(datatype contraindication
+  DrugA : string;
+  DrugB : string;
+  =====================
+  [DrugA DrugB] : contraindication;)
+
+(define contra-of?
+  {string --> (list contraindication) --> boolean}
+  _ [] -> false
+  D [[A B] | Rest] where (or (= D A) (= D B)) -> true
+  D [_ | Rest] -> (contra-of? D Rest))`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const source = generateTs(spec.datatypes, st, "contra.shen");
+
+  const dir = mkdtempSync(join(tmpdir(), "shengen-ts-contra-"));
+  const file = join(dir, "contra.ts");
+  writeFileSync(file, source);
+
+  type ContraMod = {
+    Contraindication: {
+      createOrThrow(a: string, b: string): { drugA(): string; drugB(): string };
+    };
+    mustContraindication(
+      a: string,
+      b: string
+    ): { drugA(): string; drugB(): string };
+    contraOf(d: string, list: Array<{ drugA(): string; drugB(): string }>): boolean;
+  };
+  const mod: ContraMod = await import(file);
+
+  const c1 = mod.mustContraindication("warfarin", "aspirin");
+  const c2 = mod.mustContraindication("metformin", "insulin");
+
+  // Drug that appears as drugA in a pair.
+  assert.equal(mod.contraOf("warfarin", [c1, c2]), true);
+  // Drug that appears as drugB.
+  assert.equal(mod.contraOf("insulin", [c1, c2]), true);
+  // Drug that doesn't appear.
+  assert.equal(mod.contraOf("acetaminophen", [c1, c2]), false);
+  // Empty list.
+  assert.equal(mod.contraOf("warfarin", []), false);
+});
+
 test("generateTs: wrapper-only spec has no constrained/guarded checks or imports", () => {
   const spec = `(datatype name
   X : string;
