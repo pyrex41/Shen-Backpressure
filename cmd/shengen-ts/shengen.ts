@@ -859,7 +859,13 @@ export function generateTs(types: Datatype[], st: SymbolTable, specPath: string)
 }
 
 export interface GeneratedType {
+  // Block name — always `dt.name`. Kept for callers that care about provenance.
   name: string;
+  // Post-rename Shen-canonical name: the one that tsName was built from.
+  // For sum-type variants this is `dt.name`; for plain blocks it's the
+  // conclusion type name. This is the right source of truth for naming
+  // free-function helpers like `mustAmount`.
+  shenName: string;
   tsName: string;
   category: string;
   rule: Rule;
@@ -875,6 +881,7 @@ export function classify(dt: Datatype, st: SymbolTable): GeneratedType[] {
     const info = st.lookup(typeName);
     out.push({
       name: dt.name,
+      shenName: typeName,
       tsName: toPascalCase(typeName),
       category: info?.category ?? "composite",
       rule: r,
@@ -883,16 +890,53 @@ export function classify(dt: Datatype, st: SymbolTable): GeneratedType[] {
   return out;
 }
 
+// mustName converts a Shen datatype name into its free-function helper name,
+// matching the Go shen-derive emission (`mustAmount`, `mustAccountId`, …).
+function mustName(shenName: string): string {
+  return "must" + toPascalCase(shenName);
+}
+
+// genTryCreateBody is the common factory-shape both tryCreate and createOrThrow
+// share: tryCreate is the error-returning variant, createOrThrow throws.
+function genTryCreate(className: string, paramsStr: string, argNames: string[]): string[] {
+  const argList = argNames.join(", ");
+  return [
+    `  static tryCreate(${paramsStr}): ${className} | Error {`,
+    `    try { return ${className}.createOrThrow(${argList}); }`,
+    `    catch (e) { return e instanceof Error ? e : new Error(String(e)); }`,
+    `  }`,
+  ];
+}
+
+// genMust emits the free-function helper that wraps createOrThrow — the entry
+// point shen-derive-ts's generated tests reach for via `shenguard.mustXxx(...)`.
+function genMust(
+  shenName: string,
+  className: string,
+  paramsStr: string,
+  argNames: string[]
+): string[] {
+  const argList = argNames.join(", ");
+  return [
+    `export function ${mustName(shenName)}(${paramsStr}): ${className} {`,
+    `  return ${className}.createOrThrow(${argList});`,
+    `}`,
+  ];
+}
+
 function genWrapper(gt: GeneratedType): string[] {
   const tsType = shenTypeToTs(gt.rule.premises[0].typeName);
+  const paramsStr = `x: ${tsType}`;
   return [
     `export class ${gt.tsName} {`,
     `  private readonly _v: ${tsType};`,
     `  private constructor(v: ${tsType}) { this._v = v; }`,
-    `  static create(x: ${tsType}): ${gt.tsName} { return new ${gt.tsName}(x); }`,
+    `  static createOrThrow(x: ${tsType}): ${gt.tsName} { return new ${gt.tsName}(x); }`,
+    ...genTryCreate(gt.tsName, paramsStr, ["x"]),
     `  val(): ${tsType} { return this._v; }`,
     ...(tsType === "string" ? [`  toString(): string { return this._v; }`] : []),
     `}`,
+    ...genMust(gt.shenName, gt.tsName, paramsStr, ["x"]),
   ];
 }
 
@@ -904,16 +948,19 @@ function genConstrained(gt: GeneratedType, st: SymbolTable): string[] {
     const [code, msg] = verifiedToTs(st, v, varMap);
     checks.push(`    if (!(${code})) throw new Error(\`${msg.replace(/`/g, "\\`")}: \${x}\`);`);
   }
+  const paramsStr = `x: ${tsType}`;
   return [
     `export class ${gt.tsName} {`,
     `  private readonly _v: ${tsType};`,
     `  private constructor(v: ${tsType}) { this._v = v; }`,
-    `  static create(x: ${tsType}): ${gt.tsName} {`,
+    `  static createOrThrow(x: ${tsType}): ${gt.tsName} {`,
     ...checks,
     `    return new ${gt.tsName}(x);`,
     `  }`,
+    ...genTryCreate(gt.tsName, paramsStr, ["x"]),
     `  val(): ${tsType} { return this._v; }`,
     `}`,
+    ...genMust(gt.shenName, gt.tsName, paramsStr, ["x"]),
   ];
 }
 
@@ -923,6 +970,7 @@ function genComposite(gt: GeneratedType): string[] {
     type: shenTypeToTs(p.typeName),
   }));
   const params = fields.map((f) => `${f.name}: ${f.type}`).join(", ");
+  const argNames = fields.map((f) => f.name);
   const assigns = fields.map((f) => `    this._${f.name} = ${f.name};`);
   const accessors = fields.map(
     (f) => `  ${f.name}(): ${f.type} { return this._${f.name}; }`
@@ -933,11 +981,13 @@ function genComposite(gt: GeneratedType): string[] {
     `  private constructor(${params}) {`,
     ...assigns,
     `  }`,
-    `  static create(${params}): ${gt.tsName} {`,
-    `    return new ${gt.tsName}(${fields.map((f) => f.name).join(", ")});`,
+    `  static createOrThrow(${params}): ${gt.tsName} {`,
+    `    return new ${gt.tsName}(${argNames.join(", ")});`,
     `  }`,
+    ...genTryCreate(gt.tsName, params, argNames),
     ...accessors,
     `}`,
+    ...genMust(gt.shenName, gt.tsName, params, argNames),
   ];
 }
 
@@ -948,6 +998,7 @@ function genGuarded(gt: GeneratedType, st: SymbolTable): string[] {
     shenType: p.typeName,
   }));
   const params = fields.map((f) => `${f.name}: ${f.type}`).join(", ");
+  const argNames = fields.map((f) => f.name);
   const assigns = fields.map((f) => `    this._${f.name} = ${f.name};`);
   const accessors = fields.map(
     (f) => `  ${f.name}(): ${f.type} { return this._${f.name}; }`
@@ -964,12 +1015,14 @@ function genGuarded(gt: GeneratedType, st: SymbolTable): string[] {
     `  private constructor(${params}) {`,
     ...assigns,
     `  }`,
-    `  static create(${params}): ${gt.tsName} {`,
+    `  static createOrThrow(${params}): ${gt.tsName} {`,
     ...checks,
-    `    return new ${gt.tsName}(${fields.map((f) => f.name).join(", ")});`,
+    `    return new ${gt.tsName}(${argNames.join(", ")});`,
     `  }`,
+    ...genTryCreate(gt.tsName, params, argNames),
     ...accessors,
     `}`,
+    ...genMust(gt.shenName, gt.tsName, params, argNames),
   ];
 }
 
