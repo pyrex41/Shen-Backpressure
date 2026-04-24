@@ -233,7 +233,9 @@ test("parseDefineClauses: bare multi-clause without type sig", () => {
 
 // --- Integration: dosage-calculator ---
 
-test("integration: dosage-calculator core.shen parses with expected defines", () => {
+// The dosage-calculator example was removed in the demo-readiness cleanup
+// (commit eb3be68). Skipping until a replacement integration fixture lands.
+test.skip("integration: dosage-calculator core.shen parses with expected defines", () => {
   const path = resolve(repoRoot, "examples/dosage-calculator/specs/core.shen");
   const src = readFileSync(path, "utf-8");
   const sf = parseFile(src);

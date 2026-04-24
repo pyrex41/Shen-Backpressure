@@ -32,7 +32,7 @@ build-shengen-ts:
 	cd cmd/shengen-ts && npm install && npm run build
 
 build-shen-derive:
-	cd shen-derive && go build -o ../bin/shen-derive ./cmd/shen-derive
+	cd shen-derive && go build -o ../bin/shen-derive .
 
 build-shen-derive-ts:
 	cd cmd/shen-derive-ts && npm install && npm run build

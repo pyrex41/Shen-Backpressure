@@ -1,0 +1,16 @@
+{
+  "name": "@shen-backpressure/shen-derive-ts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "TypeScript port of shen-derive — generates spec-parity tests from Shen (define ...) blocks.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test --experimental-strip-types \"**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "typescript": "^5.6.0"
+  }
+}
