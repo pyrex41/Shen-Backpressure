@@ -1680,20 +1680,227 @@ function translateDefineAtom(
 // full type inference. Currently handles: bare variables whose Shen type in
 // varMap is `(list T)`, and literal `(__list …)` / `[…]` call sites where all
 // elements share an obvious type.
-function inferListElemType(
+// inferShenType propagates Shen types through the body-expression grammar.
+// It recognises the same set of ops the body translator does, plus user
+// (define …) calls (via their signature) and accessor dispatch on composite
+// types. Returns null when it can't determine a type (e.g. a user-function
+// call whose signature isn't in the symbol table).
+//
+// The propagator treats types structurally (strings like "number", "(list
+// transaction)"). Primitives, list parameterisation, and wrapper-projection
+// via `val` all resolve symbolically, so nested calls like
+// `(foldr f true (scanl g init Txs))` propagate cleanly: scanl's
+// accumulator type flows up to foldr's element-type hint.
+function inferShenType(
   expr: SExpr,
-  varMap: Map<string, string>
+  varMap: Map<string, string>,
+  st: SymbolTable
 ): string | null {
   if (isAtom(expr)) {
     const atom = expr.atom ?? "";
+    if (!atom) return null;
+    if (atom === "true" || atom === "false") return "boolean";
+    if (isNumericLiteral(atom)) return "number";
+    if (/^".*"$/.test(atom)) return "string";
     const ty = varMap.get(atom);
-    if (!ty) return null;
-    return listElemType(ty);
+    return ty ?? null;
   }
-  // Nested calls (e.g. another `(scanl …)`) — type inference would need a
-  // real propagator; for now we just bail. Returning null means the lambda
-  // falls back to `any`, which is no worse than the pre-inference baseline.
+  const fname = op(expr);
+  const args = expr.children!.slice(1);
+
+  switch (fname) {
+    case "__nil":
+      return "(list any)";
+    case "__list": {
+      if (args.length === 0) return "(list any)";
+      const elemType = inferShenType(args[0], varMap, st) ?? "any";
+      return `(list ${elemType})`;
+    }
+    case "__cons":
+    case "cons": {
+      const headType =
+        args[0] !== undefined ? inferShenType(args[0], varMap, st) : null;
+      const tailType =
+        args[1] !== undefined ? inferShenType(args[1], varMap, st) : null;
+      const elem =
+        headType ??
+        (tailType !== null ? listElemType(tailType) : null) ??
+        "any";
+      return `(list ${elem})`;
+    }
+
+    // Boolean-returning ops.
+    case ">=":
+    case "<=":
+    case ">":
+    case "<":
+    case "=":
+    case "!=":
+    case "and":
+    case "or":
+    case "not":
+    case "member?":
+    case "empty?":
+    case "element?":
+    case "in-range?":
+      return "boolean";
+
+    // Number-returning ops.
+    case "+":
+    case "-":
+    case "*":
+    case "/":
+    case "%":
+    case "shen.mod":
+    case "length":
+      return "number";
+
+    case "if": {
+      // Match Shen's structural typing: both branches must agree, so either
+      // one is a valid proxy. Prefer the `then` branch; fall back to `else`.
+      if (args[1] !== undefined) {
+        const t = inferShenType(args[1], varMap, st);
+        if (t) return t;
+      }
+      if (args[2] !== undefined) {
+        return inferShenType(args[2], varMap, st);
+      }
+      return null;
+    }
+
+    case "head": {
+      if (args[0] === undefined) return null;
+      const ty = inferShenType(args[0], varMap, st);
+      if (!ty) return null;
+      const elem = listElemType(ty);
+      if (elem) return elem;
+      // `(head string)` returns a single character, still a string.
+      if (ty === "string") return "string";
+      return null;
+    }
+    case "head-char":
+      return "string";
+    case "tail":
+    case "tail-chars": {
+      if (args[0] === undefined) return null;
+      const ty = inferShenType(args[0], varMap, st);
+      if (!ty) return null;
+      return ty;
+    }
+    case "concat": {
+      if (args[0] === undefined) return null;
+      return inferShenType(args[0], varMap, st);
+    }
+
+    case "val": {
+      if (args[0] === undefined) return null;
+      const ty = inferShenType(args[0], varMap, st);
+      if (!ty) return null;
+      // Wrappers: return the wrapped primitive / inner type. For already-
+      // primitive inputs, `val` is identity (matches the runtime `__val`).
+      const info = st.lookup(ty);
+      if (info?.wrappedPrim) return info.wrappedPrim;
+      if (info?.wrappedType) return info.wrappedType;
+      return ty;
+    }
+
+    case "lambda": {
+      // A lambda's type is its body's type — callers that need argument
+      // types should prepopulate varMap with the lambda's binding.
+      if (args.length !== 2 || !isAtom(args[0])) return null;
+      return inferShenType(args[1], varMap, st);
+    }
+
+    case "foldr":
+    case "foldl": {
+      // Fold return type matches the accumulator, which matches init.
+      if (args[1] === undefined) return null;
+      return inferShenType(args[1], varMap, st);
+    }
+
+    case "scanl": {
+      // scanl returns a list of successive accumulators. Accumulator type =
+      // init's type.
+      if (args[1] === undefined) return null;
+      const initType = inferShenType(args[1], varMap, st);
+      if (!initType) return null;
+      return `(list ${initType})`;
+    }
+
+    case "map": {
+      if (args.length !== 2) return null;
+      // Propagate element type into the lambda so its body's type resolves.
+      const listType = inferShenType(args[1], varMap, st);
+      const elem = listType ? listElemType(listType) : null;
+      const lamBody = inferLambdaBodyType(args[0], varMap, st, [elem ?? "any"]);
+      if (!lamBody) return null;
+      return `(list ${lamBody})`;
+    }
+
+    case "filter": {
+      if (args[1] === undefined) return null;
+      return inferShenType(args[1], varMap, st);
+    }
+  }
+
+  // Accessor dispatch on composite/guarded types.
+  if (args.length === 1 && isAtom(args[0])) {
+    const argAtom = args[0].atom ?? "";
+    const argType = varMap.get(argAtom);
+    if (argType) {
+      const info = st.lookup(argType);
+      if (info) {
+        const target = info.fields.find(
+          (f) => toCamelCase(f.shenName) === toCamelCase(fname)
+        );
+        if (target) return target.shenType;
+      }
+    }
+  }
+
+  // User-defined (define …) call — use the declared signature's return slot.
+  const def = st.defines.get(fname);
+  if (def && def.signature.length > 0) {
+    return def.signature[def.signature.length - 1];
+  }
+
   return null;
+}
+
+// inferLambdaBodyType walks into a (possibly curried) lambda, binding each
+// successive Shen type from paramTypes to the matching lambda parameter in
+// varMap, then returns the innermost body's inferred type.
+function inferLambdaBodyType(
+  expr: SExpr,
+  varMap: Map<string, string>,
+  st: SymbolTable,
+  paramTypes: string[]
+): string | null {
+  let current = expr;
+  const scope = new Map(varMap);
+  let depth = 0;
+  while (isCall(current) && op(current) === "lambda") {
+    const inner = current.children!.slice(1);
+    if (inner.length !== 2 || !isAtom(inner[0])) return null;
+    const param = inner[0].atom ?? "";
+    scope.set(param, paramTypes[depth] ?? "any");
+    current = inner[1];
+    depth++;
+  }
+  return inferShenType(current, scope, st);
+}
+
+// inferListElemType: thin helper that extracts `T` from `(list T)` when an
+// expression evaluates to a Shen list. Used by the fold/scan/map/filter
+// translators to hint their lambda's binding.
+function inferListElemType(
+  expr: SExpr,
+  varMap: Map<string, string>,
+  st: SymbolTable
+): string | null {
+  const ty = inferShenType(expr, varMap, st);
+  if (!ty) return null;
+  return listElemType(ty);
 }
 
 // translateCurriedLambda handles nested `(lambda X (lambda Y body))` shapes
@@ -1840,29 +2047,29 @@ function translateDefineExpr(
     case "foldr": {
       // Shen foldr is right-fold with curried f: f(x)(acc). Outer lambda
       // binds the element, inner binds the accumulator.
-      const elemShenType = inferListElemType(args[2], varMap) ?? "any";
+      const elemShenType = inferListElemType(args[2], varMap, st) ?? "any";
       const f = translateCurriedLambda(args[0], varMap, st, [elemShenType, "any"]);
       return `${tx(args[2])}.reduceRight((acc: any, x: any) => (${f})(x)(acc), ${tx(args[1])})`;
     }
     case "foldl": {
       // f(acc)(x): outer lambda binds accumulator, inner binds element.
-      const elemShenType = inferListElemType(args[2], varMap) ?? "any";
+      const elemShenType = inferListElemType(args[2], varMap, st) ?? "any";
       const f = translateCurriedLambda(args[0], varMap, st, ["any", elemShenType]);
       return `${tx(args[2])}.reduce((acc: any, x: any) => (${f})(acc)(x), ${tx(args[1])})`;
     }
     case "scanl": {
       // Same curry order as foldl.
-      const elemShenType = inferListElemType(args[2], varMap) ?? "any";
+      const elemShenType = inferListElemType(args[2], varMap, st) ?? "any";
       const f = translateCurriedLambda(args[0], varMap, st, ["any", elemShenType]);
       return `__scanl(${f}, ${tx(args[1])}, ${tx(args[2])})`;
     }
     case "map": {
-      const elemShenType = inferListElemType(args[1], varMap) ?? "any";
+      const elemShenType = inferListElemType(args[1], varMap, st) ?? "any";
       const f = translateCurriedLambda(args[0], varMap, st, [elemShenType]);
       return `${tx(args[1])}.map((x: any) => (${f})(x))`;
     }
     case "filter": {
-      const elemShenType = inferListElemType(args[1], varMap) ?? "any";
+      const elemShenType = inferListElemType(args[1], varMap, st) ?? "any";
       const f = translateCurriedLambda(args[0], varMap, st, [elemShenType]);
       return `${tx(args[1])}.filter((x: any) => (${f})(x))`;
     }

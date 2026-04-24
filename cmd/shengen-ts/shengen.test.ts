@@ -1463,6 +1463,77 @@ test("translateDefineExpr: map element type propagates into lambda", () => {
   );
 });
 
+test("inferShenType: nested (foldr … (scanl … Txs)) resolves inner lambda's binding", () => {
+  // The propagator must see through the scanl call to know its return type
+  // is (list tx), so the outer foldr's lambda binds its element to `tx` and
+  // accessor dispatch `(amt X)` → `x.amt()` fires correctly.
+  const src = `(datatype amount
+  X : number;
+  (>= X 0) : verified;
+  ====================
+  X : amount;)
+
+(datatype tx
+  Amt : amount;
+  Tag : string;
+  =================
+  [Amt Tag] : tx;)
+
+(define any-of-these?
+  {(list tx) --> boolean}
+  Txs -> (foldr (lambda X (lambda Acc (or (>= (val (amt X)) 0) Acc)))
+                false
+                (scanl (lambda A (lambda T T)) (head Txs) Txs)))`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "test.shen");
+  // Accessor dispatch on X inside the outer foldr's lambda implies X's type
+  // was inferred through scanl's return type.
+  assert.ok(
+    /x\.amt\(\)/.test(out),
+    `expected accessor dispatch x.amt() from propagated scanl result type; got:\n${out}`
+  );
+  assert.ok(
+    !/\bamt\(x\)\b/.test(out),
+    `should not fall back to user-call amt(x); got:\n${out}`
+  );
+});
+
+test("inferShenType: user-define call return type flows through nested contexts", () => {
+  // `(map amount Txs)` — `amount` is a field accessor; the propagator routes
+  // through accessor dispatch, so map's lambda arg gets tx and map returns
+  // (list amount). An outer `(head (map amount Txs))` should therefore
+  // resolve to `amount`, and a subsequent `(val …)` unwraps it.
+  //
+  // We check via a surrounding define that needs the right element type for
+  // its own accessor dispatch downstream.
+  const src = `(datatype amount
+  X : number;
+  =========
+  X : amount;)
+
+(datatype tx
+  Amt : amount;
+  Tag : string;
+  =================
+  [Amt Tag] : tx;)
+
+(define head-amount-val
+  {(list tx) --> number}
+  Txs -> (val (head (map (lambda T (amt T)) Txs))))`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "test.shen");
+  assert.ok(
+    /t\.amt\(\)/.test(out),
+    `expected propagated tx type in map's lambda; got:\n${out}`
+  );
+});
+
 test("translateDefineExpr: foldl/scanl accumulator stays untyped while element resolves", () => {
   // Regression check: scanl and foldl curry as f(acc)(x). Only the INNER
   // lambda (x) should get the element type; the outer lambda (acc) stays
