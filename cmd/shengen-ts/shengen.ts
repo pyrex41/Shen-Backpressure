@@ -1226,6 +1226,13 @@ export interface GenerateOptions {
   // (e.g. `import * as shenguard from "./guards.ts"`). See §2.3 of the
   // shengen-ts parity handoff for the design choice.
   pkg?: string;
+  // When true, only emit defines that are transitively referenced from a
+  // datatype's `:verified` premise. Derivation-target defines (e.g. a
+  // `roundtrip?` that calls into the consumer's real `encode`/`decode`)
+  // are skipped. Default false preserves the historical "emit everything,
+  // let the consumer fill in missing symbols" behavior. Opt-in when the
+  // generated file is expected to pass `tsc --strict` on its own.
+  filterUnreferencedDefines?: boolean;
 }
 
 export function generateTs(
@@ -1284,7 +1291,7 @@ export function generateTs(
     }
   }
 
-  lines.push(...generateDefineHelpers(st));
+  lines.push(...generateDefineHelpers(st, types, options));
   return lines.join("\n") + "\n";
 }
 
@@ -1668,6 +1675,73 @@ function translateDefineAtom(
   return toCamelCase(atom);
 }
 
+// inferListElemType pulls the element type out of an SExpr that's expected
+// to evaluate to a Shen list, when enough info is available to do so without
+// full type inference. Currently handles: bare variables whose Shen type in
+// varMap is `(list T)`, and literal `(__list …)` / `[…]` call sites where all
+// elements share an obvious type.
+function inferListElemType(
+  expr: SExpr,
+  varMap: Map<string, string>
+): string | null {
+  if (isAtom(expr)) {
+    const atom = expr.atom ?? "";
+    const ty = varMap.get(atom);
+    if (!ty) return null;
+    return listElemType(ty);
+  }
+  // Nested calls (e.g. another `(scanl …)`) — type inference would need a
+  // real propagator; for now we just bail. Returning null means the lambda
+  // falls back to `any`, which is no worse than the pre-inference baseline.
+  return null;
+}
+
+// translateCurriedLambda handles nested `(lambda X (lambda Y body))` shapes
+// when the Shen types for the successive bindings are known from context
+// (e.g. the lambda is the `f` arg of a fold/scan/map/filter). paramTypes[i]
+// is the Shen type for the i-th binding in the curried chain; positions past
+// the end default to "any".
+function translateCurriedLambda(
+  expr: SExpr,
+  varMap: Map<string, string>,
+  st: SymbolTable,
+  paramTypes: string[]
+): string {
+  if (!isCall(expr) || op(expr) !== "lambda") {
+    // Not a lambda — translate as a plain expression (e.g. a named helper
+    // passed through). No type hint to apply.
+    return translateDefineExpr(expr, varMap, st);
+  }
+  return translateCurriedLambdaAt(expr, varMap, st, paramTypes, 0);
+}
+
+function translateCurriedLambdaAt(
+  expr: SExpr,
+  varMap: Map<string, string>,
+  st: SymbolTable,
+  paramTypes: string[],
+  depth: number
+): string {
+  if (!isCall(expr) || op(expr) !== "lambda") {
+    return translateDefineExpr(expr, varMap, st);
+  }
+  const args = expr.children!.slice(1);
+  if (args.length !== 2 || !isAtom(args[0])) {
+    return "/* bad lambda */ () => undefined";
+  }
+  const param = args[0].atom ?? "";
+  const paramType = paramTypes[depth] ?? "any";
+  const inner = new Map(varMap);
+  inner.set(param, paramType);
+  // If the body is itself a lambda and we still have paramType hints,
+  // recurse so the inner binding also gets a Shen type.
+  const body =
+    isCall(args[1]) && op(args[1]) === "lambda" && depth + 1 < paramTypes.length
+      ? translateCurriedLambdaAt(args[1], inner, st, paramTypes, depth + 1)
+      : translateDefineExpr(args[1], inner, st);
+  return `(${toCamelCase(param)}: any) => ${body}`;
+}
+
 function translateDefineExpr(
   expr: SExpr,
   varMap: Map<string, string>,
@@ -1712,6 +1786,22 @@ function translateDefineExpr(
       return `${tx(args[0])}.slice(1)`;
     case "length":
       return `${tx(args[0])}.length`;
+    case "trim":
+      // `(trim X)` → `X.trim()`. Strip leading/trailing whitespace.
+      return `${tx(args[0])}.trim()`;
+    case "head-char":
+      // `(head-char X)` → first character of string `X` as a 1-char string.
+      // TS `""[0]` is `undefined`, so guard with `?? ""` to keep the Shen
+      // semantic that head-char of the empty string is empty.
+      return `(${tx(args[0])}[0] ?? "")`;
+    case "tail-chars":
+      // `(tail-chars X)` → `X` with the first character removed.
+      return `${tx(args[0])}.slice(1)`;
+    case "in-range?":
+      // `(in-range? C A B)` → lexical `A <= C <= B`. Used for character-range
+      // alphabet checks (e.g. "A" <= c <= "Z"). TS string comparison is
+      // lexicographic, which matches Shen's intended single-char semantics.
+      return `(${tx(args[0])} >= ${tx(args[1])} && ${tx(args[0])} <= ${tx(args[2])})`;
     case "cons":
       return `[${tx(args[0])}, ...${tx(args[1])}]`;
     case "__cons":
@@ -1747,19 +1837,35 @@ function translateDefineExpr(
       const body = translateDefineExpr(args[1], inner, st);
       return `(${toCamelCase(param)}: any) => ${body}`;
     }
-    case "foldr":
-      // Shen foldr is right-fold with curried f: f(x)(acc). Wrap the f
-      // translation in parens so an inline lambda doesn't bind to the outer
-      // arrow's RHS.
-      return `${tx(args[2])}.reduceRight((acc: any, x: any) => (${tx(args[0])})(x)(acc), ${tx(args[1])})`;
-    case "foldl":
-      return `${tx(args[2])}.reduce((acc: any, x: any) => (${tx(args[0])})(acc)(x), ${tx(args[1])})`;
-    case "scanl":
-      return `__scanl(${tx(args[0])}, ${tx(args[1])}, ${tx(args[2])})`;
-    case "map":
-      return `${tx(args[1])}.map((x: any) => (${tx(args[0])})(x))`;
-    case "filter":
-      return `${tx(args[1])}.filter((x: any) => (${tx(args[0])})(x))`;
+    case "foldr": {
+      // Shen foldr is right-fold with curried f: f(x)(acc). Outer lambda
+      // binds the element, inner binds the accumulator.
+      const elemShenType = inferListElemType(args[2], varMap) ?? "any";
+      const f = translateCurriedLambda(args[0], varMap, st, [elemShenType, "any"]);
+      return `${tx(args[2])}.reduceRight((acc: any, x: any) => (${f})(x)(acc), ${tx(args[1])})`;
+    }
+    case "foldl": {
+      // f(acc)(x): outer lambda binds accumulator, inner binds element.
+      const elemShenType = inferListElemType(args[2], varMap) ?? "any";
+      const f = translateCurriedLambda(args[0], varMap, st, ["any", elemShenType]);
+      return `${tx(args[2])}.reduce((acc: any, x: any) => (${f})(acc)(x), ${tx(args[1])})`;
+    }
+    case "scanl": {
+      // Same curry order as foldl.
+      const elemShenType = inferListElemType(args[2], varMap) ?? "any";
+      const f = translateCurriedLambda(args[0], varMap, st, ["any", elemShenType]);
+      return `__scanl(${f}, ${tx(args[1])}, ${tx(args[2])})`;
+    }
+    case "map": {
+      const elemShenType = inferListElemType(args[1], varMap) ?? "any";
+      const f = translateCurriedLambda(args[0], varMap, st, [elemShenType]);
+      return `${tx(args[1])}.map((x: any) => (${f})(x))`;
+    }
+    case "filter": {
+      const elemShenType = inferListElemType(args[1], varMap) ?? "any";
+      const f = translateCurriedLambda(args[0], varMap, st, [elemShenType]);
+      return `${tx(args[1])}.filter((x: any) => (${f})(x))`;
+    }
   }
 
   // User-defined predicate / function call, or an accessor-style call like
@@ -1789,17 +1895,74 @@ function translateDefineExpr(
   return `${callee}(${args.map(tx).join(", ")})`;
 }
 
+// reachableDefines computes the transitive closure of define names that are
+// actually referenced from a datatype's `:verified` premise. Defines that
+// exist in the spec but are not reached — e.g. `roundtrip?` in codec.shen §7,
+// a shen-derive-ts target whose body calls into the consumer's real
+// `encode`/`decode` — are NOT emitted as TS. Emitting them would produce
+// references to undefined symbols and fail `tsc --strict`.
+//
+// shen-derive-ts reads the spec file directly, so skipping these in the TS
+// output does not break the derivation pipeline.
+function reachableDefines(
+  st: SymbolTable,
+  types: Datatype[]
+): Set<string> {
+  const reached = new Set<string>();
+  const frontier: string[] = [];
+
+  const visit = (expr: SExpr): void => {
+    if (!isCall(expr)) return;
+    const fname = op(expr);
+    if (st.defines.has(fname) && !reached.has(fname)) {
+      reached.add(fname);
+      frontier.push(fname);
+    }
+    for (const child of expr.children!) visit(child);
+  };
+
+  for (const dt of types) {
+    for (const rule of dt.rules) {
+      for (const v of rule.verified) {
+        visit(parseSExpr(v.raw));
+      }
+    }
+  }
+
+  while (frontier.length > 0) {
+    const name = frontier.shift()!;
+    const def = st.defines.get(name);
+    if (!def) continue;
+    for (const clause of def.clauses) {
+      if (clause.result) visit(parseSExpr(clause.result));
+      if (clause.guard) visit(parseSExpr(clause.guard));
+    }
+  }
+
+  return reached;
+}
+
 // generateDefineHelpers emits one TS function per (define …) in the symbol
-// table's registry. Returns the helper source plus a `__scanl` prelude when
-// any define uses scanl.
-function generateDefineHelpers(st: SymbolTable): string[] {
+// table. When `options.filterUnreferencedDefines` is set, only defines that
+// are transitively referenced from a datatype's `:verified` premise are
+// emitted; derivation targets and dead code are skipped. Returns the helper
+// source plus a `__scanl` prelude when any emitted define uses scanl.
+function generateDefineHelpers(
+  st: SymbolTable,
+  types: Datatype[],
+  options: GenerateOptions = {}
+): string[] {
   if (st.defines.size === 0) return [];
+  const filter = options.filterUnreferencedDefines === true;
+  const reached = filter ? reachableDefines(st, types) : null;
+  if (filter && reached!.size === 0) return [];
   const lines: string[] = [];
   const bodies: string[] = [];
   let needsScanl = false;
   let needsVal = false;
 
-  for (const [, def] of st.defines) {
+  for (const [name, def] of st.defines) {
+    if (reached && !reached.has(name)) continue;
     const emitted = generateOneDefine(def, st);
     if (emitted.usesScanl) needsScanl = true;
     if (emitted.usesVal) needsVal = true;
@@ -2057,6 +2220,7 @@ function main(): void {
   let outFile: string | null = null;
   let dryRun = false;
   let pkg: string | undefined;
+  let filterUnreferencedDefines = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--spec" && i + 1 < args.length) {
@@ -2067,6 +2231,8 @@ function main(): void {
       pkg = args[++i];
     } else if (args[i] === "--dry-run") {
       dryRun = true;
+    } else if (args[i] === "--filter-unreferenced-defines") {
+      filterUnreferencedDefines = true;
     } else if (!args[i].startsWith("--")) {
       specPaths.push(args[i]);
     }
@@ -2087,7 +2253,10 @@ function main(): void {
   printSymbolTable(types, st, originLabel);
 
   if (!dryRun) {
-    const output = generateTs(types, st, originLabel, { pkg });
+    const output = generateTs(types, st, originLabel, {
+      pkg,
+      filterUnreferencedDefines,
+    });
     if (outFile) {
       writeFileSync(outFile, output);
       process.stderr.write(`Generated ${outFile} from ${originLabel}\n`);
