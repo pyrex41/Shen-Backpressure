@@ -139,6 +139,10 @@ function primArity(op: string): number {
     case "fst":
     case "snd":
     case "concat":
+    case "length":
+    case "trim":
+    case "head-char":
+    case "tail-chars":
       return 1;
     case "+":
     case "-":
@@ -157,11 +161,13 @@ function primArity(op: string): number {
     case "map":
     case "filter":
     case "unfoldr":
+    case "element?":
       return 2;
     case "foldr":
     case "foldl":
     case "scanl":
     case "compose":
+    case "in-range?":
       return 3;
     default:
       return 0;
@@ -442,6 +448,43 @@ export function execPrim(op: string, args: Value[]): Value {
       const x = args[2]!;
       return applyVal(f, applyVal(g, x));
     }
+
+    // String primitives — mirror shengen-ts's translateDefineExpr emission
+    // (length → x.length; trim → x.trim(); head-char → x[0] ?? "";
+    // tail-chars → x.slice(1); in-range? → lex compare; element? → set
+    // membership).
+    case "length": {
+      const v = args[0]!;
+      if (v.kind === "string") return { kind: "int", val: v.val.length };
+      if (v.kind === "list") return { kind: "int", val: v.elems.length };
+      throw new Error(`length: expected String or List, got ${v.kind}`);
+    }
+    case "trim": {
+      const s = asString(args[0]!, "trim");
+      return { kind: "string", val: s.trim() };
+    }
+    case "head-char": {
+      const s = asString(args[0]!, "head-char");
+      return { kind: "string", val: s.length === 0 ? "" : s[0]! };
+    }
+    case "tail-chars": {
+      const s = asString(args[0]!, "tail-chars");
+      return { kind: "string", val: s.slice(1) };
+    }
+    case "in-range?": {
+      const c = asString(args[0]!, "in-range?");
+      const lo = asString(args[1]!, "in-range?");
+      const hi = asString(args[2]!, "in-range?");
+      return { kind: "bool", val: c >= lo && c <= hi };
+    }
+    case "element?": {
+      const x = args[0]!;
+      const xs = asList(args[1]!, "element?");
+      for (const y of xs) {
+        if (valEqual(x, y)) return { kind: "bool", val: true };
+      }
+      return { kind: "bool", val: false };
+    }
   }
   throw new Error(`unknown primitive: ${op}`);
 }
@@ -451,6 +494,13 @@ export function execPrim(op: string, args: Value[]): Value {
 function asInt(v: Value, ctx: string): number {
   if (v.kind !== "int") {
     throw new Error(`${ctx}: expected Int, got ${v.kind}`);
+  }
+  return v.val;
+}
+
+function asString(v: Value, ctx: string): string {
+  if (v.kind !== "string") {
+    throw new Error(`${ctx}: expected String, got ${v.kind}`);
   }
   return v.val;
 }

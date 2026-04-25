@@ -293,3 +293,114 @@ test("eval: processable balance pattern (overspend)", () => {
     (cons 30 (cons 50 (cons 40 nil)))))`;
   assertBool(run(src), false);
 });
+
+// --- String primitives (mirror shengen-ts's translateDefineExpr) ---
+
+test("eval: length on string", () => {
+  assertInt(run('(length "hello")'), 5);
+});
+
+test("eval: length on empty string is 0", () => {
+  assertInt(run('(length "")'), 0);
+});
+
+test("eval: length on list", () => {
+  assertInt(run("(length (cons 1 (cons 2 (cons 3 nil))))"), 3);
+});
+
+test("eval: trim removes leading and trailing whitespace", () => {
+  const v = run('(trim "  hello  ")');
+  assert.equal(v.kind, "string");
+  if (v.kind === "string") assert.equal(v.val, "hello");
+});
+
+test("eval: trim of all-whitespace yields empty", () => {
+  const v = run('(trim "   ")');
+  assert.equal(v.kind, "string");
+  if (v.kind === "string") assert.equal(v.val, "");
+});
+
+test("eval: head-char of non-empty string", () => {
+  const v = run('(head-char "abc")');
+  assert.equal(v.kind, "string");
+  if (v.kind === "string") assert.equal(v.val, "a");
+});
+
+test("eval: head-char of empty string is empty", () => {
+  const v = run('(head-char "")');
+  assert.equal(v.kind, "string");
+  if (v.kind === "string") assert.equal(v.val, "");
+});
+
+test("eval: tail-chars drops first character", () => {
+  const v = run('(tail-chars "abc")');
+  assert.equal(v.kind, "string");
+  if (v.kind === "string") assert.equal(v.val, "bc");
+});
+
+test("eval: tail-chars of single-char string is empty", () => {
+  const v = run('(tail-chars "x")');
+  assert.equal(v.kind, "string");
+  if (v.kind === "string") assert.equal(v.val, "");
+});
+
+test("eval: in-range? accepts in-range char", () => {
+  assertBool(run('(in-range? "M" "A" "Z")'), true);
+});
+
+test("eval: in-range? rejects out-of-range char", () => {
+  assertBool(run('(in-range? "a" "A" "Z")'), false);
+});
+
+test("eval: in-range? boundary lo is inclusive", () => {
+  assertBool(run('(in-range? "A" "A" "Z")'), true);
+});
+
+test("eval: in-range? boundary hi is inclusive", () => {
+  assertBool(run('(in-range? "Z" "A" "Z")'), true);
+});
+
+test("eval: element? finds member in string list", () => {
+  assertBool(run('(element? "b" (cons "a" (cons "b" (cons "c" nil))))'), true);
+});
+
+test("eval: element? rejects non-member", () => {
+  assertBool(run('(element? "z" (cons "a" (cons "b" nil)))'), false);
+});
+
+test("eval: element? on empty list is false", () => {
+  assertBool(run('(element? "x" nil)'), false);
+});
+
+// --- non-blank? round-trip — composes length + trim + > ---
+
+test("eval: non-blank? define body accepts non-blank string", () => {
+  // Mirrors event-schema.shen: X -> (> (length (trim X)) 0)
+  assertBool(run('(> (length (trim "  hello  ")) 0)'), true);
+});
+
+test("eval: non-blank? define body rejects whitespace-only", () => {
+  assertBool(run('(> (length (trim "   ")) 0)'), false);
+});
+
+test("eval: non-blank? define body rejects empty string", () => {
+  assertBool(run('(> (length (trim "")) 0)'), false);
+});
+
+// --- base64url-char? define body — composes in-range? + or + = ---
+
+test("eval: base64url-char? accepts uppercase letter", () => {
+  const src = `(or (in-range? "M" "A" "Z")
+                  (or (in-range? "M" "a" "z")
+                      (or (in-range? "M" "0" "9")
+                          (or (= "M" "-") (= "M" "_")))))`;
+  assertBool(run(src), true);
+});
+
+test("eval: base64url-char? rejects punctuation", () => {
+  const src = `(or (in-range? "!" "A" "Z")
+                  (or (in-range? "!" "a" "z")
+                      (or (in-range? "!" "0" "9")
+                          (or (= "!" "-") (= "!" "_")))))`;
+  assertBool(run(src), false);
+});
