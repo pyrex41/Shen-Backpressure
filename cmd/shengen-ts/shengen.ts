@@ -2210,6 +2210,81 @@ interface DefineEmission {
   usesVal: boolean;
 }
 
+// LinearRecPattern captures a single-arg, two-clause define of the shape
+//
+//   <BC>  -> <BR>                              ; literal base case
+//   <V>   -> (and <HBODY> (<fname> <STEP>))    ; recursive step
+//
+// where HBODY does not itself recurse into <fname>. Such defines translate
+// to a deterministic while-loop, sidestepping the JS engine's lack of TCO
+// for self-tail-calls. Without this rewrite, predicates like `base64url?`
+// blow the call stack on inputs of order ~10k characters even though their
+// algorithmic shape is iteration-friendly.
+interface LinearRecPattern {
+  v: string;     // upper-case Shen variable bound by clause[1]'s pattern
+  bcRaw: string; // raw literal pattern from clause[0] (e.g. `""`, `0`, `[]`)
+  brRaw: string; // raw literal terminal result from clause[0] (e.g. `true`)
+  hbody: SExpr;  // first arg of `and` — the per-step predicate (in V)
+  step: SExpr;   // sole arg of the recursive call — next-iteration value
+}
+
+function isLinearRecLiteralPattern(s: string): boolean {
+  return /^".*"$/.test(s) || isNumericLiteral(s) || s === "[]";
+}
+
+function isLinearRecLiteralTerminal(s: string): boolean {
+  const t = s.trim();
+  return (
+    t === "true" ||
+    t === "false" ||
+    t === "[]" ||
+    /^".*"$/.test(t) ||
+    isNumericLiteral(t)
+  );
+}
+
+function sexprContainsCall(expr: SExpr, name: string): boolean {
+  if (isAtom(expr)) return false;
+  if (op(expr) === name) return true;
+  return (expr.children ?? []).some((c) => sexprContainsCall(c, name));
+}
+
+function detectLinearRecursion(def: Define): LinearRecPattern | null {
+  if (def.clauses.length !== 2) return null;
+  const [c0, c1] = def.clauses;
+  if (c0.patterns.length !== 1 || c1.patterns.length !== 1) return null;
+  if (c0.guard.trim() !== "" || c1.guard.trim() !== "") return null;
+
+  const bcRaw = c0.patterns[0];
+  const brRaw = c0.result;
+  if (!isLinearRecLiteralPattern(bcRaw)) return null;
+  if (!isLinearRecLiteralTerminal(brRaw)) return null;
+
+  const v = c1.patterns[0];
+  if (!/^[A-Z][A-Za-z0-9_-]*$/.test(v)) return null;
+
+  const result = c1.result.trim();
+  if (!result.startsWith("(")) return null;
+  let expr: SExpr;
+  try {
+    expr = parseSExpr(result);
+  } catch {
+    return null;
+  }
+  if (!isCall(expr) || op(expr) !== "and") return null;
+  const andArgs = expr.children!.slice(1);
+  if (andArgs.length !== 2) return null;
+  const [hbody, recCall] = andArgs;
+  if (!isCall(recCall) || op(recCall) !== def.name) return null;
+  const recArgs = recCall.children!.slice(1);
+  if (recArgs.length !== 1) return null;
+
+  // HBODY must not itself recurse — otherwise the rewrite is not faithful.
+  if (sexprContainsCall(hbody, def.name)) return null;
+
+  return { v, bcRaw, brRaw, hbody, step: recArgs[0] };
+}
+
 function generateOneDefine(def: Define, st: SymbolTable): DefineEmission {
   const lines: string[] = [];
   const tsName = definePascalName(def.name);
@@ -2249,6 +2324,35 @@ function generateOneDefine(def: Define, st: SymbolTable): DefineEmission {
 
   lines.push(`// ${tsName} is generated from Shen define ${def.name}`);
   lines.push(`export function ${tsName}(${paramSig}): ${returnTs} {`);
+
+  // Linear-recursion → while-loop rewrite. Recognised shape is documented on
+  // LinearRecPattern. Eligibility requires a single positional arg whose
+  // canonical paramName is the lowercased form of the bound variable in the
+  // step clause; both conditions hold whenever detectLinearRecursion matches.
+  if (paramCount === 1) {
+    const linearRec = detectLinearRecursion(def);
+    if (linearRec && paramNames[0] === toCamelCase(linearRec.v)) {
+      const paramShen = sigParams[0] ?? "any";
+      const varMap = new Map<string, string>([[linearRec.v, paramShen]]);
+      const v = paramNames[0];
+      const bcTs = translateDefineAtom(linearRec.bcRaw, varMap, st);
+      const brTs = translateDefineAtom(linearRec.brRaw, varMap, st);
+      const hbodyTs = translateDefineExpr(linearRec.hbody, varMap, st);
+      const stepTs = translateDefineExpr(linearRec.step, varMap, st);
+
+      lines.push(`  while (!(${v} === ${bcTs})) {`);
+      lines.push(`    if (!(${hbodyTs})) return false;`);
+      lines.push(`    ${v} = ${stepTs};`);
+      lines.push(`  }`);
+      lines.push(`  return ${brTs};`);
+      lines.push(`}`);
+      lines.push("");
+      const stepSrc = def.clauses[1].result;
+      const usesScanl = /scanl/.test(stepSrc);
+      const usesVal = /\bval\b/.test(stepSrc);
+      return { lines, usesScanl, usesVal };
+    }
+  }
 
   let usesScanl = false;
   let usesVal = false;
