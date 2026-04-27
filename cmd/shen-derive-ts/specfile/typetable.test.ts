@@ -203,9 +203,39 @@ test("sum types produce a synthetic sumtype entry", () => {
   const shape = get(tt, "shape");
   assert.equal(shape.category, "sumtype");
   assert.equal(shape.tsName, "Shape");
+  assert.deepEqual(shape.variants, ["circle", "square"]);
   const circle = get(tt, "circle");
   assert.equal(circle.category, "composite");
   assert.equal(circle.fields.length, 1);
+});
+
+test("aliases record their wrapped premise type", () => {
+  const dts: Datatype[] = [
+    {
+      name: "event-data",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "event-data", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "event-variant",
+      rules: [
+        {
+          premises: [{ varName: "E", typeName: "event-data" }],
+          verified: [],
+          conclusion: { varName: "E", typeName: "site-data", fields: [] },
+        },
+      ],
+    },
+  ];
+  const tt = buildTypeTable(dts, "", "");
+  const siteData = get(tt, "site-data");
+  assert.equal(siteData.category, "alias");
+  assert.equal(siteData.aliasOf, "event-data");
 });
 
 // --- tsType tests ---

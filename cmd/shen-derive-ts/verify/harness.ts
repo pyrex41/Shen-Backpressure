@@ -34,6 +34,8 @@ export type HarnessConfig = {
   tt: TypeTable;
   /** Every define from the spec (for mutual recursion in the eval env). */
   allDefines: Define[];
+  /** Synchronous external functions made available to spec evaluation. */
+  externs?: ExternBinding[];
   /** The define to be verified (must exist in spec.defines). */
   funcName: string;
   /** Relative TS path for the implementation module, e.g. "./processable". */
@@ -47,6 +49,14 @@ export type HarnessConfig = {
   maxCases: number;
   seed: number;
   randomDraws: number;
+};
+
+export type ExternAdapter = (...args: Value[]) => Value;
+
+export type ExternBinding = {
+  name: string;
+  arity: number;
+  fn: ExternAdapter;
 };
 
 export type Case = {
@@ -83,9 +93,15 @@ export function buildHarness(cfg: HarnessConfig): Harness {
     throw new Error(`spec ${def.name}: no clauses`);
   }
 
+  // Shared base env with field accessors, externs, and all defines
+  // (envHolder trick). Build this before sampling so constrained-type
+  // predicates can call helper defines.
+  const baseEnv = buildBaseEnv(cfg.tt, cfg.allDefines, cfg.externs ?? []);
+
   // Sampling context. Zero seed → deterministic boundary values only.
   const ctx: SampleCtx = {
     tt: cfg.tt,
+    constraintEnv: baseEnv,
     rand: cfg.seed !== 0 ? new SeededRng(cfg.seed) : null,
     randomDraws: cfg.seed !== 0
       ? (cfg.randomDraws > 0 ? cfg.randomDraws : 8)
@@ -105,9 +121,6 @@ export function buildHarness(cfg: HarnessConfig): Harness {
 
   const maxCases = cfg.maxCases > 0 ? cfg.maxCases : 50;
   const combos = cartesian(paramSamples, maxCases);
-
-  // Shared base env with field accessors and all defines (envHolder trick).
-  const baseEnv = buildBaseEnv(cfg.tt, cfg.allDefines);
 
   const cases: Case[] = [];
   for (let idx = 0; idx < combos.length; idx++) {
@@ -229,6 +242,7 @@ function bindClausePatterns(
 export function buildBaseEnv(
   tt: TypeTable,
   defines: Define[],
+  externs: ExternBinding[] = [],
 ): Env {
   let env = Env.empty();
 
@@ -275,11 +289,30 @@ export function buildBaseEnv(
   // this shared container, so all references resolve through the
   // fully-populated env after we finish extending it below.
   const holder: { env: Env } = { env };
+  for (const ext of externs) {
+    if (ext.arity <= 0 || !Number.isInteger(ext.arity)) {
+      throw new Error(`extern ${ext.name}: arity must be a positive integer`);
+    }
+    env = env.extend(ext.name, curriedExternFn(ext));
+  }
   for (const d of defines) {
     env = env.extend(d.name, curriedDefineFn(d, holder));
   }
   holder.env = env;
   return env;
+}
+
+function curriedExternFn(ext: ExternBinding): Value {
+  const build = (collected: Value[]): Value =>
+    builtinFn(ext.name, (v) => {
+      const next = collected.slice();
+      next.push(v);
+      if (next.length === ext.arity) {
+        return ext.fn(...next);
+      }
+      return build(next);
+    });
+  return build([]);
 }
 
 function curriedDefineFn(
@@ -342,6 +375,9 @@ export function tsLiteralFor(
     if (entry.category === "wrapper" || entry.category === "constrained") {
       // Emit the underlying primitive literal (comparison unwraps via .val()).
       return tsLiteralFor(v, entry.shenPrim, tt);
+    }
+    if (entry.category === "alias" && entry.aliasOf) {
+      return tsLiteralFor(v, entry.aliasOf, tt);
     }
     if (entry.category === "composite" || entry.category === "guarded") {
       if (v.kind !== "list") {
