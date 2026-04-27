@@ -223,6 +223,52 @@ test("pair-in-list?: buildHarness + emit succeed end-to-end", () => {
   }
 });
 
+// --- extern bindings ---
+
+const EXTERN_ROUNDTRIP_SRC = `
+(datatype thing
+  X : string;
+  ==========
+  X : thing;)
+
+(define roundtrip?
+  {thing --> boolean}
+  X -> (= X (decode (encode X))))
+`;
+
+test("extern bindings let the harness evaluate adapter-backed spec calls", () => {
+  const sf = parseFile(EXTERN_ROUNDTRIP_SRC);
+  const tt = buildTypeTable(sf.datatypes, "./shenguard_gen.ts", "shenguard");
+  const identity = (v: Value): Value => v;
+
+  const h = buildHarness({
+    spec: sf,
+    tt,
+    allDefines: sf.defines,
+    externs: [
+      { name: "encode", arity: 1, fn: identity },
+      { name: "decode", arity: 1, fn: identity },
+    ],
+    funcName: "roundtrip?",
+    implModule: "./roundtrip",
+    implFunc: "Roundtrip",
+    importPath: "./shenguard_gen.ts",
+    importAlias: "shenguard",
+    maxCases: 10,
+    seed: 0,
+    randomDraws: 0,
+  });
+
+  assert.ok(h.cases.length > 0);
+  for (const c of h.cases) {
+    assert.equal(c.expected.kind, "bool");
+    if (c.expected.kind === "bool") assert.equal(c.expected.val, true);
+  }
+  const src = emit(h);
+  assert.ok(src.includes("Roundtrip("));
+  assert.ok(src.includes("const want = true;"));
+});
+
 // --- seeded sampling determinism ---
 
 const ADD_ONE_SRC = `

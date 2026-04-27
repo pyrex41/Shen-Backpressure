@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 
 import type { Datatype } from "../specfile/parse.ts";
 import { buildTypeTable } from "../specfile/typetable.ts";
+import { Env, boolVal, builtinFn } from "../core/eval.ts";
 import { genSamples, SeededRng, type SampleCtx } from "./samples.ts";
 
 // --- Fixture datatypes ---
@@ -200,6 +201,112 @@ test("transaction composite produces one variation per longest-field index", () 
       assert.equal(x.value.elems.length, 3);
     }
   }
+});
+
+// --- Alias + sum types ---
+
+test("alias samples delegate to the target type", () => {
+  const dts: Datatype[] = [
+    {
+      name: "account-id",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "account-id", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "user-id",
+      rules: [
+        {
+          premises: [{ varName: "A", typeName: "account-id" }],
+          verified: [],
+          conclusion: { varName: "A", typeName: "user-id", fields: [] },
+        },
+      ],
+    },
+  ];
+  const tt = buildTypeTable(dts, "./shenguard.ts", "shenguard");
+  const ctx: SampleCtx = { tt, rand: null, randomDraws: 0 };
+
+  assert.deepEqual(
+    genSamples(ctx, "user-id").map((s) => s.tsExpr),
+    genSamples(ctx, "account-id").map((s) => s.tsExpr),
+  );
+});
+
+test("sumtype samples include at least one sample from each variant", () => {
+  const dts: Datatype[] = [
+    {
+      name: "circle",
+      rules: [
+        {
+          premises: [{ varName: "R", typeName: "number" }],
+          verified: [],
+          conclusion: { varName: "", typeName: "shape", fields: ["R"] },
+        },
+      ],
+    },
+    {
+      name: "square",
+      rules: [
+        {
+          premises: [{ varName: "S", typeName: "number" }],
+          verified: [],
+          conclusion: { varName: "", typeName: "shape", fields: ["S"] },
+        },
+      ],
+    },
+  ];
+  const tt = buildTypeTable(dts, "./shenguard.ts", "shenguard");
+  const s = genSamples({ tt, rand: null, randomDraws: 0 }, "shape");
+
+  assert.ok(s.some((x) => x.tsExpr.startsWith("shenguard.mustCircle(")));
+  assert.ok(s.some((x) => x.tsExpr.startsWith("shenguard.mustSquare(")));
+});
+
+test("event-pubkey-like sum samples empty and full variants", () => {
+  const dts: Datatype[] = [
+    {
+      name: "empty-pubkey",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [{ raw: "(= (length X) 0)", varName: "", expr: "(= (length X) 0)" }],
+          conclusion: { varName: "X", typeName: "event-pubkey", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "full-pubkey",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [
+            { raw: "(= (length X) 43)", varName: "", expr: "(= (length X) 43)" },
+            { raw: "(base64url? X)", varName: "", expr: "(base64url? X)" },
+          ],
+          conclusion: { varName: "X", typeName: "event-pubkey", fields: [] },
+        },
+      ],
+    },
+  ];
+  const tt = buildTypeTable(dts, "./shenguard.ts", "shenguard");
+  const constraintEnv = Env.empty().extend(
+    "base64url?",
+    builtinFn("base64url?", () => boolVal(true)),
+  );
+  const s = genSamples({ tt, constraintEnv, rand: null, randomDraws: 0 }, "event-pubkey");
+
+  assert.ok(s.some((x) => x.tsExpr === `shenguard.mustEmptyPubkey("")`));
+  assert.ok(
+    s.some((x) =>
+      x.tsExpr === `shenguard.mustFullPubkey(${JSON.stringify("A".repeat(43))})`
+    ),
+    "expected constrained-string candidate for 43-char full pubkey",
+  );
 });
 
 // --- Seeded PRNG reproducibility ---

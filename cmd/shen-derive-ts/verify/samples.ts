@@ -65,6 +65,8 @@ export type Sample = {
 
 export type SampleCtx = {
   tt: TypeTable;
+  /** Optional environment used when constrained-type predicates call defines. */
+  constraintEnv?: Env;
   /** null → deterministic, boundary values only. */
   rand: SeededRng | null;
   /** Number of extra random draws for primitive number/string types. */
@@ -90,6 +92,13 @@ const NUMBER_RAW: ReadonlyArray<
 ];
 
 const STRING_POOL: ReadonlyArray<string> = ["", "alice", "bob"];
+const CONSTRAINED_STRING_EXTRA_POOL: ReadonlyArray<string> = [
+  " ",
+  "A",
+  "A".repeat(43),
+  "A".repeat(44),
+  "abc_def-123",
+];
 const BOOL_POOL: ReadonlyArray<boolean> = [true, false];
 
 // --- Entry point ---
@@ -145,9 +154,15 @@ export function genSamples(ctx: SampleCtx, shenType: string): Sample[] {
     case "guarded":
       return compositeSamples(ctx, entry);
     case "alias":
-      throw new Error(`alias type "${t}" not supported in samples yet`);
+      if (!entry.aliasOf) {
+        throw new Error(`alias type "${t}" has no target type`);
+      }
+      return genSamples(ctx, entry.aliasOf);
     case "sumtype":
-      throw new Error(`sum type "${t}" sampling not supported yet`);
+      if (!entry.variants || entry.variants.length === 0) {
+        throw new Error(`sum type "${t}" has no variants`);
+      }
+      return entry.variants.flatMap((variant) => genSamples(ctx, variant));
     default: {
       // Exhaustive check.
       const _never: never = entry.category;
@@ -174,8 +189,16 @@ function numberSamples(): Sample[] {
 
 function wrapperSamples(ctx: SampleCtx, entry: TypeEntry): Sample[] {
   let primSamples = genSamples(ctx, entry.shenPrim);
+  if (entry.category === "constrained" && entry.shenPrim === "string") {
+    primSamples = primSamples.concat(
+      CONSTRAINED_STRING_EXTRA_POOL.map((s) => ({
+        value: stringVal(s),
+        tsExpr: JSON.stringify(s),
+      })),
+    );
+  }
   if (entry.category === "constrained") {
-    primSamples = filterByConstraints(entry, primSamples);
+    primSamples = filterByConstraints(ctx, entry, primSamples);
   }
   const helper = `${entry.importAlias || "shenguard"}.must${entry.tsName}`;
   return primSamples.map((ps) => ({
@@ -185,6 +208,7 @@ function wrapperSamples(ctx: SampleCtx, entry: TypeEntry): Sample[] {
 }
 
 function filterByConstraints(
+  ctx: SampleCtx,
   entry: TypeEntry,
   candidates: Sample[],
 ): Sample[] {
@@ -204,7 +228,7 @@ function filterByConstraints(
 
   const out: Sample[] = [];
   for (const s of candidates) {
-    const env = Env.empty().extend(entry.varName, s.value);
+    const env = (ctx.constraintEnv ?? Env.empty()).extend(entry.varName, s.value);
     let ok = true;
     for (const p of preds) {
       try {
