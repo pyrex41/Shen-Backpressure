@@ -4,16 +4,28 @@
 // Constructors are the ONLY way to create these types — bypassing them
 // is a violation of the formal spec.
 
+// --- TagResolveOutcome (sum type) ---
+// Multiple Shen datatype blocks produce this type.
+// Variants: signed-complete, unsigned-complete, partial
+export type TagResolveOutcome = SignedComplete | UnsignedComplete | Partial;
+
 // --- QueryText ---
 // Shen: (datatype query-text)
 export class QueryText {
   private readonly _v: string;
   private constructor(v: string) { this._v = v; }
-  static create(x: string): QueryText {
+  static createOrThrow(x: string): QueryText {
     if (!(x.length > 0)) throw new Error(`x.length must be > 0: ${x}`);
     return new QueryText(x);
   }
+  static tryCreate(x: string): QueryText | Error {
+    try { return QueryText.createOrThrow(x); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
   val(): string { return this._v; }
+}
+export function mustQueryText(x: string): QueryText {
+  return QueryText.createOrThrow(x);
 }
 
 // --- Url ---
@@ -21,11 +33,18 @@ export class QueryText {
 export class Url {
   private readonly _v: string;
   private constructor(v: string) { this._v = v; }
-  static create(x: string): Url {
+  static createOrThrow(x: string): Url {
     if (!(x.length > 8)) throw new Error(`x.length must be > 8: ${x}`);
     return new Url(x);
   }
+  static tryCreate(x: string): Url | Error {
+    try { return Url.createOrThrow(x); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
   val(): string { return this._v; }
+}
+export function mustUrl(x: string): Url {
+  return Url.createOrThrow(x);
 }
 
 // --- Snippet ---
@@ -33,9 +52,16 @@ export class Url {
 export class Snippet {
   private readonly _v: string;
   private constructor(v: string) { this._v = v; }
-  static create(x: string): Snippet { return new Snippet(x); }
+  static createOrThrow(x: string): Snippet { return new Snippet(x); }
+  static tryCreate(x: string): Snippet | Error {
+    try { return Snippet.createOrThrow(x); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
   val(): string { return this._v; }
   toString(): string { return this._v; }
+}
+export function mustSnippet(x: string): Snippet {
+  return Snippet.createOrThrow(x);
 }
 
 // --- Timestamp ---
@@ -43,11 +69,18 @@ export class Snippet {
 export class Timestamp {
   private readonly _v: number;
   private constructor(v: number) { this._v = v; }
-  static create(x: number): Timestamp {
+  static createOrThrow(x: number): Timestamp {
     if (!(x > 0)) throw new Error(`x must be > 0: ${x}`);
     return new Timestamp(x);
   }
+  static tryCreate(x: number): Timestamp | Error {
+    try { return Timestamp.createOrThrow(x); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
   val(): number { return this._v; }
+}
+export function mustTimestamp(x: number): Timestamp {
+  return Timestamp.createOrThrow(x);
 }
 
 // --- SearchQuery ---
@@ -59,13 +92,20 @@ export class SearchQuery {
     this._text = text;
     this._maxResults = maxResults;
   }
-  static create(text: QueryText, maxResults: number): SearchQuery {
+  static createOrThrow(text: QueryText, maxResults: number): SearchQuery {
     if (!(maxResults >= 1)) throw new Error(`maxResults must be >= 1`);
     if (!(maxResults <= 20)) throw new Error(`maxResults must be <= 20`);
     return new SearchQuery(text, maxResults);
   }
+  static tryCreate(text: QueryText, maxResults: number): SearchQuery | Error {
+    try { return SearchQuery.createOrThrow(text, maxResults); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
   text(): QueryText { return this._text; }
   maxResults(): number { return this._maxResults; }
+}
+export function mustSearchQuery(text: QueryText, maxResults: number): SearchQuery {
+  return SearchQuery.createOrThrow(text, maxResults);
 }
 
 // --- SearchHit ---
@@ -79,12 +119,19 @@ export class SearchHit {
     this._url = url;
     this._snippet = snippet;
   }
-  static create(title: string, url: Url, snippet: Snippet): SearchHit {
+  static createOrThrow(title: string, url: Url, snippet: Snippet): SearchHit {
     return new SearchHit(title, url, snippet);
+  }
+  static tryCreate(title: string, url: Url, snippet: Snippet): SearchHit | Error {
+    try { return SearchHit.createOrThrow(title, url, snippet); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
   }
   title(): string { return this._title; }
   url(): Url { return this._url; }
   snippet(): Snippet { return this._snippet; }
+}
+export function mustSearchHit(title: string, url: Url, snippet: Snippet): SearchHit {
+  return SearchHit.createOrThrow(title, url, snippet);
 }
 
 // --- SearchResult ---
@@ -98,12 +145,19 @@ export class SearchResult {
     this._hits = hits;
     this._ts = ts;
   }
-  static create(query: SearchQuery, hits: SearchHit[], ts: Timestamp): SearchResult {
+  static createOrThrow(query: SearchQuery, hits: SearchHit[], ts: Timestamp): SearchResult {
     return new SearchResult(query, hits, ts);
+  }
+  static tryCreate(query: SearchQuery, hits: SearchHit[], ts: Timestamp): SearchResult | Error {
+    try { return SearchResult.createOrThrow(query, hits, ts); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
   }
   query(): SearchQuery { return this._query; }
   hits(): SearchHit[] { return this._hits; }
   ts(): Timestamp { return this._ts; }
+}
+export function mustSearchResult(query: SearchQuery, hits: SearchHit[], ts: Timestamp): SearchResult {
+  return SearchResult.createOrThrow(query, hits, ts);
 }
 
 // --- FetchRequest ---
@@ -121,12 +175,19 @@ export class FetchedPage {
     this._content = content;
     this._ts = ts;
   }
-  static create(url: Url, content: string, ts: Timestamp): FetchedPage {
+  static createOrThrow(url: Url, content: string, ts: Timestamp): FetchedPage {
     return new FetchedPage(url, content, ts);
+  }
+  static tryCreate(url: Url, content: string, ts: Timestamp): FetchedPage | Error {
+    try { return FetchedPage.createOrThrow(url, content, ts); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
   }
   url(): Url { return this._url; }
   content(): string { return this._content; }
   ts(): Timestamp { return this._ts; }
+}
+export function mustFetchedPage(url: Url, content: string, ts: Timestamp): FetchedPage {
+  return FetchedPage.createOrThrow(url, content, ts);
 }
 
 // --- AiPrompt ---
@@ -138,13 +199,20 @@ export class AiPrompt {
     this._system = system;
     this._user = user;
   }
-  static create(system: string, user: string): AiPrompt {
+  static createOrThrow(system: string, user: string): AiPrompt {
     if (!(system.length > 0)) throw new Error(`system.length must be > 0`);
     if (!(user.length > 0)) throw new Error(`user.length must be > 0`);
     return new AiPrompt(system, user);
   }
+  static tryCreate(system: string, user: string): AiPrompt | Error {
+    try { return AiPrompt.createOrThrow(system, user); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
   system(): string { return this._system; }
   user(): string { return this._user; }
+}
+export function mustAiPrompt(system: string, user: string): AiPrompt {
+  return AiPrompt.createOrThrow(system, user);
 }
 
 // --- AiResponse ---
@@ -158,12 +226,19 @@ export class AiResponse {
     this._text = text;
     this._ts = ts;
   }
-  static create(prompt: AiPrompt, text: string, ts: Timestamp): AiResponse {
+  static createOrThrow(prompt: AiPrompt, text: string, ts: Timestamp): AiResponse {
     return new AiResponse(prompt, text, ts);
+  }
+  static tryCreate(prompt: AiPrompt, text: string, ts: Timestamp): AiResponse | Error {
+    try { return AiResponse.createOrThrow(prompt, text, ts); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
   }
   prompt(): AiPrompt { return this._prompt; }
   text(): string { return this._text; }
   ts(): Timestamp { return this._ts; }
+}
+export function mustAiResponse(prompt: AiPrompt, text: string, ts: Timestamp): AiResponse {
+  return AiResponse.createOrThrow(prompt, text, ts);
 }
 
 // --- GroundedSource ---
@@ -175,12 +250,19 @@ export class GroundedSource {
     this._page = page;
     this._hit = hit;
   }
-  static create(page: FetchedPage, hit: SearchHit): GroundedSource {
+  static createOrThrow(page: FetchedPage, hit: SearchHit): GroundedSource {
     if (!(page.url() === hit.url())) throw new Error(`page.url() must equal hit.url()`);
     return new GroundedSource(page, hit);
   }
+  static tryCreate(page: FetchedPage, hit: SearchHit): GroundedSource | Error {
+    try { return GroundedSource.createOrThrow(page, hit); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
   page(): FetchedPage { return this._page; }
   hit(): SearchHit { return this._hit; }
+}
+export function mustGroundedSource(page: FetchedPage, hit: SearchHit): GroundedSource {
+  return GroundedSource.createOrThrow(page, hit);
 }
 
 // --- ResearchSummary ---
@@ -194,12 +276,19 @@ export class ResearchSummary {
     this._sources = sources;
     this._response = response;
   }
-  static create(query: SearchQuery, sources: GroundedSource[], response: AiResponse): ResearchSummary {
+  static createOrThrow(query: SearchQuery, sources: GroundedSource[], response: AiResponse): ResearchSummary {
     return new ResearchSummary(query, sources, response);
+  }
+  static tryCreate(query: SearchQuery, sources: GroundedSource[], response: AiResponse): ResearchSummary | Error {
+    try { return ResearchSummary.createOrThrow(query, sources, response); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
   }
   query(): SearchQuery { return this._query; }
   sources(): GroundedSource[] { return this._sources; }
   response(): AiResponse { return this._response; }
+}
+export function mustResearchSummary(query: SearchQuery, sources: GroundedSource[], response: AiResponse): ResearchSummary {
+  return ResearchSummary.createOrThrow(query, sources, response);
 }
 
 // --- UiComponentType ---
@@ -207,9 +296,16 @@ export class ResearchSummary {
 export class UiComponentType {
   private readonly _v: string;
   private constructor(v: string) { this._v = v; }
-  static create(x: string): UiComponentType { return new UiComponentType(x); }
+  static createOrThrow(x: string): UiComponentType { return new UiComponentType(x); }
+  static tryCreate(x: string): UiComponentType | Error {
+    try { return UiComponentType.createOrThrow(x); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
   val(): string { return this._v; }
   toString(): string { return this._v; }
+}
+export function mustUiComponentType(x: string): UiComponentType {
+  return UiComponentType.createOrThrow(x);
 }
 
 // --- UiTextBlock ---
@@ -221,11 +317,18 @@ export class UiTextBlock {
     this._content = content;
     this._cssClass = cssClass;
   }
-  static create(content: string, cssClass: string): UiTextBlock {
+  static createOrThrow(content: string, cssClass: string): UiTextBlock {
     return new UiTextBlock(content, cssClass);
+  }
+  static tryCreate(content: string, cssClass: string): UiTextBlock | Error {
+    try { return UiTextBlock.createOrThrow(content, cssClass); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
   }
   content(): string { return this._content; }
   cssClass(): string { return this._cssClass; }
+}
+export function mustUiTextBlock(content: string, cssClass: string): UiTextBlock {
+  return UiTextBlock.createOrThrow(content, cssClass);
 }
 
 // --- UiSourceCard ---
@@ -241,15 +344,22 @@ export class UiSourceCard {
     this._snippet = snippet;
     this._relevance = relevance;
   }
-  static create(title: string, url: Url, snippet: Snippet, relevance: number): UiSourceCard {
+  static createOrThrow(title: string, url: Url, snippet: Snippet, relevance: number): UiSourceCard {
     if (!(relevance >= 0)) throw new Error(`relevance must be >= 0`);
     if (!(relevance <= 1)) throw new Error(`relevance must be <= 1`);
     return new UiSourceCard(title, url, snippet, relevance);
+  }
+  static tryCreate(title: string, url: Url, snippet: Snippet, relevance: number): UiSourceCard | Error {
+    try { return UiSourceCard.createOrThrow(title, url, snippet, relevance); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
   }
   title(): string { return this._title; }
   url(): Url { return this._url; }
   snippet(): Snippet { return this._snippet; }
   relevance(): number { return this._relevance; }
+}
+export function mustUiSourceCard(title: string, url: Url, snippet: Snippet, relevance: number): UiSourceCard {
+  return UiSourceCard.createOrThrow(title, url, snippet, relevance);
 }
 
 // --- UiSearchBar ---
@@ -261,11 +371,18 @@ export class UiSearchBar {
     this._placeholder = placeholder;
     this._value = value;
   }
-  static create(placeholder: string, value: string): UiSearchBar {
+  static createOrThrow(placeholder: string, value: string): UiSearchBar {
     return new UiSearchBar(placeholder, value);
+  }
+  static tryCreate(placeholder: string, value: string): UiSearchBar | Error {
+    try { return UiSearchBar.createOrThrow(placeholder, value); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
   }
   placeholder(): string { return this._placeholder; }
   value(): string { return this._value; }
+}
+export function mustUiSearchBar(placeholder: string, value: string): UiSearchBar {
+  return UiSearchBar.createOrThrow(placeholder, value);
 }
 
 // --- UiPanel ---
@@ -279,12 +396,19 @@ export class UiPanel {
     this._kind = kind;
     this._children = children;
   }
-  static create(id: string, kind: UiComponentType, children: string[]): UiPanel {
+  static createOrThrow(id: string, kind: UiComponentType, children: string[]): UiPanel {
     return new UiPanel(id, kind, children);
+  }
+  static tryCreate(id: string, kind: UiComponentType, children: string[]): UiPanel | Error {
+    try { return UiPanel.createOrThrow(id, kind, children); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
   }
   id(): string { return this._id; }
   kind(): UiComponentType { return this._kind; }
   children(): string[] { return this._children; }
+}
+export function mustUiPanel(id: string, kind: UiComponentType, children: string[]): UiPanel {
+  return UiPanel.createOrThrow(id, kind, children);
 }
 
 // --- SafeRender ---
@@ -296,11 +420,18 @@ export class SafeRender {
     this._summary = summary;
     this._panel = panel;
   }
-  static create(summary: ResearchSummary, panel: UiPanel): SafeRender {
+  static createOrThrow(summary: ResearchSummary, panel: UiPanel): SafeRender {
     return new SafeRender(summary, panel);
+  }
+  static tryCreate(summary: ResearchSummary, panel: UiPanel): SafeRender | Error {
+    try { return SafeRender.createOrThrow(summary, panel); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
   }
   summary(): ResearchSummary { return this._summary; }
   panel(): UiPanel { return this._panel; }
+}
+export function mustSafeRender(summary: ResearchSummary, panel: UiPanel): SafeRender {
+  return SafeRender.createOrThrow(summary, panel);
 }
 
 // --- PipelineIdle ---
@@ -308,11 +439,18 @@ export class SafeRender {
 export class PipelineIdle {
   private readonly _v: string;
   private constructor(v: string) { this._v = v; }
-  static create(x: string): PipelineIdle {
+  static createOrThrow(x: string): PipelineIdle {
     if (!(x === "idle")) throw new Error(`x must equal "idle": ${x}`);
     return new PipelineIdle(x);
   }
+  static tryCreate(x: string): PipelineIdle | Error {
+    try { return PipelineIdle.createOrThrow(x); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
   val(): string { return this._v; }
+}
+export function mustPipelineIdle(x: string): PipelineIdle {
+  return PipelineIdle.createOrThrow(x);
 }
 
 // --- PipelineSearching ---
@@ -332,14 +470,216 @@ export class PipelineGenerating {
     this._sources = sources;
     this._query = query;
   }
-  static create(sources: GroundedSource[], query: SearchQuery): PipelineGenerating {
+  static createOrThrow(sources: GroundedSource[], query: SearchQuery): PipelineGenerating {
     return new PipelineGenerating(sources, query);
+  }
+  static tryCreate(sources: GroundedSource[], query: SearchQuery): PipelineGenerating | Error {
+    try { return PipelineGenerating.createOrThrow(sources, query); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
   }
   sources(): GroundedSource[] { return this._sources; }
   query(): SearchQuery { return this._query; }
+}
+export function mustPipelineGenerating(sources: GroundedSource[], query: SearchQuery): PipelineGenerating {
+  return PipelineGenerating.createOrThrow(sources, query);
 }
 
 // --- PipelineComplete ---
 // Shen: (datatype pipeline-complete)
 export type PipelineComplete = SafeRender;
+
+// --- TagId ---
+// Shen: (datatype tag-id)
+export class TagId {
+  private readonly _v: string;
+  private constructor(v: string) { this._v = v; }
+  static createOrThrow(x: string): TagId {
+    if (!(x.length > 0)) throw new Error(`x.length must be > 0: ${x}`);
+    return new TagId(x);
+  }
+  static tryCreate(x: string): TagId | Error {
+    try { return TagId.createOrThrow(x); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
+  val(): string { return this._v; }
+}
+export function mustTagId(x: string): TagId {
+  return TagId.createOrThrow(x);
+}
+
+// --- TagSignature ---
+// Shen: (datatype tag-signature)
+export class TagSignature {
+  private readonly _v: string;
+  private constructor(v: string) { this._v = v; }
+  static createOrThrow(x: string): TagSignature { return new TagSignature(x); }
+  static tryCreate(x: string): TagSignature | Error {
+    try { return TagSignature.createOrThrow(x); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
+  val(): string { return this._v; }
+  toString(): string { return this._v; }
+}
+export function mustTagSignature(x: string): TagSignature {
+  return TagSignature.createOrThrow(x);
+}
+
+// --- TagBlock ---
+// Shen: (datatype tag-block)
+export class TagBlock {
+  private readonly _id: TagId;
+  private readonly _body: string;
+  private readonly _childRefs: TagId[];
+  private readonly _signature: TagSignature;
+  private constructor(id: TagId, body: string, childRefs: TagId[], signature: TagSignature) {
+    this._id = id;
+    this._body = body;
+    this._childRefs = childRefs;
+    this._signature = signature;
+  }
+  static createOrThrow(id: TagId, body: string, childRefs: TagId[], signature: TagSignature): TagBlock {
+    return new TagBlock(id, body, childRefs, signature);
+  }
+  static tryCreate(id: TagId, body: string, childRefs: TagId[], signature: TagSignature): TagBlock | Error {
+    try { return TagBlock.createOrThrow(id, body, childRefs, signature); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
+  id(): TagId { return this._id; }
+  body(): string { return this._body; }
+  childRefs(): TagId[] { return this._childRefs; }
+  signature(): TagSignature { return this._signature; }
+}
+export function mustTagBlock(id: TagId, body: string, childRefs: TagId[], signature: TagSignature): TagBlock {
+  return TagBlock.createOrThrow(id, body, childRefs, signature);
+}
+
+// --- RefTableEntry ---
+// Shen: (datatype ref-table-entry)
+export class RefTableEntry {
+  private readonly _ref: TagId;
+  private readonly _block: TagBlock;
+  private constructor(ref: TagId, block: TagBlock) {
+    this._ref = ref;
+    this._block = block;
+  }
+  static createOrThrow(ref: TagId, block: TagBlock): RefTableEntry {
+    return new RefTableEntry(ref, block);
+  }
+  static tryCreate(ref: TagId, block: TagBlock): RefTableEntry | Error {
+    try { return RefTableEntry.createOrThrow(ref, block); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
+  ref(): TagId { return this._ref; }
+  block(): TagBlock { return this._block; }
+}
+export function mustRefTableEntry(ref: TagId, block: TagBlock): RefTableEntry {
+  return RefTableEntry.createOrThrow(ref, block);
+}
+
+// --- RefTable ---
+// Shen: (datatype ref-table)
+export class RefTable {
+  private readonly _v: RefTableEntry[];
+  private constructor(v: RefTableEntry[]) { this._v = v; }
+  static createOrThrow(x: RefTableEntry[]): RefTable {
+    const entries = x;
+    if (!(entries.length >= 0)) throw new Error(`entries.length must be >= 0: ${x}`);
+    return new RefTable(x);
+  }
+  static tryCreate(x: RefTableEntry[]): RefTable | Error {
+    try { return RefTable.createOrThrow(x); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
+  val(): RefTableEntry[] { return this._v; }
+}
+export function mustRefTable(x: RefTableEntry[]): RefTable {
+  return RefTable.createOrThrow(x);
+}
+
+// --- SignedComplete ---
+// Shen: (datatype signed-complete)
+export class SignedComplete {
+  private readonly _kind: string;
+  private readonly _root: TagBlock;
+  private readonly _children: TagBlock[];
+  private readonly _signature: TagSignature;
+  private constructor(kind: string, root: TagBlock, children: TagBlock[], signature: TagSignature) {
+    this._kind = kind;
+    this._root = root;
+    this._children = children;
+    this._signature = signature;
+  }
+  static createOrThrow(kind: string, root: TagBlock, children: TagBlock[], signature: TagSignature): SignedComplete {
+    if (!(kind === "signed-complete")) throw new Error(`kind must equal "signed-complete"`);
+    return new SignedComplete(kind, root, children, signature);
+  }
+  static tryCreate(kind: string, root: TagBlock, children: TagBlock[], signature: TagSignature): SignedComplete | Error {
+    try { return SignedComplete.createOrThrow(kind, root, children, signature); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
+  kind(): string { return this._kind; }
+  root(): TagBlock { return this._root; }
+  children(): TagBlock[] { return this._children; }
+  signature(): TagSignature { return this._signature; }
+}
+export function mustSignedComplete(kind: string, root: TagBlock, children: TagBlock[], signature: TagSignature): SignedComplete {
+  return SignedComplete.createOrThrow(kind, root, children, signature);
+}
+
+// --- UnsignedComplete ---
+// Shen: (datatype unsigned-complete)
+export class UnsignedComplete {
+  private readonly _kind: string;
+  private readonly _root: TagBlock;
+  private readonly _children: TagBlock[];
+  private constructor(kind: string, root: TagBlock, children: TagBlock[]) {
+    this._kind = kind;
+    this._root = root;
+    this._children = children;
+  }
+  static createOrThrow(kind: string, root: TagBlock, children: TagBlock[]): UnsignedComplete {
+    if (!(kind === "unsigned-complete")) throw new Error(`kind must equal "unsigned-complete"`);
+    return new UnsignedComplete(kind, root, children);
+  }
+  static tryCreate(kind: string, root: TagBlock, children: TagBlock[]): UnsignedComplete | Error {
+    try { return UnsignedComplete.createOrThrow(kind, root, children); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
+  kind(): string { return this._kind; }
+  root(): TagBlock { return this._root; }
+  children(): TagBlock[] { return this._children; }
+}
+export function mustUnsignedComplete(kind: string, root: TagBlock, children: TagBlock[]): UnsignedComplete {
+  return UnsignedComplete.createOrThrow(kind, root, children);
+}
+
+// --- Partial ---
+// Shen: (datatype partial)
+export class Partial {
+  private readonly _kind: string;
+  private readonly _root: TagBlock;
+  private readonly _children: TagBlock[];
+  private readonly _missing: TagId[];
+  private constructor(kind: string, root: TagBlock, children: TagBlock[], missing: TagId[]) {
+    this._kind = kind;
+    this._root = root;
+    this._children = children;
+    this._missing = missing;
+  }
+  static createOrThrow(kind: string, root: TagBlock, children: TagBlock[], missing: TagId[]): Partial {
+    if (!(kind === "partial")) throw new Error(`kind must equal "partial"`);
+    return new Partial(kind, root, children, missing);
+  }
+  static tryCreate(kind: string, root: TagBlock, children: TagBlock[], missing: TagId[]): Partial | Error {
+    try { return Partial.createOrThrow(kind, root, children, missing); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
+  kind(): string { return this._kind; }
+  root(): TagBlock { return this._root; }
+  children(): TagBlock[] { return this._children; }
+  missing(): TagId[] { return this._missing; }
+}
+export function mustPartial(kind: string, root: TagBlock, children: TagBlock[], missing: TagId[]): Partial {
+  return Partial.createOrThrow(kind, root, children, missing);
+}
 

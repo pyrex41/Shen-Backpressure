@@ -55,6 +55,12 @@ Produces `/tmp/guards.ts` containing:
   block, with TS type signatures pulled from the Shen
   `{t1 --> t2 --> ret}` signature.
 
+Sum types are detected when multiple datatype blocks conclude the same Shen
+type. Each variant keeps its own class and `must<Type>` helper, while the
+shared conclusion emits a TypeScript union. For example, the web-tools tag
+resolver emits `TagResolveOutcome = SignedComplete | UnsignedComplete |
+Partial`.
+
 ## Testing
 
 From this directory:
@@ -102,7 +108,7 @@ The behaviors below are deliberate deviations from `cmd/shengen`
   table, S-expr parser, resolver, `verifiedToTs`, structural-match
   fallback, `parseDatatype` / `parseDefine`, `inferShenType` type
   propagator, `generateTs` emitter.
-- `shengen.test.ts` — 65 tests covering parser, symbol table, codegen,
+- `shengen.test.ts` — tests covering parser, symbol table, codegen,
   runtime-imported generated modules.
 - `package.json` / `tsconfig.json` — strict TS with
   `allowImportingTsExtensions`; no runtime deps.
