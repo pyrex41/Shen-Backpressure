@@ -238,6 +238,38 @@ test("aliases record their wrapped premise type", () => {
   assert.equal(siteData.aliasOf, "event-data");
 });
 
+test("verified wrappers around non-primitives are constrained aliases", () => {
+  const dts: Datatype[] = [
+    {
+      name: "bytes",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "(list number)" }],
+          verified: [{ raw: "(bytes? X)", varName: "", expr: "(bytes? X)" }],
+          conclusion: { varName: "X", typeName: "bytes", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "sha256-digest",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "bytes" }],
+          verified: [{ raw: "(= 32 (length X))", varName: "", expr: "(= 32 (length X))" }],
+          conclusion: { varName: "X", typeName: "sha256-digest", fields: [] },
+        },
+      ],
+    },
+  ];
+  const tt = buildTypeTable(dts, "./guards.ts", "guards");
+  const bytes = get(tt, "bytes");
+  assert.equal(bytes.category, "constrained");
+  assert.equal(bytes.aliasOf, "(list number)");
+  const digest = get(tt, "sha256-digest");
+  assert.equal(digest.category, "constrained");
+  assert.equal(digest.aliasOf, "bytes");
+});
+
 // --- tsType tests ---
 
 test("tsType maps primitives to TS built-ins", () => {

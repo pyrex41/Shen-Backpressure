@@ -106,3 +106,54 @@ export function decode(v) {
   assert.ok(res.stdout.includes("Roundtrip("));
   assert.ok(res.stdout.includes("const want = true;"));
 });
+
+test("verify accepts Promise-returning --extern adapters", () => {
+  const dir = mkdtempSync(join(tmpdir(), "shen-derive-async-extern-"));
+  writeFileSync(
+    join(dir, "spec.shen"),
+    `
+(datatype thing
+  X : string;
+  ==========
+  X : thing;)
+
+(define roundtrip?
+  {thing --> boolean}
+  X -> (= X (decode (encode X))))
+`,
+  );
+  writeFileSync(
+    join(dir, "derive-externs.ts"),
+    `
+export async function encode(v) {
+  return v;
+}
+
+export async function decode(v) {
+  return v;
+}
+`,
+  );
+
+  const res = runCli(dir, [
+    "verify",
+    "spec.shen",
+    "--func",
+    "roundtrip?",
+    "--impl-module",
+    "./impl",
+    "--impl-func",
+    "Roundtrip",
+    "--import",
+    "./guards_gen",
+    "--extern",
+    "encode=./derive-externs.ts::encode/1",
+    "--extern",
+    "decode=./derive-externs.ts::decode/1",
+  ]);
+
+  assert.equal(res.status, 0, res.stderr);
+  assert.ok(res.stdout.includes(`test("case_00", async () => {`));
+  assert.ok(res.stdout.includes("const got = await Roundtrip("));
+  assert.ok(res.stdout.includes("const want = true;"));
+});

@@ -15,7 +15,7 @@ import { pathToFileURL } from "node:url";
 import { parseFile, findDefine } from "./specfile/parse.ts";
 import { buildTypeTable } from "./specfile/typetable.ts";
 import {
-  buildHarness,
+  buildHarnessAsync,
   emit,
   type ExternBinding,
   type HarnessConfig,
@@ -196,17 +196,20 @@ async function loadExterns(specs: ExternSpec[]): Promise<ExternBinding[]> {
         `extern ${spec.name}: provide /arity or set a positive numeric arity property`,
       );
     }
-    out.push({
+    const binding: ExternBinding = {
       name: spec.name,
       arity,
+      async: adapterFn.constructor.name === "AsyncFunction",
       fn: (...args: Value[]) => {
         const value = adapterFn(...args);
         if (isPromiseLike(value)) {
-          throw new Error(`extern ${spec.name}: async adapters are not supported yet`);
+          binding.async = true;
+          return Promise.resolve(value).then((v) => v as Value);
         }
         return value as Value;
       },
-    });
+    };
+    out.push(binding);
   }
   return out;
 }
@@ -300,7 +303,7 @@ async function cmdVerify(args: string[]): Promise<void> {
 
   let harness;
   try {
-    harness = buildHarness(cfg);
+    harness = await buildHarnessAsync(cfg);
   } catch (e) {
     process.stderr.write(`build harness: ${(e as Error).message}\n`);
     process.exit(1);
