@@ -34,7 +34,7 @@ export type TypeEntry = {
   /** PascalCase class name (e.g. "AccountId") */
   tsName: string;
   category: TypeCategory;
-  /** Underlying primitive Shen type for wrappers/constrained; "" otherwise. */
+  /** Underlying primitive Shen type for primitive wrappers/constrained; "" otherwise. */
   shenPrim: string;
   /** TS type string for the underlying primitive; "" otherwise. */
   tsPrimType: string;
@@ -44,7 +44,7 @@ export type TypeEntry = {
   varName: string;
   /** Fields for composite/guarded types. Empty otherwise. */
   fields: Field[];
-  /** Target Shen type for aliases. */
+  /** Target Shen type for aliases and constrained non-primitive wrappers. */
   aliasOf?: string;
   /** Variant datatype names for synthetic sum types. */
   variants?: string[];
@@ -130,12 +130,15 @@ export function buildTypeTable(
       } else if (
         isWrapped &&
         verified.length > 0 &&
-        prems.length >= 1 &&
-        isPrimitive(prems[0].typeName)
+        prems.length >= 1
       ) {
         entry.category = "constrained";
-        entry.shenPrim = prems[0].typeName;
-        entry.tsPrimType = shenPrimToTs(entry.shenPrim);
+        if (isPrimitive(prems[0].typeName)) {
+          entry.shenPrim = prems[0].typeName;
+          entry.tsPrimType = shenPrimToTs(entry.shenPrim);
+        } else {
+          entry.aliasOf = prems[0].typeName;
+        }
         entry.varName = prems[0].varName;
       } else if (
         isWrapped &&

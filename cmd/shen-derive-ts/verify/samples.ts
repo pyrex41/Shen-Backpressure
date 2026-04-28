@@ -18,6 +18,12 @@ import {
 } from "../core/eval.ts";
 import { parseSexpr } from "../core/sexpr-parse.ts";
 import {
+  headSym,
+  sexprIntVal,
+  symName,
+  type Sexpr,
+} from "../core/sexpr.ts";
+import {
   elemType,
   tsType,
   type TypeEntry,
@@ -188,14 +194,22 @@ function numberSamples(): Sample[] {
 // through unchanged — wrapping is invisible at eval time.
 
 function wrapperSamples(ctx: SampleCtx, entry: TypeEntry): Sample[] {
-  let primSamples = genSamples(ctx, entry.shenPrim);
-  if (entry.category === "constrained" && entry.shenPrim === "string") {
+  const innerType = wrappedInnerType(entry);
+  if (innerType === "") {
+    throw new Error(`wrapped type "${entry.shenName}" has no inner type`);
+  }
+  let primSamples = genSamples(ctx, innerType);
+  if (entry.category === "constrained" && innerType === "string") {
     primSamples = primSamples.concat(
       CONSTRAINED_STRING_EXTRA_POOL.map((s) => ({
         value: stringVal(s),
         tsExpr: JSON.stringify(s),
       })),
     );
+  }
+  if (entry.category === "constrained") {
+    primSamples = primSamples.concat(exactLengthSamples(ctx, entry, innerType));
+    primSamples = dedupeSamples(primSamples);
   }
   if (entry.category === "constrained") {
     primSamples = filterByConstraints(ctx, entry, primSamples);
@@ -205,6 +219,137 @@ function wrapperSamples(ctx: SampleCtx, entry: TypeEntry): Sample[] {
     value: ps.value,
     tsExpr: `${helper}(${ps.tsExpr})`,
   }));
+}
+
+function wrappedInnerType(entry: TypeEntry): string {
+  return entry.shenPrim !== "" ? entry.shenPrim : entry.aliasOf ?? "";
+}
+
+function exactLengthSamples(
+  ctx: SampleCtx,
+  entry: TypeEntry,
+  innerType: string,
+): Sample[] {
+  const lengths = exactLengthConstraints(entry);
+  const out: Sample[] = [];
+  for (const length of lengths) {
+    const sample = sampleForExactLength(ctx, innerType, length);
+    if (sample !== null) out.push(sample);
+  }
+  return out;
+}
+
+function exactLengthConstraints(entry: TypeEntry): number[] {
+  if (entry.varName === "") return [];
+  const out: number[] = [];
+  for (const raw of entry.verified) {
+    let expr: Sexpr;
+    try {
+      expr = parseSexpr(raw);
+    } catch {
+      continue;
+    }
+    if (headSym(expr) !== "=" || expr.kind !== "list" || expr.elems.length !== 3) {
+      continue;
+    }
+    const left = expr.elems[1]!;
+    const right = expr.elems[2]!;
+    const [leftInt, leftOk] = sexprIntVal(left);
+    const [rightInt, rightOk] = sexprIntVal(right);
+    if (leftOk && isLengthOfVar(right, entry.varName)) out.push(leftInt);
+    if (rightOk && isLengthOfVar(left, entry.varName)) out.push(rightInt);
+  }
+  return [...new Set(out)].filter((n) => n >= 0);
+}
+
+function isLengthOfVar(expr: Sexpr, varName: string): boolean {
+  if (headSym(expr) !== "length" || expr.kind !== "list" || expr.elems.length !== 2) {
+    return false;
+  }
+  return isVarRef(expr.elems[1]!, varName);
+}
+
+function isVarRef(expr: Sexpr, varName: string): boolean {
+  const [name, ok] = symName(expr);
+  if (ok) return name === varName;
+  if (headSym(expr) === "val" && expr.kind === "list" && expr.elems.length === 2) {
+    const [innerName, innerOk] = symName(expr.elems[1]!);
+    return innerOk && innerName === varName;
+  }
+  return false;
+}
+
+function sampleForExactLength(
+  ctx: SampleCtx,
+  shenType: string,
+  length: number,
+): Sample | null {
+  const elem = elemType(shenType);
+  if (elem !== "") {
+    return listOfLengthSample(ctx, elem, length);
+  }
+
+  const entry = ctx.tt.get(shenType.trim());
+  if (entry === undefined) return null;
+
+  if (entry.category === "alias") {
+    if (!entry.aliasOf) return null;
+    return sampleForExactLength(ctx, entry.aliasOf, length);
+  }
+
+  if (entry.category === "wrapper" || entry.category === "constrained") {
+    const innerType = wrappedInnerType(entry);
+    if (innerType === "") return null;
+    const inner = sampleForExactLength(ctx, innerType, length);
+    if (inner === null) return null;
+    if (
+      entry.category === "constrained" &&
+      filterByConstraints(ctx, entry, [inner]).length === 0
+    ) {
+      return null;
+    }
+    const helper = `${entry.importAlias || "shenguard"}.must${entry.tsName}`;
+    return {
+      value: inner.value,
+      tsExpr: `${helper}(${inner.tsExpr})`,
+    };
+  }
+
+  return null;
+}
+
+function listOfLengthSample(
+  ctx: SampleCtx,
+  elemShenType: string,
+  length: number,
+): Sample | null {
+  if (elemShenType.trim() === "number") {
+    const values = Array.from({ length }, (_, i) => intVal(i % 256));
+    const exprs = Array.from({ length }, (_, i) => String(i % 256));
+    return {
+      value: listVal(...values),
+      tsExpr: `[${exprs.join(", ")}]`,
+    };
+  }
+
+  const elemSamples = genSamples(ctx, elemShenType);
+  const first = elemSamples[0];
+  if (first === undefined) return null;
+  return {
+    value: listVal(...Array.from({ length }, () => first.value)),
+    tsExpr: `[${Array.from({ length }, () => first.tsExpr).join(", ")}]`,
+  };
+}
+
+function dedupeSamples(samples: Sample[]): Sample[] {
+  const seen = new Set<string>();
+  const out: Sample[] = [];
+  for (const sample of samples) {
+    if (seen.has(sample.tsExpr)) continue;
+    seen.add(sample.tsExpr);
+    out.push(sample);
+  }
+  return out;
 }
 
 function filterByConstraints(

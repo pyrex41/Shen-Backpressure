@@ -11,6 +11,7 @@ import {
   Env,
   builtinFn,
   evalExpr,
+  evalExprAsync,
   type Value,
 } from "../core/eval.ts";
 import { match } from "../core/match.ts";
@@ -34,7 +35,7 @@ export type HarnessConfig = {
   tt: TypeTable;
   /** Every define from the spec (for mutual recursion in the eval env). */
   allDefines: Define[];
-  /** Synchronous external functions made available to spec evaluation. */
+  /** External functions made available to spec evaluation. */
   externs?: ExternBinding[];
   /** The define to be verified (must exist in spec.defines). */
   funcName: string;
@@ -51,12 +52,13 @@ export type HarnessConfig = {
   randomDraws: number;
 };
 
-export type ExternAdapter = (...args: Value[]) => Value;
+export type ExternAdapter = (...args: Value[]) => Value | Promise<Value>;
 
 export type ExternBinding = {
   name: string;
   arity: number;
   fn: ExternAdapter;
+  async?: boolean;
 };
 
 export type Case = {
@@ -70,6 +72,7 @@ export type Case = {
 export type Harness = {
   cfg: HarnessConfig;
   cases: Case[];
+  asyncTests?: boolean;
 };
 
 // --- BuildHarness ---
@@ -143,7 +146,75 @@ export function buildHarness(cfg: HarnessConfig): Harness {
     cases.push({ args: argVals, argsTs, expected, expectedTs, label });
   }
 
-  return { cfg, cases };
+  return { cfg, cases, asyncTests: (cfg.externs ?? []).some((ext) => ext.async === true) };
+}
+
+export async function buildHarnessAsync(cfg: HarnessConfig): Promise<Harness> {
+  // Validate target define.
+  const def = cfg.spec.defines.find((d) => d.name === cfg.funcName);
+  if (def === undefined) {
+    throw new Error(`buildHarness: define ${cfg.funcName} not found in spec`);
+  }
+  if (def.typeSig.paramTypes.length === 0) {
+    throw new Error(
+      `spec ${def.name}: verification requires a type signature ` +
+        `({...}) — the sampler has no way to generate inputs otherwise`,
+    );
+  }
+  if (def.paramNames.length !== def.typeSig.paramTypes.length) {
+    throw new Error(`spec ${def.name}: param count mismatch`);
+  }
+  if (def.clauses.length === 0) {
+    throw new Error(`spec ${def.name}: no clauses`);
+  }
+
+  const baseEnv = buildBaseEnvAsync(cfg.tt, cfg.allDefines, cfg.externs ?? []);
+  const sampleEnv = buildBaseEnv(cfg.tt, cfg.allDefines, cfg.externs ?? []);
+
+  const ctx: SampleCtx = {
+    tt: cfg.tt,
+    constraintEnv: sampleEnv,
+    rand: cfg.seed !== 0 ? new SeededRng(cfg.seed) : null,
+    randomDraws: cfg.seed !== 0
+      ? (cfg.randomDraws > 0 ? cfg.randomDraws : 8)
+      : 0,
+  };
+
+  const paramSamples: Sample[][] = def.typeSig.paramTypes.map((pt, i) => {
+    try {
+      return genSamples(ctx, pt);
+    } catch (e) {
+      throw new Error(
+        `samples for param ${def.paramNames[i]}: ${(e as Error).message}`,
+      );
+    }
+  });
+
+  const maxCases = cfg.maxCases > 0 ? cfg.maxCases : 50;
+  const combos = cartesian(paramSamples, maxCases);
+
+  const cases: Case[] = [];
+  for (let idx = 0; idx < combos.length; idx++) {
+    const combo = combos[idx]!;
+    const argVals: Value[] = combo.map((s) => s.value);
+    const argsTs: string[] = combo.map((s) => s.tsExpr);
+    let expected: Value;
+    try {
+      expected = await evalDefineAsync(def, argVals, baseEnv);
+    } catch (e) {
+      throw new Error(`case ${idx}: eval spec: ${(e as Error).message}`);
+    }
+    let expectedTs: string;
+    try {
+      expectedTs = tsLiteralFor(expected, def.typeSig.returnType, cfg.tt);
+    } catch (e) {
+      throw new Error(`case ${idx}: literal: ${(e as Error).message}`);
+    }
+    const label = `case_${idx.toString().padStart(2, "0")}`;
+    cases.push({ args: argVals, argsTs, expected, expectedTs, label });
+  }
+
+  return { cfg, cases, asyncTests: (cfg.externs ?? []).some((ext) => ext.async === true) };
 }
 
 // --- Cartesian product (odometer loop ported from Go) ---
@@ -202,6 +273,42 @@ export function evalDefine(
     }
     const bodyExpr = parseSexpr(cl.body);
     return evalExpr(env, bodyExpr);
+  }
+  throw new Error(
+    `no matching clause for ${def.name} with args ${vals.map(showValue).join(" ")}`,
+  );
+}
+
+export async function evalDefineAsync(
+  def: Define,
+  vals: Value[],
+  base: Env,
+): Promise<Value> {
+  if (def.clauses.length === 0) {
+    throw new Error(`define ${def.name}: no clauses`);
+  }
+  for (let i = 0; i < def.clauses.length; i++) {
+    const cl = def.clauses[i]!;
+    if (cl.patterns.length !== vals.length) {
+      throw new Error(
+        `define ${def.name} clause ${i}: ${cl.patterns.length} patterns vs ${vals.length} args`,
+      );
+    }
+    const res = bindClausePatterns(base, cl, vals);
+    if (res === null) continue;
+    const env = res;
+    if (cl.guard !== null) {
+      const guardExpr = parseSexpr(cl.guard);
+      const g = await evalExprAsync(env, guardExpr);
+      if (g.kind !== "bool") {
+        throw new Error(
+          `define ${def.name} clause ${i}: guard returned ${g.kind}, expected bool`,
+        );
+      }
+      if (!g.val) continue;
+    }
+    const bodyExpr = parseSexpr(cl.body);
+    return evalExprAsync(env, bodyExpr);
   }
   throw new Error(
     `no matching clause for ${def.name} with args ${vals.map(showValue).join(" ")}`,
@@ -302,6 +409,62 @@ export function buildBaseEnv(
   return env;
 }
 
+export function buildBaseEnvAsync(
+  tt: TypeTable,
+  defines: Define[],
+  externs: ExternBinding[] = [],
+): Env {
+  let env = Env.empty();
+
+  env = env.extend(
+    "val",
+    builtinFn("val", (v) => v),
+  );
+
+  const registered = new Set<string>();
+  for (const entry of tt.values()) {
+    for (let fi = 0; fi < entry.fields.length; fi++) {
+      const f = entry.fields[fi]!;
+      const idx = fi;
+      const registerName = (name: string): void => {
+        if (registered.has(name)) return;
+        registered.add(name);
+        env = env.extend(
+          name,
+          builtinFn(name, (v) => {
+            if (v.kind !== "list") {
+              throw new Error(
+                `field accessor "${name}": not a composite value (got ${v.kind})`,
+              );
+            }
+            if (idx < 0 || idx >= v.elems.length) {
+              throw new Error(
+                `field accessor "${name}": index ${idx} out of range`,
+              );
+            }
+            return v.elems[idx]!;
+          }),
+        );
+      };
+      registerName(f.shenName.toLowerCase());
+      registerName(f.shenName);
+    }
+  }
+
+  const holder: { env: Env } = { env };
+  for (const ext of externs) {
+    if (ext.arity <= 0 || !Number.isInteger(ext.arity)) {
+      throw new Error(`extern ${ext.name}: arity must be a positive integer`);
+    }
+    env = env.extend(ext.name, curriedExternFn(ext));
+  }
+  for (const d of defines) {
+    env = env.extend(d.name, curriedDefineFnAsync(d, holder));
+  }
+  holder.env = env;
+  return env;
+}
+
 function curriedExternFn(ext: ExternBinding): Value {
   const build = (collected: Value[]): Value =>
     builtinFn(ext.name, (v) => {
@@ -326,6 +489,23 @@ function curriedDefineFn(
       next.push(v);
       if (next.length === arity) {
         return evalDefine(def, next, holder.env);
+      }
+      return build(next);
+    });
+  return build([]);
+}
+
+function curriedDefineFnAsync(
+  def: Define,
+  holder: { env: Env },
+): Value {
+  const arity = def.clauses[0]?.patterns.length ?? 0;
+  const build = (collected: Value[]): Value =>
+    builtinFn(def.name, async (v) => {
+      const next = collected.slice();
+      next.push(v);
+      if (next.length === arity) {
+        return evalDefineAsync(def, next, holder.env);
       }
       return build(next);
     });
@@ -374,7 +554,11 @@ export function tsLiteralFor(
   if (entry !== undefined) {
     if (entry.category === "wrapper" || entry.category === "constrained") {
       // Emit the underlying primitive literal (comparison unwraps via .val()).
-      return tsLiteralFor(v, entry.shenPrim, tt);
+      const inner = entry.shenPrim !== "" ? entry.shenPrim : entry.aliasOf ?? "";
+      if (inner === "") {
+        throw new Error(`wrapped type ${t}: no inner type`);
+      }
+      return tsLiteralFor(v, inner, tt);
     }
     if (entry.category === "alias" && entry.aliasOf) {
       return tsLiteralFor(v, entry.aliasOf, tt);
@@ -436,6 +620,8 @@ export function emit(h: Harness): string {
     retCategory === "guarded";
 
   const lines: string[] = [];
+  const asyncTests = h.asyncTests === true ||
+    (cfg.externs ?? []).some((ext) => ext.async === true);
   lines.push(`// Code generated by shen-derive-ts. DO NOT EDIT.`);
   if (cfg.seed !== 0) {
     lines.push(`// seed: ${cfg.seed}`);
@@ -479,8 +665,8 @@ export function emit(h: Harness): string {
     const wantExpr = c.expectedTs;
     const gotExpr = isWrappedReturn ? "got.val()" : "got";
     const assertFn = useDeepEqual ? "deepStrictEqual" : "strictEqual";
-    lines.push(`test(${JSON.stringify(c.label)}, () => {`);
-    lines.push(`  const got = ${call};`);
+    lines.push(`test(${JSON.stringify(c.label)}, ${asyncTests ? "async " : ""}() => {`);
+    lines.push(`  const got = ${asyncTests ? `await ${call}` : call};`);
     lines.push(`  const want = ${wantExpr};`);
     lines.push(
       `  assert.${assertFn}(${gotExpr}, want, \`${cfg.funcName}: spec says \${JSON.stringify(want)}, impl returned \${JSON.stringify(got)}\`);`,

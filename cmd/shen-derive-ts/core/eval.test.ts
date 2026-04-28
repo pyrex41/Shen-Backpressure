@@ -116,6 +116,10 @@ test("eval: modulo int only", () => {
   assertInt(run("(% 10 3)"), 1);
 });
 
+test("eval: shen.mod aliases modulo", () => {
+  assertInt(run("(shen.mod 10 3)"), 1);
+});
+
 test("eval: division by zero throws (int)", () => {
   assert.throws(() => run("(/ 5 0)"), /division by zero/);
 });

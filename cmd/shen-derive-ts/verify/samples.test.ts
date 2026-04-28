@@ -309,6 +309,44 @@ test("event-pubkey-like sum samples empty and full variants", () => {
   );
 });
 
+test("constrained byte aliases include exact-length samples", () => {
+  const dts: Datatype[] = [
+    {
+      name: "bytes",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "(list number)" }],
+          verified: [{ raw: "(bytes? X)", varName: "", expr: "(bytes? X)" }],
+          conclusion: { varName: "X", typeName: "bytes", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "sha256-digest",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "bytes" }],
+          verified: [{ raw: "(= 32 (length X))", varName: "", expr: "(= 32 (length X))" }],
+          conclusion: { varName: "X", typeName: "sha256-digest", fields: [] },
+        },
+      ],
+    },
+  ];
+  const tt = buildTypeTable(dts, "./guards.ts", "guards");
+  const constraintEnv = Env.empty().extend(
+    "bytes?",
+    builtinFn("bytes?", () => boolVal(true)),
+  );
+  const s = genSamples({ tt, constraintEnv, rand: null, randomDraws: 0 }, "sha256-digest");
+  const exact = s.find((sample) => sample.value.kind === "list" && sample.value.elems.length === 32);
+
+  assert.ok(exact, "expected a 32-byte digest sample");
+  assert.ok(
+    exact!.tsExpr.startsWith("guards.mustSha256Digest(guards.mustBytes([0, 1, 2"),
+    `unexpected exact-length sample expression: ${exact!.tsExpr}`,
+  );
+});
+
 // --- Seeded PRNG reproducibility ---
 
 test("SeededRng produces reproducible sequences for the same seed", () => {

@@ -9,6 +9,7 @@ import { buildTypeTable } from "../specfile/typetable.ts";
 import {
   buildBaseEnv,
   buildHarness,
+  buildHarnessAsync,
   emit,
   evalDefine,
   type HarnessConfig,
@@ -267,6 +268,39 @@ test("extern bindings let the harness evaluate adapter-backed spec calls", () =>
   const src = emit(h);
   assert.ok(src.includes("Roundtrip("));
   assert.ok(src.includes("const want = true;"));
+});
+
+test("async extern bindings emit awaitable test cases", async () => {
+  const sf = parseFile(EXTERN_ROUNDTRIP_SRC);
+  const tt = buildTypeTable(sf.datatypes, "./shenguard_gen.ts", "shenguard");
+  const identity = async (v: Value): Promise<Value> => v;
+
+  const h = await buildHarnessAsync({
+    spec: sf,
+    tt,
+    allDefines: sf.defines,
+    externs: [
+      { name: "encode", arity: 1, fn: identity, async: true },
+      { name: "decode", arity: 1, fn: identity, async: true },
+    ],
+    funcName: "roundtrip?",
+    implModule: "./roundtrip",
+    implFunc: "Roundtrip",
+    importPath: "./shenguard_gen.ts",
+    importAlias: "shenguard",
+    maxCases: 10,
+    seed: 0,
+    randomDraws: 0,
+  });
+
+  assert.equal(h.asyncTests, true);
+  for (const c of h.cases) {
+    assert.equal(c.expected.kind, "bool");
+    if (c.expected.kind === "bool") assert.equal(c.expected.val, true);
+  }
+  const src = emit(h);
+  assert.ok(src.includes(`test("case_00", async () => {`));
+  assert.ok(src.includes("const got = await Roundtrip("));
 });
 
 // --- seeded sampling determinism ---
