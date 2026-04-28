@@ -22,6 +22,7 @@ import {
   type TypeTable,
 } from "../specfile/typetable.ts";
 import {
+  fixtureRowsForDefine,
   genSamples,
   SeededRng,
   type Sample,
@@ -123,7 +124,7 @@ export function buildHarness(cfg: HarnessConfig): Harness {
   });
 
   const maxCases = cfg.maxCases > 0 ? cfg.maxCases : 50;
-  const combos = cartesian(paramSamples, maxCases);
+  const combos = sampledCombos(ctx, def, maxCases, paramSamples);
 
   const cases: Case[] = [];
   for (let idx = 0; idx < combos.length; idx++) {
@@ -191,7 +192,7 @@ export async function buildHarnessAsync(cfg: HarnessConfig): Promise<Harness> {
   });
 
   const maxCases = cfg.maxCases > 0 ? cfg.maxCases : 50;
-  const combos = cartesian(paramSamples, maxCases);
+  const combos = sampledCombos(ctx, def, maxCases, paramSamples);
 
   const cases: Case[] = [];
   for (let idx = 0; idx < combos.length; idx++) {
@@ -218,6 +219,22 @@ export async function buildHarnessAsync(cfg: HarnessConfig): Promise<Harness> {
 }
 
 // --- Cartesian product (odometer loop ported from Go) ---
+
+function sampledCombos(
+  ctx: SampleCtx,
+  def: Define,
+  maxCases: number,
+  paramSamples: Sample[][],
+): Sample[][] {
+  const fixtureRows = fixtureRowsForDefine(
+    ctx,
+    def.name,
+    def.typeSig.paramTypes,
+  ).slice(0, maxCases);
+  const remaining = maxCases - fixtureRows.length;
+  if (remaining <= 0) return fixtureRows;
+  return fixtureRows.concat(cartesian(paramSamples, remaining));
+}
 
 function cartesian(paramSamples: Sample[][], maxCases: number): Sample[][] {
   if (paramSamples.length === 0) return [];
