@@ -553,6 +553,70 @@ test("generateTs: sum-type variant emits a class, not a type alias", () => {
   );
 });
 
+test("generateTs: tag resolver outcomes emit union and variant helpers", () => {
+  const spec = `(datatype tag-id
+  X : string;
+  (> (length X) 0) : verified;
+  ==============
+  X : tag-id;)
+
+(datatype tag-signature
+  X : string;
+  ==============
+  X : tag-signature;)
+
+(datatype tag-block
+  Id : tag-id;
+  Body : string;
+  ChildRefs : (list tag-id);
+  Signature : tag-signature;
+  ===================================
+  [Id Body ChildRefs Signature] : tag-block;)
+
+(datatype signed-complete
+  Kind : string;
+  Root : tag-block;
+  Children : (list tag-block);
+  Signature : tag-signature;
+  (= Kind "signed-complete") : verified;
+  =====================================
+  [Kind Root Children Signature] : tag-resolve-outcome;)
+
+(datatype unsigned-complete
+  Kind : string;
+  Root : tag-block;
+  Children : (list tag-block);
+  (= Kind "unsigned-complete") : verified;
+  ================================
+  [Kind Root Children] : tag-resolve-outcome;)
+
+(datatype partial
+  Kind : string;
+  Root : tag-block;
+  Children : (list tag-block);
+  Missing : (list tag-id);
+  (= Kind "partial") : verified;
+  =================================
+  [Kind Root Children Missing] : tag-resolve-outcome;)`;
+  const types = parseFileString(spec);
+  const st = new SymbolTable();
+  st.build(types);
+  const out = generateTs(types, st, "tag-resolver.shen");
+
+  const outcome = st.lookup("tag-resolve-outcome");
+  assert.equal(outcome?.category, "sumtype");
+  assert.ok(
+    out.includes("export type TagResolveOutcome = SignedComplete | UnsignedComplete | Partial;"),
+    `missing TagResolveOutcome union; output was:\n${out}`
+  );
+  for (const helper of ["mustSignedComplete", "mustUnsignedComplete", "mustPartial"]) {
+    assert.ok(out.includes(`export function ${helper}`), `missing ${helper}`);
+  }
+  assert.ok(out.includes(`kind === "signed-complete"`));
+  assert.ok(out.includes(`kind === "unsigned-complete"`));
+  assert.ok(out.includes(`kind === "partial"`));
+});
+
 // ============================================================================
 // §3.3 regression: inferTargetFields + precise structuralMatchFallback.
 // ============================================================================

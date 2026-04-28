@@ -25,7 +25,6 @@ import {
 } from "../core/sexpr.ts";
 import {
   elemType,
-  tsType,
   type TypeEntry,
   type TypeTable,
 } from "../specfile/typetable.ts";
@@ -131,7 +130,7 @@ export function genSamples(ctx: SampleCtx, shenType: string): Sample[] {
   const elem = elemType(t);
   if (elem !== "") {
     const elemSamples = genSamples(ctx, elem);
-    return listSamples(ctx.tt, elem, elemSamples);
+    return listSamples(elemSamples);
   }
 
   // primitives
@@ -198,6 +197,12 @@ export function fixtureRowsForDefine(
   paramTypes: readonly string[],
 ): Sample[][] {
   if (
+    funcName.trim() === "resolve-tag-block-children" &&
+    paramTypes.map((t) => t.trim()).join("|") === "tag-block|ref-table"
+  ) {
+    return tagBlockResolverFixtureRows(ctx);
+  }
+  if (
     funcName.trim() !== "sig-verify-agreement?" ||
     paramTypes.map((t) => t.trim()).join("|") !==
       "encoded-fragment|schnorr-sig|xonly-pubkey"
@@ -250,6 +255,93 @@ function sigVerifyAgreementFixtureRow(ctx: SampleCtx): Sample[] {
       tsExpr: `${helper(ctx, "xonly-pubkey")}(${byteGuardExpr(ctx, pubkeyBytes)})`,
     },
   ];
+}
+
+function tagBlockResolverFixtureRows(ctx: SampleCtx): Sample[][] {
+  const signedRoot = tagBlockSample(ctx, {
+    id: "root-signed",
+    body: "Signed root",
+    childRefs: ["child-a"],
+    signature: "sig-root",
+  });
+  const unsignedRoot = tagBlockSample(ctx, {
+    id: "root-unsigned",
+    body: "Unsigned root",
+    childRefs: ["child-a"],
+    signature: "",
+  });
+  const partialRoot = tagBlockSample(ctx, {
+    id: "root-partial",
+    body: "Partial root",
+    childRefs: ["child-a", "missing-child"],
+    signature: "sig-root",
+  });
+  const child = {
+    id: "child-a",
+    body: "Child A",
+    childRefs: [] as string[],
+    signature: "",
+  };
+  const refTable = refTableSample(ctx, [
+    { ref: "child-a", block: child },
+  ]);
+
+  return [
+    [signedRoot, refTable],
+    [unsignedRoot, refTable],
+    [partialRoot, refTable],
+  ];
+}
+
+type TagBlockFixture = {
+  id: string;
+  body: string;
+  childRefs: string[];
+  signature: string;
+};
+
+type RefTableEntryFixture = {
+  ref: string;
+  block: TagBlockFixture;
+};
+
+function tagBlockSample(ctx: SampleCtx, block: TagBlockFixture): Sample {
+  return {
+    value: tagBlockValue(block),
+    tsExpr: tagBlockExpr(ctx, block),
+  };
+}
+
+function refTableSample(ctx: SampleCtx, entries: RefTableEntryFixture[]): Sample {
+  return {
+    value: listVal(...entries.map((entry) =>
+      listVal(stringVal(entry.ref), tagBlockValue(entry.block))
+    )),
+    tsExpr: `${helper(ctx, "ref-table")}([${entries.map((entry) =>
+      `${helper(ctx, "ref-table-entry")}(${helper(ctx, "tag-id")}(${
+        JSON.stringify(entry.ref)
+      }), ${tagBlockExpr(ctx, entry.block)})`
+    ).join(", ")}])`,
+  };
+}
+
+function tagBlockValue(block: TagBlockFixture): Value {
+  return listVal(
+    stringVal(block.id),
+    stringVal(block.body),
+    listVal(...block.childRefs.map((ref) => stringVal(ref))),
+    stringVal(block.signature),
+  );
+}
+
+function tagBlockExpr(ctx: SampleCtx, block: TagBlockFixture): string {
+  return `${helper(ctx, "tag-block")}(${helper(ctx, "tag-id")}(${
+    JSON.stringify(block.id)
+  }), ${JSON.stringify(block.body)}, [${block.childRefs.map((ref) =>
+    `${helper(ctx, "tag-id")}(${JSON.stringify(ref)})`
+  ).join(", ")}], ${helper(ctx, "tag-signature")}(${
+    JSON.stringify(block.signature)
+  }))`;
 }
 
 function helper(ctx: SampleCtx, shenType: string): string {
@@ -525,14 +617,9 @@ function compositeSamples(ctx: SampleCtx, entry: TypeEntry): Sample[] {
 // invariant that keeps tricky elem samples (e.g. a fractional number
 // at index 4) from being silently excluded from every list.
 
-function listSamples(
-  tt: TypeTable,
-  elemShenType: string,
-  elemSamples: Sample[],
-): Sample[] {
-  const tsElemType = tsType(tt, elemShenType);
+function listSamples(elemSamples: Sample[]): Sample[] {
   const out: Sample[] = [
-    { value: listVal(), tsExpr: `[] as ${tsElemType}[]` },
+    { value: listVal(), tsExpr: `[]` },
   ];
 
   if (elemSamples.length === 0) return out;

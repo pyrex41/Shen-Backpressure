@@ -232,7 +232,7 @@ Six focused examples carry the full story. See [`examples/.archive/README.md`](e
 
 - **[`examples/payment/`](examples/payment/)** — Flagship demo. Payment processor with balance invariants, `shen-derive` gate wired to `processable_spec_test.go`, and reference outputs in Go, TypeScript, Rust, and Python (both standard and hardened modes).
 - **[`examples/multi-tenant-api/`](examples/multi-tenant-api/)** — Live Go HTTP service with a JWT → AuthenticatedUser → TenantAccess → ResourceAccess proof chain. `demo.md` is a curl transcript with real tokens and `go test -v` output.
-- **[`examples/shen-web-tools/`](examples/shen-web-tools/)** — Polyglot research pipeline: Shen/SBCL backend + Arrow.js frontend. Three specs (core, medicare, shen-derive smoke). TS derive gate wired via `sb.toml`.
+- **[`examples/shen-web-tools/`](examples/shen-web-tools/)** — Polyglot research pipeline: Shen/SBCL backend + Arrow.js frontend. The TS gate now proves a product tag/ref-table resolver: child refs become signed complete, unsigned complete, or partial renderable outcomes.
 - **[`examples/order-state-machine/`](examples/order-state-machine/)** — State machine where invalid transitions are compile errors.
 - **[`examples/shenguard-bolt-on/`](examples/shenguard-bolt-on/)** — Infrastructure story: bolt `shenguard` onto existing Argo + Crossplane to add deductive checks without replacing the control plane.
 - **[`examples/category-showcase/`](examples/category-showcase/)** — Teaching aid: all six shengen categories (wrapper, constrained, composite, guarded, proof-chain, sum type) in a single spec.

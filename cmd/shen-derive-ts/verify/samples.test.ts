@@ -530,6 +530,93 @@ test("sig-verify-agreement fixture row carries correlated valid crypto inputs", 
   if (pubkey!.value.kind === "list") assert.equal(pubkey!.value.elems.length, 32);
 });
 
+test("resolve-tag-block-children fixture rows cover signed unsigned and partial outcomes", () => {
+  const dts: Datatype[] = [
+    {
+      name: "tag-id",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "tag-id", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "tag-signature",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "tag-signature", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "tag-block",
+      rules: [
+        {
+          premises: [
+            { varName: "Id", typeName: "tag-id" },
+            { varName: "Body", typeName: "string" },
+            { varName: "ChildRefs", typeName: "(list tag-id)" },
+            { varName: "Signature", typeName: "tag-signature" },
+          ],
+          verified: [],
+          conclusion: {
+            varName: "",
+            typeName: "tag-block",
+            fields: ["Id", "Body", "ChildRefs", "Signature"],
+          },
+        },
+      ],
+    },
+    {
+      name: "ref-table-entry",
+      rules: [
+        {
+          premises: [
+            { varName: "Ref", typeName: "tag-id" },
+            { varName: "Block", typeName: "tag-block" },
+          ],
+          verified: [],
+          conclusion: {
+            varName: "",
+            typeName: "ref-table-entry",
+            fields: ["Ref", "Block"],
+          },
+        },
+      ],
+    },
+    {
+      name: "ref-table",
+      rules: [
+        {
+          premises: [{ varName: "Entries", typeName: "(list ref-table-entry)" }],
+          verified: [{ raw: "(>= (length Entries) 0)", varName: "", expr: "(>= (length Entries) 0)" }],
+          conclusion: { varName: "Entries", typeName: "ref-table", fields: [] },
+        },
+      ],
+    },
+  ];
+  const tt = buildTypeTable(dts, "./guards.ts", "guards");
+  const rows = fixtureRowsForDefine(
+    { tt, rand: null, randomDraws: 0 },
+    "resolve-tag-block-children",
+    ["tag-block", "ref-table"],
+  );
+
+  assert.equal(rows.length, 3);
+  assert.ok(rows[0]![0]!.tsExpr.includes(`guards.mustTagSignature("sig-root")`));
+  assert.ok(rows[1]![0]!.tsExpr.includes(`guards.mustTagSignature("")`));
+  assert.ok(rows[2]![0]!.tsExpr.includes(`guards.mustTagId("missing-child")`));
+  for (const row of rows) {
+    assert.equal(row.length, 2);
+    assert.ok(row[0]!.tsExpr.startsWith("guards.mustTagBlock("));
+    assert.ok(row[1]!.tsExpr.startsWith("guards.mustRefTable([guards.mustRefTableEntry("));
+  }
+});
+
 // --- Seeded PRNG reproducibility ---
 
 test("SeededRng produces reproducible sequences for the same seed", () => {

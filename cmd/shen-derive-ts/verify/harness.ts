@@ -16,9 +16,11 @@ import {
 } from "../core/eval.ts";
 import { match } from "../core/match.ts";
 import { parseSexpr } from "../core/sexpr-parse.ts";
+import { headSym, symName, type Sexpr } from "../core/sexpr.ts";
 import type { Clause, Define, SpecFile } from "../specfile/parse.ts";
 import {
   elemType,
+  type TypeEntry,
   type TypeTable,
 } from "../specfile/typetable.ts";
 import {
@@ -535,6 +537,7 @@ export function tsLiteralFor(
   v: Value,
   shenType: string,
   tt: TypeTable,
+  mode: "return" | "constructor" = "return",
 ): string {
   const t = shenType.trim();
 
@@ -544,7 +547,7 @@ export function tsLiteralFor(
     if (v.kind !== "list") {
       throw new Error(`expected list for ${t}, got ${v.kind}`);
     }
-    const parts = v.elems.map((e) => tsLiteralFor(e, elem, tt));
+    const parts = v.elems.map((e) => tsLiteralFor(e, elem, tt, "constructor"));
     return `[${parts.join(", ")}]`;
   }
 
@@ -570,15 +573,24 @@ export function tsLiteralFor(
   const entry = tt.get(t);
   if (entry !== undefined) {
     if (entry.category === "wrapper" || entry.category === "constrained") {
-      // Emit the underlying primitive literal (comparison unwraps via .val()).
       const inner = entry.shenPrim !== "" ? entry.shenPrim : entry.aliasOf ?? "";
       if (inner === "") {
         throw new Error(`wrapped type ${t}: no inner type`);
       }
-      return tsLiteralFor(v, inner, tt);
+      const innerLiteral = tsLiteralFor(v, inner, tt, "constructor");
+      if (mode === "return") {
+        // Top-level wrapped returns compare against got.val().
+        return tsLiteralFor(v, inner, tt, "return");
+      }
+      const helper = `${entry.importAlias || "shenguard"}.must${entry.tsName}`;
+      return `${helper}(${innerLiteral})`;
     }
     if (entry.category === "alias" && entry.aliasOf) {
-      return tsLiteralFor(v, entry.aliasOf, tt);
+      return tsLiteralFor(v, entry.aliasOf, tt, mode);
+    }
+    if (entry.category === "sumtype") {
+      const variant = selectSumVariant(v, entry, tt);
+      return tsLiteralFor(v, variant.shenName, tt, "constructor");
     }
     if (entry.category === "composite" || entry.category === "guarded") {
       if (v.kind !== "list") {
@@ -593,13 +605,86 @@ export function tsLiteralFor(
       }
       const helper = `${entry.importAlias || "shenguard"}.must${entry.tsName}`;
       const parts = entry.fields.map((f, i) =>
-        tsLiteralFor(v.elems[i]!, f.typeName, tt),
+        tsLiteralFor(v.elems[i]!, f.typeName, tt, "constructor"),
       );
       return `${helper}(${parts.join(", ")})`;
     }
   }
 
   throw new Error(`cannot produce TS literal for ${t} value ${v.kind}`);
+}
+
+function selectSumVariant(v: Value, entry: TypeEntry, tt: TypeTable): TypeEntry {
+  if (v.kind !== "list") {
+    throw new Error(`expected sumtype list for ${entry.shenName}, got ${v.kind}`);
+  }
+  const variants = entry.variants ?? [];
+  const candidates = variants
+    .map((name) => tt.get(name))
+    .filter((variant): variant is TypeEntry =>
+      variant !== undefined &&
+      (variant.category === "composite" || variant.category === "guarded") &&
+      variant.fields.length === v.elems.length
+    );
+  const discriminated = candidates.filter((variant) =>
+    discriminatorMatches(variant, v),
+  );
+  if (discriminated.length === 1) return discriminated[0]!;
+  if (discriminated.length > 1) {
+    throw new Error(
+      `sumtype ${entry.shenName}: discriminator matched multiple variants: ${
+        discriminated.map((variant) => variant.shenName).join(", ")
+      }`,
+    );
+  }
+  if (candidates.length === 1) return candidates[0]!;
+  throw new Error(
+    `sumtype ${entry.shenName}: could not select variant for ${v.elems.length}-field value`,
+  );
+}
+
+function discriminatorMatches(
+  entry: TypeEntry,
+  v: Extract<Value, { kind: "list" }>,
+): boolean {
+  for (const raw of entry.verified) {
+    const disc = parseStringDiscriminator(raw, entry);
+    if (disc === null) continue;
+    const value = v.elems[disc.index];
+    return value?.kind === "string" && value.val === disc.literal;
+  }
+  return false;
+}
+
+function parseStringDiscriminator(
+  raw: string,
+  entry: TypeEntry,
+): { index: number; literal: string } | null {
+  let expr: Sexpr;
+  try {
+    expr = parseSexpr(raw);
+  } catch {
+    return null;
+  }
+  if (headSym(expr) !== "=" || expr.kind !== "list" || expr.elems.length !== 3) {
+    return null;
+  }
+  return discriminatorSide(expr.elems[1]!, expr.elems[2]!, entry) ??
+    discriminatorSide(expr.elems[2]!, expr.elems[1]!, entry);
+}
+
+function discriminatorSide(
+  maybeField: Sexpr,
+  maybeLiteral: Sexpr,
+  entry: TypeEntry,
+): { index: number; literal: string } | null {
+  const [fieldName, ok] = symName(maybeField);
+  if (!ok || maybeLiteral.kind !== "atom" || maybeLiteral.atomKind !== "string") {
+    return null;
+  }
+  const index = entry.fields.findIndex((field) => field.shenName === fieldName);
+  if (index === -1) return null;
+  return { index, literal: maybeLiteral.val };
 }
 
 function formatIntLiteral(n: number): string {
@@ -634,7 +719,7 @@ export function emit(h: Harness): string {
     retCategory === "wrapper" || retCategory === "constrained";
   const isListReturn = elemType(retType) !== "";
   const useDeepEqual = isListReturn || retCategory === "composite" ||
-    retCategory === "guarded";
+    retCategory === "guarded" || retCategory === "sumtype";
 
   const lines: string[] = [];
   const asyncTests = h.asyncTests === true ||

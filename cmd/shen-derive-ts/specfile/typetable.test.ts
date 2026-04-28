@@ -209,6 +209,101 @@ test("sum types produce a synthetic sumtype entry", () => {
   assert.equal(circle.fields.length, 1);
 });
 
+test("tag resolver outcomes classify as guarded sum variants", () => {
+  const dts: Datatype[] = [
+    {
+      name: "tag-block",
+      rules: [
+        {
+          premises: [
+            { varName: "Id", typeName: "tag-id" },
+            { varName: "Body", typeName: "string" },
+            { varName: "ChildRefs", typeName: "(list tag-id)" },
+            { varName: "Signature", typeName: "tag-signature" },
+          ],
+          verified: [],
+          conclusion: {
+            varName: "",
+            typeName: "tag-block",
+            fields: ["Id", "Body", "ChildRefs", "Signature"],
+          },
+        },
+      ],
+    },
+    {
+      name: "signed-complete",
+      rules: [
+        {
+          premises: [
+            { varName: "Kind", typeName: "string" },
+            { varName: "Root", typeName: "tag-block" },
+            { varName: "Children", typeName: "(list tag-block)" },
+            { varName: "Signature", typeName: "tag-signature" },
+          ],
+          verified: [
+            { raw: `(= Kind "signed-complete")`, varName: "", expr: `(= Kind "signed-complete")` },
+          ],
+          conclusion: {
+            varName: "",
+            typeName: "tag-resolve-outcome",
+            fields: ["Kind", "Root", "Children", "Signature"],
+          },
+        },
+      ],
+    },
+    {
+      name: "unsigned-complete",
+      rules: [
+        {
+          premises: [
+            { varName: "Kind", typeName: "string" },
+            { varName: "Root", typeName: "tag-block" },
+            { varName: "Children", typeName: "(list tag-block)" },
+          ],
+          verified: [
+            { raw: `(= Kind "unsigned-complete")`, varName: "", expr: `(= Kind "unsigned-complete")` },
+          ],
+          conclusion: {
+            varName: "",
+            typeName: "tag-resolve-outcome",
+            fields: ["Kind", "Root", "Children"],
+          },
+        },
+      ],
+    },
+    {
+      name: "partial",
+      rules: [
+        {
+          premises: [
+            { varName: "Kind", typeName: "string" },
+            { varName: "Root", typeName: "tag-block" },
+            { varName: "Children", typeName: "(list tag-block)" },
+            { varName: "Missing", typeName: "(list tag-id)" },
+          ],
+          verified: [
+            { raw: `(= Kind "partial")`, varName: "", expr: `(= Kind "partial")` },
+          ],
+          conclusion: {
+            varName: "",
+            typeName: "tag-resolve-outcome",
+            fields: ["Kind", "Root", "Children", "Missing"],
+          },
+        },
+      ],
+    },
+  ];
+  const tt = buildTypeTable(dts, "./guards.ts", "guards");
+  const outcome = get(tt, "tag-resolve-outcome");
+
+  assert.equal(outcome.category, "sumtype");
+  assert.deepEqual(outcome.variants, ["signed-complete", "unsigned-complete", "partial"]);
+  assert.equal(get(tt, "signed-complete").category, "guarded");
+  assert.equal(get(tt, "unsigned-complete").category, "guarded");
+  assert.equal(get(tt, "partial").category, "guarded");
+  assert.equal(get(tt, "signed-complete").fields[2]!.tsType, "TagBlock[]");
+});
+
 test("aliases record their wrapped premise type", () => {
   const dts: Datatype[] = [
     {

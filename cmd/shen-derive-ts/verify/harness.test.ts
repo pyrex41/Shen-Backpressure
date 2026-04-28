@@ -12,6 +12,7 @@ import {
   buildHarnessAsync,
   emit,
   evalDefine,
+  tsLiteralFor,
   type HarnessConfig,
 } from "./harness.ts";
 import type { Value } from "../core/eval.ts";
@@ -488,4 +489,111 @@ test("list return type uses deepStrictEqual and emits array literals", () => {
   }
   const src = emit(h);
   assert.ok(src.includes("assert.deepStrictEqual"));
+});
+
+// --- sumtype return: variant constructor expected literals ---
+
+const TAG_OUTCOME_SRC = `
+(datatype tag-id
+  X : string;
+  (> (length X) 0) : verified;
+  ==============
+  X : tag-id;)
+
+(datatype tag-signature
+  X : string;
+  ==============
+  X : tag-signature;)
+
+(datatype tag-block
+  Id : tag-id;
+  Body : string;
+  ChildRefs : (list tag-id);
+  Signature : tag-signature;
+  ===================================
+  [Id Body ChildRefs Signature] : tag-block;)
+
+(datatype signed-complete
+  Kind : string;
+  Root : tag-block;
+  Children : (list tag-block);
+  Signature : tag-signature;
+  (= Kind "signed-complete") : verified;
+  =====================================
+  [Kind Root Children Signature] : tag-resolve-outcome;)
+
+(datatype unsigned-complete
+  Kind : string;
+  Root : tag-block;
+  Children : (list tag-block);
+  (= Kind "unsigned-complete") : verified;
+  ================================
+  [Kind Root Children] : tag-resolve-outcome;)
+
+(datatype partial
+  Kind : string;
+  Root : tag-block;
+  Children : (list tag-block);
+  Missing : (list tag-id);
+  (= Kind "partial") : verified;
+  =================================
+  [Kind Root Children Missing] : tag-resolve-outcome;)
+
+(define force-signed-outcome
+  {tag-block --> tag-resolve-outcome}
+  Block -> (cons "signed-complete" (cons Block (cons [] (cons (Signature Block) nil)))))
+`;
+
+test("sumtype return type selects variant by discriminator and emits helpers", () => {
+  const sf = parseFile(TAG_OUTCOME_SRC);
+  const tt = buildTypeTable(sf.datatypes, "./shenguard_gen.ts", "shenguard");
+  const root = listVal(
+    stringVal("root"),
+    stringVal("Root body"),
+    listVal(),
+    stringVal("sig-root"),
+  );
+  const signed = listVal(
+    stringVal("signed-complete"),
+    root,
+    listVal(),
+    stringVal("sig-root"),
+  );
+  const partial = listVal(
+    stringVal("partial"),
+    root,
+    listVal(),
+    listVal(stringVal("missing-child")),
+  );
+
+  assert.equal(
+    tsLiteralFor(signed, "tag-resolve-outcome", tt),
+    `shenguard.mustSignedComplete("signed-complete", shenguard.mustTagBlock(shenguard.mustTagId("root"), "Root body", [], shenguard.mustTagSignature("sig-root")), [], shenguard.mustTagSignature("sig-root"))`,
+  );
+  assert.equal(
+    tsLiteralFor(partial, "tag-resolve-outcome", tt),
+    `shenguard.mustPartial("partial", shenguard.mustTagBlock(shenguard.mustTagId("root"), "Root body", [], shenguard.mustTagSignature("sig-root")), [], [shenguard.mustTagId("missing-child")])`,
+  );
+});
+
+test("sumtype return type uses deepStrictEqual in emitted tests", () => {
+  const sf = parseFile(TAG_OUTCOME_SRC);
+  const tt = buildTypeTable(sf.datatypes, "./shenguard_gen.ts", "shenguard");
+  const h = buildHarness({
+    spec: sf,
+    tt,
+    allDefines: sf.defines,
+    funcName: "force-signed-outcome",
+    implModule: "./force_signed_outcome",
+    implFunc: "ForceSignedOutcome",
+    importPath: "./shenguard_gen.ts",
+    importAlias: "shenguard",
+    maxCases: 6,
+    seed: 0,
+    randomDraws: 0,
+  });
+  const src = emit(h);
+
+  assert.ok(src.includes("assert.deepStrictEqual"));
+  assert.ok(src.includes("mustSignedComplete"));
 });
