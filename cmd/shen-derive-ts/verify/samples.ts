@@ -79,6 +79,21 @@ export type SampleCtx = {
   randomDraws: number;
 };
 
+const SIG_VERIFY_AGREEMENT_FIXTURE = {
+  encodedFragment:
+    "SzXSccusKCktSlWoUbS0YLRRc3RyDDDydEotNjbJNilLy3Q1Kgoz8i3yd_b38bAISjdzdvTxLXGucvQ0ttAxMtHJBAA",
+  signatureBytes: [
+    235, 218, 60, 170, 184, 72, 173, 197, 100, 18, 179, 62, 210, 118, 72, 89,
+    94, 180, 237, 205, 243, 139, 100, 245, 79, 59, 234, 128, 76, 249, 50, 74,
+    27, 183, 197, 41, 41, 179, 199, 14, 182, 222, 192, 54, 85, 229, 10, 132,
+    133, 74, 120, 41, 40, 137, 48, 203, 232, 229, 165, 82, 134, 233, 147, 172,
+  ],
+  pubkeyBytes: [
+    132, 191, 117, 98, 38, 43, 189, 105, 64, 8, 87, 72, 243, 190, 106, 250,
+    82, 174, 49, 113, 85, 24, 30, 206, 49, 182, 99, 81, 204, 255, 164, 176,
+  ],
+} as const;
+
 // --- Boundary pools. MUST match Go exactly. ---
 //
 // Number pool mixes ints and floats — 2.5 is the load-bearing
@@ -177,6 +192,21 @@ export function genSamples(ctx: SampleCtx, shenType: string): Sample[] {
   }
 }
 
+export function fixtureRowsForDefine(
+  ctx: SampleCtx,
+  funcName: string,
+  paramTypes: readonly string[],
+): Sample[][] {
+  if (
+    funcName.trim() !== "sig-verify-agreement?" ||
+    paramTypes.map((t) => t.trim()).join("|") !==
+      "encoded-fragment|schnorr-sig|xonly-pubkey"
+  ) {
+    return [];
+  }
+  return [sigVerifyAgreementFixtureRow(ctx)];
+}
+
 // --- Primitive number pool ---
 
 function numberSamples(): Sample[] {
@@ -184,6 +214,58 @@ function numberSamples(): Sample[] {
     value: n.kind === "int" ? intVal(n.val) : floatVal(n.val),
     tsExpr: n.expr,
   }));
+}
+
+function sigVerifyAgreementFixtureRow(ctx: SampleCtx): Sample[] {
+  const fragment = SIG_VERIFY_AGREEMENT_FIXTURE.encodedFragment;
+  const sigBytes = [...SIG_VERIFY_AGREEMENT_FIXTURE.signatureBytes];
+  const pubkeyBytes = [...SIG_VERIFY_AGREEMENT_FIXTURE.pubkeyBytes];
+  const eventDataValue = listVal(
+    stringVal(""),
+    stringVal("Fixture Root"),
+    stringVal(""),
+    stringVal(""),
+    stringVal(""),
+  );
+
+  return [
+    {
+      value: listVal(eventDataValue, stringVal(fragment)),
+      tsExpr: `${helper(ctx, "encoded-fragment")}(${
+        helper(ctx, "event-data")
+      }(${helper(ctx, "empty-pubkey")}(""), ${helper(ctx, "event-name")}("Fixture Root"), ${
+        helper(ctx, "event-description")
+      }(""), ${helper(ctx, "event-image")}(""), ${
+        helper(ctx, "event-tag-block")
+      }("")), ${helper(ctx, "bounded-base64url")}(${
+        helper(ctx, "base64url")
+      }(${JSON.stringify(fragment)})))`,
+    },
+    {
+      value: byteListValue(sigBytes),
+      tsExpr: `${helper(ctx, "schnorr-sig")}(${byteGuardExpr(ctx, sigBytes)})`,
+    },
+    {
+      value: byteListValue(pubkeyBytes),
+      tsExpr: `${helper(ctx, "xonly-pubkey")}(${byteGuardExpr(ctx, pubkeyBytes)})`,
+    },
+  ];
+}
+
+function helper(ctx: SampleCtx, shenType: string): string {
+  const entry = ctx.tt.get(shenType);
+  if (entry === undefined) {
+    throw new Error(`fixture ${shenType}: type not found`);
+  }
+  return `${entry.importAlias || "shenguard"}.must${entry.tsName}`;
+}
+
+function byteListValue(bytes: readonly number[]): Value {
+  return listVal(...bytes.map((byte) => intVal(byte)));
+}
+
+function byteGuardExpr(ctx: SampleCtx, bytes: readonly number[]): string {
+  return `${helper(ctx, "bytes")}([${bytes.join(", ")}])`;
 }
 
 // --- Wrapper / constrained types ---
