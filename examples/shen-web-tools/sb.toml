@@ -5,6 +5,40 @@ pkg  = "shenguard"
 [paths]
 spec = "specs/core.shen"
 
+[engine]
+relaxed = false
+
+# Gate topology — declared explicitly via the [[gates]] array of
+# tables (Wave-1 manifest format). For TypeScript projects the
+# default test runner is `npm test` and the default build is
+# `npx tsc --noEmit`. The auto-appended shen-derive gate runs after
+# these.
+
+[[gates]]
+name = "shengen"
+kind = "command"
+run  = "./bin/shengen-codegen.sh"
+
+[[gates]]
+name = "test"
+kind = "command"
+run  = "npm test"
+
+[[gates]]
+name = "build"
+kind = "command"
+run  = "npx tsc --noEmit"
+
+[[gates]]
+name = "shen-check"
+kind = "command"
+run  = "./bin/shen-check.sh"
+
+[[gates]]
+name = "tcb-audit"
+kind = "command"
+run  = "./bin/shenguard-audit.sh"
+
 # Gate 6 — spec-equivalence verification via shen-derive-ts.
 #
 # Each [[derive.specs]] entry pins one hand-written TS implementation
