@@ -34,7 +34,7 @@ export type TypeEntry = {
   /** PascalCase class name (e.g. "AccountId") */
   tsName: string;
   category: TypeCategory;
-  /** Underlying primitive Shen type for wrappers/constrained; "" otherwise. */
+  /** Underlying primitive Shen type for primitive wrappers/constrained; "" otherwise. */
   shenPrim: string;
   /** TS type string for the underlying primitive; "" otherwise. */
   tsPrimType: string;
@@ -44,6 +44,10 @@ export type TypeEntry = {
   varName: string;
   /** Fields for composite/guarded types. Empty otherwise. */
   fields: Field[];
+  /** Target Shen type for aliases and constrained non-primitive wrappers. */
+  aliasOf?: string;
+  /** Variant datatype names for synthetic sum types. */
+  variants?: string[];
   /** Import specifier for the shengen-ts generated module. */
   importPath: string;
   /** Namespace alias used when qualifying imported types. */
@@ -70,12 +74,14 @@ export function buildTypeTable(
   // Pass 1: count how many rules produce each conclusion type name. A count
   // greater than one means "this conclusion is a sum type with N variants".
   const concCount = new Map<string, number>();
+  const concVariants = new Map<string, string[]>();
   for (const dt of datatypes) {
     for (const r of dt.rules) {
-      concCount.set(
-        r.conclusion.typeName,
-        (concCount.get(r.conclusion.typeName) ?? 0) + 1,
-      );
+      const conc = r.conclusion.typeName;
+      concCount.set(conc, (concCount.get(conc) ?? 0) + 1);
+      const variants = concVariants.get(conc) ?? [];
+      variants.push(dt.name);
+      concVariants.set(conc, variants);
     }
   }
 
@@ -124,12 +130,15 @@ export function buildTypeTable(
       } else if (
         isWrapped &&
         verified.length > 0 &&
-        prems.length >= 1 &&
-        isPrimitive(prems[0].typeName)
+        prems.length >= 1
       ) {
         entry.category = "constrained";
-        entry.shenPrim = prems[0].typeName;
-        entry.tsPrimType = shenPrimToTs(entry.shenPrim);
+        if (isPrimitive(prems[0].typeName)) {
+          entry.shenPrim = prems[0].typeName;
+          entry.tsPrimType = shenPrimToTs(entry.shenPrim);
+        } else {
+          entry.aliasOf = prems[0].typeName;
+        }
         entry.varName = prems[0].varName;
       } else if (
         isWrapped &&
@@ -138,6 +147,7 @@ export function buildTypeTable(
         !isSumVariant
       ) {
         entry.category = "alias";
+        entry.aliasOf = prems[0].typeName;
       } else if (!isWrapped && verified.length > 0) {
         entry.category = "guarded";
       } else {
@@ -187,6 +197,7 @@ export function buildTypeTable(
           verified: [],
           varName: "",
           fields: [],
+          variants: concVariants.get(conc) ?? [],
           importPath,
           importAlias,
         });

@@ -7,7 +7,13 @@ import assert from "node:assert/strict";
 
 import type { Datatype } from "../specfile/parse.ts";
 import { buildTypeTable } from "../specfile/typetable.ts";
-import { genSamples, SeededRng, type SampleCtx } from "./samples.ts";
+import { Env, boolVal, builtinFn } from "../core/eval.ts";
+import {
+  fixtureRowsForDefine,
+  genSamples,
+  SeededRng,
+  type SampleCtx,
+} from "./samples.ts";
 
 // --- Fixture datatypes ---
 
@@ -199,6 +205,415 @@ test("transaction composite produces one variation per longest-field index", () 
     if (x.value.kind === "list") {
       assert.equal(x.value.elems.length, 3);
     }
+  }
+});
+
+// --- Alias + sum types ---
+
+test("alias samples delegate to the target type", () => {
+  const dts: Datatype[] = [
+    {
+      name: "account-id",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "account-id", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "user-id",
+      rules: [
+        {
+          premises: [{ varName: "A", typeName: "account-id" }],
+          verified: [],
+          conclusion: { varName: "A", typeName: "user-id", fields: [] },
+        },
+      ],
+    },
+  ];
+  const tt = buildTypeTable(dts, "./shenguard.ts", "shenguard");
+  const ctx: SampleCtx = { tt, rand: null, randomDraws: 0 };
+
+  assert.deepEqual(
+    genSamples(ctx, "user-id").map((s) => s.tsExpr),
+    genSamples(ctx, "account-id").map((s) => s.tsExpr),
+  );
+});
+
+test("sumtype samples include at least one sample from each variant", () => {
+  const dts: Datatype[] = [
+    {
+      name: "circle",
+      rules: [
+        {
+          premises: [{ varName: "R", typeName: "number" }],
+          verified: [],
+          conclusion: { varName: "", typeName: "shape", fields: ["R"] },
+        },
+      ],
+    },
+    {
+      name: "square",
+      rules: [
+        {
+          premises: [{ varName: "S", typeName: "number" }],
+          verified: [],
+          conclusion: { varName: "", typeName: "shape", fields: ["S"] },
+        },
+      ],
+    },
+  ];
+  const tt = buildTypeTable(dts, "./shenguard.ts", "shenguard");
+  const s = genSamples({ tt, rand: null, randomDraws: 0 }, "shape");
+
+  assert.ok(s.some((x) => x.tsExpr.startsWith("shenguard.mustCircle(")));
+  assert.ok(s.some((x) => x.tsExpr.startsWith("shenguard.mustSquare(")));
+});
+
+test("event-pubkey-like sum samples empty and full variants", () => {
+  const dts: Datatype[] = [
+    {
+      name: "empty-pubkey",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [{ raw: "(= (length X) 0)", varName: "", expr: "(= (length X) 0)" }],
+          conclusion: { varName: "X", typeName: "event-pubkey", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "full-pubkey",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [
+            { raw: "(= (length X) 43)", varName: "", expr: "(= (length X) 43)" },
+            { raw: "(base64url? X)", varName: "", expr: "(base64url? X)" },
+          ],
+          conclusion: { varName: "X", typeName: "event-pubkey", fields: [] },
+        },
+      ],
+    },
+  ];
+  const tt = buildTypeTable(dts, "./shenguard.ts", "shenguard");
+  const constraintEnv = Env.empty().extend(
+    "base64url?",
+    builtinFn("base64url?", () => boolVal(true)),
+  );
+  const s = genSamples({ tt, constraintEnv, rand: null, randomDraws: 0 }, "event-pubkey");
+
+  assert.ok(s.some((x) => x.tsExpr === `shenguard.mustEmptyPubkey("")`));
+  assert.ok(
+    s.some((x) =>
+      x.tsExpr === `shenguard.mustFullPubkey(${JSON.stringify("A".repeat(43))})`
+    ),
+    "expected constrained-string candidate for 43-char full pubkey",
+  );
+});
+
+test("constrained byte aliases include exact-length samples", () => {
+  const dts: Datatype[] = [
+    {
+      name: "bytes",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "(list number)" }],
+          verified: [{ raw: "(bytes? X)", varName: "", expr: "(bytes? X)" }],
+          conclusion: { varName: "X", typeName: "bytes", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "sha256-digest",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "bytes" }],
+          verified: [{ raw: "(= 32 (length X))", varName: "", expr: "(= 32 (length X))" }],
+          conclusion: { varName: "X", typeName: "sha256-digest", fields: [] },
+        },
+      ],
+    },
+  ];
+  const tt = buildTypeTable(dts, "./guards.ts", "guards");
+  const constraintEnv = Env.empty().extend(
+    "bytes?",
+    builtinFn("bytes?", () => boolVal(true)),
+  );
+  const s = genSamples({ tt, constraintEnv, rand: null, randomDraws: 0 }, "sha256-digest");
+  const exact = s.find((sample) => sample.value.kind === "list" && sample.value.elems.length === 32);
+
+  assert.ok(exact, "expected a 32-byte digest sample");
+  assert.ok(
+    exact!.tsExpr.startsWith("guards.mustSha256Digest(guards.mustBytes([0, 1, 2"),
+    `unexpected exact-length sample expression: ${exact!.tsExpr}`,
+  );
+});
+
+test("sig-verify-agreement fixture row carries correlated valid crypto inputs", () => {
+  const dts: Datatype[] = [
+    {
+      name: "base64url",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "base64url", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "bounded-base64url",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "base64url" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "bounded-base64url", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "empty-pubkey",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "event-pubkey", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "full-pubkey",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "event-pubkey", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "event-name",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "event-name", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "event-description",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "event-description", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "event-image",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "event-image", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "event-tag-block",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "event-tag-block", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "event-data",
+      rules: [
+        {
+          premises: [
+            { varName: "Pub", typeName: "event-pubkey" },
+            { varName: "Name", typeName: "event-name" },
+            { varName: "Desc", typeName: "event-description" },
+            { varName: "Img", typeName: "event-image" },
+            { varName: "Tags", typeName: "event-tag-block" },
+          ],
+          verified: [],
+          conclusion: {
+            varName: "",
+            typeName: "event-data",
+            fields: ["Pub", "Name", "Desc", "Img", "Tags"],
+          },
+        },
+      ],
+    },
+    {
+      name: "event-variant",
+      rules: [
+        {
+          premises: [{ varName: "E", typeName: "event-data" }],
+          verified: [],
+          conclusion: { varName: "E", typeName: "site-data", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "encoded-fragment",
+      rules: [
+        {
+          premises: [
+            { varName: "S", typeName: "site-data" },
+            { varName: "E", typeName: "bounded-base64url" },
+          ],
+          verified: [],
+          conclusion: {
+            varName: "",
+            typeName: "encoded-fragment",
+            fields: ["S", "E"],
+          },
+        },
+      ],
+    },
+    {
+      name: "bytes",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "(list number)" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "bytes", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "schnorr-sig",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "bytes" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "schnorr-sig", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "xonly-pubkey",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "bytes" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "xonly-pubkey", fields: [] },
+        },
+      ],
+    },
+  ];
+  const tt = buildTypeTable(dts, "./guards.ts", "guards");
+  const rows = fixtureRowsForDefine(
+    { tt, rand: null, randomDraws: 0 },
+    "sig-verify-agreement?",
+    ["encoded-fragment", "schnorr-sig", "xonly-pubkey"],
+  );
+
+  assert.equal(rows.length, 1);
+  const [fragment, sig, pubkey] = rows[0]!;
+  assert.ok(fragment!.tsExpr.includes("SzXSccusKCktSlWoUbS0YLRRc3RyDDDydEotNjbJ"));
+  assert.ok(sig!.tsExpr.startsWith("guards.mustSchnorrSig(guards.mustBytes([235, 218"));
+  assert.ok(pubkey!.tsExpr.startsWith("guards.mustXonlyPubkey(guards.mustBytes([132, 191"));
+  assert.equal(sig!.value.kind, "list");
+  assert.equal(pubkey!.value.kind, "list");
+  if (sig!.value.kind === "list") assert.equal(sig!.value.elems.length, 64);
+  if (pubkey!.value.kind === "list") assert.equal(pubkey!.value.elems.length, 32);
+});
+
+test("resolve-tag-block-children fixture rows cover signed unsigned and partial outcomes", () => {
+  const dts: Datatype[] = [
+    {
+      name: "tag-id",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "tag-id", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "tag-signature",
+      rules: [
+        {
+          premises: [{ varName: "X", typeName: "string" }],
+          verified: [],
+          conclusion: { varName: "X", typeName: "tag-signature", fields: [] },
+        },
+      ],
+    },
+    {
+      name: "tag-block",
+      rules: [
+        {
+          premises: [
+            { varName: "Id", typeName: "tag-id" },
+            { varName: "Body", typeName: "string" },
+            { varName: "ChildRefs", typeName: "(list tag-id)" },
+            { varName: "Signature", typeName: "tag-signature" },
+          ],
+          verified: [],
+          conclusion: {
+            varName: "",
+            typeName: "tag-block",
+            fields: ["Id", "Body", "ChildRefs", "Signature"],
+          },
+        },
+      ],
+    },
+    {
+      name: "ref-table-entry",
+      rules: [
+        {
+          premises: [
+            { varName: "Ref", typeName: "tag-id" },
+            { varName: "Block", typeName: "tag-block" },
+          ],
+          verified: [],
+          conclusion: {
+            varName: "",
+            typeName: "ref-table-entry",
+            fields: ["Ref", "Block"],
+          },
+        },
+      ],
+    },
+    {
+      name: "ref-table",
+      rules: [
+        {
+          premises: [{ varName: "Entries", typeName: "(list ref-table-entry)" }],
+          verified: [{ raw: "(>= (length Entries) 0)", varName: "", expr: "(>= (length Entries) 0)" }],
+          conclusion: { varName: "Entries", typeName: "ref-table", fields: [] },
+        },
+      ],
+    },
+  ];
+  const tt = buildTypeTable(dts, "./guards.ts", "guards");
+  const rows = fixtureRowsForDefine(
+    { tt, rand: null, randomDraws: 0 },
+    "resolve-tag-block-children",
+    ["tag-block", "ref-table"],
+  );
+
+  assert.equal(rows.length, 3);
+  assert.ok(rows[0]![0]!.tsExpr.includes(`guards.mustTagSignature("sig-root")`));
+  assert.ok(rows[1]![0]!.tsExpr.includes(`guards.mustTagSignature("")`));
+  assert.ok(rows[2]![0]!.tsExpr.includes(`guards.mustTagId("missing-child")`));
+  for (const row of rows) {
+    assert.equal(row.length, 2);
+    assert.ok(row[0]!.tsExpr.startsWith("guards.mustTagBlock("));
+    assert.ok(row[1]!.tsExpr.startsWith("guards.mustRefTable([guards.mustRefTableEntry("));
   }
 });
 

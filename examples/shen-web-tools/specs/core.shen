@@ -176,3 +176,65 @@
   Render : safe-render;
   ======================
   Render : pipeline-complete;)
+
+\* --- Product tag/ref resolution finish-line types --- *\
+\* Tag blocks can reference child blocks by id. A ref-table is the
+   semantic boundary that decides whether a tag block is fully renderable,
+   fully renderable but unsigned, or only partially renderable. *\
+
+(datatype tag-id
+  X : string;
+  (> (length X) 0) : verified;
+  ==============
+  X : tag-id;)
+
+(datatype tag-signature
+  X : string;
+  ==============
+  X : tag-signature;)
+
+(datatype tag-block
+  Id : tag-id;
+  Body : string;
+  ChildRefs : (list tag-id);
+  Signature : tag-signature;
+  ===================================
+  [Id Body ChildRefs Signature] : tag-block;)
+
+(datatype ref-table-entry
+  Ref : tag-id;
+  Block : tag-block;
+  =========================
+  [Ref Block] : ref-table-entry;)
+
+(datatype ref-table
+  Entries : (list ref-table-entry);
+  (>= (length Entries) 0) : verified;
+  ================================
+  Entries : ref-table;)
+
+(datatype signed-complete
+  Kind : string;
+  Root : tag-block;
+  Children : (list tag-block);
+  Signature : tag-signature;
+  (= Kind "signed-complete") : verified;
+  =====================================
+  [Kind Root Children Signature] : tag-resolve-outcome;)
+
+(datatype unsigned-complete
+  Kind : string;
+  Root : tag-block;
+  Children : (list tag-block);
+  (= Kind "unsigned-complete") : verified;
+  ================================
+  [Kind Root Children] : tag-resolve-outcome;)
+
+(datatype partial
+  Kind : string;
+  Root : tag-block;
+  Children : (list tag-block);
+  Missing : (list tag-id);
+  (= Kind "partial") : verified;
+  =================================
+  [Kind Root Children Missing] : tag-resolve-outcome;)

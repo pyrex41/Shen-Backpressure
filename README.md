@@ -13,9 +13,9 @@ production.
 
 Shen-Backpressure adds spec-level gates to the loop. The agent must
 pass the structural check (your invariants compile) and the
-behavioral check (your pure functions match a spec) on top of the
-regular tests and build. When a gate fails, the failure feeds back
-into the next prompt as backpressure.
+behavioral check (your pure functions match a spec on sampled
+inputs) on top of the regular tests and build. When a gate fails,
+the failure feeds back into the next prompt as backpressure.
 
 ## What Shen-Backpressure Does
 
@@ -33,8 +33,14 @@ that pin a hand-written implementation against the spec on sampled
 inputs.
 
 Production ships your normal target-language binary. Shen runs at
-build time, not at runtime — every guarantee lands as compile-time
-constraints in Go or TypeScript, not as a Shen runtime dependency.
+build time, not at runtime — but the two guarantees are different in
+kind. **Structural** guarantees (shen-guard) are compile-time: the
+target-language compiler rejects any `Amount` that wasn't built
+through `NewAmount`. **Behavioral** evidence (shen-derive) is
+sampled: a deterministic boundary pool plus optional seeded random
+draws asserts pointwise equality between the spec and the impl. The
+former is a proof-for-all-inputs; the latter is high-confidence
+evidence on a designed sample.
 
 ## The Five Gates
 
@@ -57,15 +63,18 @@ declare a custom gate list with optional parallel groups.
 ## Quick Start
 
 ```bash
-# In your project
-sb init
-sb loop
+# In your project (sb binary on $PATH)
+sb init        # scaffold specs/core.shen, sb.toml, prompts/, plans/
+               # and install /sb:* commands into .claude/
+sb loop        # run the Ralph loop
 ```
 
-`sb init` scaffolds `specs/core.shen`, the manifest, and the harness
-prompts; it also installs the `/sb:*` Claude Code commands. `sb loop`
-runs the Ralph loop. `examples/payment/` is the canonical walkthrough
-end-to-end.
+`sb init` does both the project scaffold and the Claude Code skill
+install in one go; the skill bundle comes from the binary's embedded
+copy of `sb/`. Install Option C below describes the same flow if you
+already have a project and only want the skills. Run
+`sb gates` between iterations if you'd rather drive the loop yourself.
+`examples/payment/` is the canonical end-to-end walkthrough.
 
 ## The Canonical Demo: Payment Processor
 
@@ -81,7 +90,8 @@ how the same spec compiles in four languages.
 The `demo-shen-derive/` subdirectory carries a runnable script and
 three deliberately-broken `.go.bak` implementations so you can watch
 the gates catch each bug in turn. Read `examples/payment/README.md`
-for the walkthrough.
+for the walkthrough, including which gates require `bin/shengen-codegen.sh`,
+`bin/shenguard-audit.sh`, and a Shen runtime.
 
 ## What Else This Does
 
@@ -91,7 +101,10 @@ headline:
 - **Polyglot guard generation.** One Shen spec compiles to Go,
   TypeScript, Python, and Rust. `examples/payment/reference/` shows
   the same five datatypes in all four languages; `examples/shen-web-tools/`
-  is a polyglot end-to-end app (Shen/SBCL backend, Arrow.js frontend).
+  is a polyglot end-to-end app (Shen/SBCL backend, Arrow.js
+  frontend) whose TypeScript proof gate now demonstrates a product
+  tag/ref-table resolver that classifies child refs into
+  `signed-complete`, `unsigned-complete`, or `partial` outcomes.
 - **Proof chains for service authorization.**
   `examples/multi-tenant-api/` ships a JWT → AuthenticatedUser →
   TenantAccess → ResourceAccess proof chain in a live Go HTTP service,
@@ -127,6 +140,14 @@ a prompt wants to know what gates exist or why one failed, it asks
 `-wave-2-sb-context.md`, and `-wave-3-prompt-hydration.md` for the
 post-hoc record of how this layering came to be.
 
+For deeper reference material — guard-type pattern catalog, Shen→Go
+side-by-side, design-decision Q&A, ASCII pipeline — see
+[`docs/REFERENCE.md`](docs/REFERENCE.md). For in-flight work, see
+[`notes/finish-line-roadmap.md`](notes/finish-line-roadmap.md), and
+the design prompts under [`feature_ideas/`](feature_ideas/) for
+mixed-evidence reports, differential verification, counterexample
+traces, holographic mocks, and compliance audit trails.
+
 ## Install
 
 ### Option A: SKM (recommended)
@@ -148,10 +169,12 @@ cp Shen-Backpressure/sb/skills/shen-backpressure/SKILL.md .claude/skills/shen-ba
 
 ### Option C: `sb init`
 
-If you have the `sb` binary in your `$PATH`, `sb init` installs the
-same skill bundle into `.claude/` from the binary's embedded copy.
-The embedded copy is a build-time mirror of `sb/`; `make
-check-skilldata` enforces equality.
+`sb init` is the same skill-install flow as Option B, plus a project
+scaffold (specs/core.shen, sb.toml, prompts/, plans/). It reads the
+binary's embedded copy of `sb/`; that copy is a build-time mirror,
+and `make check-skilldata` enforces equality with the canonical
+`sb/` tree. Use it when you also want the project files; use Option
+A or B when you only want the skills.
 
 ## Commands
 
@@ -162,6 +185,7 @@ check-skilldata` enforces equality.
 | `/sb:ralph-scaffold` | All-in-one: init + loop setup. |
 | `/sb:create-shengen` | Build a new shengen codegen tool for an additional target language. |
 | `/sb:derive` | Wire up or refresh `shen-derive` spec-equivalence tests. |
+| `/sb:help` | List available commands. |
 
 ## Supported Harnesses
 
@@ -178,14 +202,17 @@ check-skilldata` enforces equality.
 ```
 cmd/sb/                  Engine CLI (gen, gates, derive, context, loop, init)
 cmd/shengen/             Go codegen (production-wired)
-cmd/shengen-ts/          TypeScript codegen (production-wired)
+cmd/shengen-ts/          TypeScript codegen (production-wired, while-loop emission)
 cmd/shengen-py/          Python codegen (reference)
 cmd/shengen-rs/          Rust codegen (reference)
-cmd/shen-derive-ts/      TS port of shen-derive
+cmd/shen-derive-ts/      Self-hosted TS port of shen-derive (async crypto, aliases, multi-spec)
 shen-derive/             Go shen-derive module
 sb/                      Canonical SKM bundle (commands, skill, AGENT_PROMPT)
 cmd/sb/skilldata/        Build-time mirror of sb/, embedded into the binary
+docs/REFERENCE.md        Pattern catalog, side-by-sides, design-decision Q&A
 examples/                payment/, multi-tenant-api/, shen-web-tools/, .archive/
+feature_ideas/           Design prompts for mixed-evidence reports, differential verification, …
+notes/                   Finish-line roadmap and open questions
 thoughts/                Research notes, reviews, handoffs
 ```
 
@@ -197,7 +224,7 @@ auto-detects the supported backends:
 | Backend | Startup | Compute | Install |
 |---------|---------|---------|---------|
 | **shen-sbcl** (default) | 0.06s | 1× | `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl` |
-| **shen-scheme** | 0.44s | 1.6× faster | Build from [shen-scheme](https://github.com/Shen-Language/shen-scheme) |
+| **shen-scheme** | 0.44s | 1.6× faster | Build from [shen-scheme](https://github.com/Shen-Language/shen-scheme) (`brew install chezscheme`, then `make`, then `cp bin/shen-scheme /usr/local/bin/`) |
 
 For gate loops and CI, `shen-sbcl` wins — startup dominates on small
 specs. For large specs with heavy typechecking, `shen-scheme`'s faster
@@ -217,7 +244,7 @@ The project ships two complementary tools that share the same
 | Best for | Domain values that cross a boundary (I/O, mutation, glue) | Pure functions where the obvious spec is clear and the efficient impl isn't |
 | How it works | Shen spec → shengen → opaque guard types → constructor validation at compile time | `(define …)` block acts as the oracle; generated table-driven test asserts the impl matches on sampled inputs |
 | Artifact | Generated guard types committed to the repo | Generated test file committed to the repo, drift checked by a gate |
-| Proof method | Shen sequent calculus + target-language compiler | Spec-vs-impl equivalence on a deterministic boundary pool plus optional seeded random draws; constrained types filter samples against their `verified` predicates |
+| Proof method | Shen sequent calculus + target-language compiler — proves the rule for every well-typed value | Spec-vs-impl equivalence on a deterministic boundary pool plus optional seeded random draws; constrained types filter samples against their `verified` predicates — sampled, not for-all |
 
 `shen-derive` plugs into `sb` as Gate 6. Configure it via
 `[[derive.specs]]` in `sb.toml`; `sb gates` registers the gate
@@ -235,7 +262,9 @@ cd shen-derive && go build -o shen-derive .
 
 The generated test is a regular `go test` file — commit it, then run
 the `sb derive` gate to detect drift between the spec, the impl, and
-the committed test.
+the committed test. The TypeScript port at `cmd/shen-derive-ts/` is
+self-hosted and supports async crypto derivation, aliases, externs,
+and multi-spec verify.
 
 ## Further Reading
 

@@ -25,6 +25,22 @@ Common Lisp Backend (SBCL)
 
 **Shen decides WHAT to do. CL does the I/O. Arrow renders the result.**
 
+## Tag Resolver Finish Line
+
+This example also carries the current TypeScript proof gate for product
+tag/ref-table rendering. `specs/core.shen` defines `tag-block`,
+`ref-table`, and the `tag-resolve-outcome` sum type. The resolver contract
+in `specs/tag-block-resolver.shen` resolves child refs into:
+
+- `signed-complete`: every child ref resolves and the root has a signature.
+- `unsigned-complete`: every child ref resolves, but the root is unsigned.
+- `partial`: at least one child ref is missing, while available children remain renderable.
+
+The hand-written implementation in `runtime/tag_resolver.ts` is checked by
+`runtime/tag_resolver.shen-derive.test.ts`, generated from the Shen spec.
+`runtime/tag_render_contract.ts` is the renderer boundary: UI code consumes
+`TagRenderState`, not raw ref-table data.
+
 ## Providers
 
 The CL backend supports pluggable providers for each I/O operation:
@@ -170,6 +186,10 @@ backend/
 runtime/
   bridge.ts              API client + optional pi-ai streaming
   ui.ts                  Arrow.js reactive UI renderer
+  tag_resolver.ts        Tag/ref-table resolver implementation
+  tag_render_contract.ts Renderer-facing tri-state tag outcome adapter
+  tag_resolver.shen-derive.test.ts
+                         Generated spec-equivalence test for the resolver
   main.ts                Frontend bootstrap
 index.html               Entry point (loads Arrow.js via importmap)
 static/style.css         Styles
@@ -187,3 +207,18 @@ Shen enforces a strict pipeline order via types:
 6. **render** → assemble UI panel tree (`assemble-research-view`)
 
 The type system prevents skipping steps — you can't build a `research-summary` without `grounded-source` values.
+
+## Verification Gate
+
+The active `shen-derive-ts` gate in `sb.toml` targets
+`resolve-tag-block-children`:
+
+```bash
+npm run shengen      # regenerate runtime/guards_gen.ts from specs/core.shen
+npm run shen-derive  # regenerate runtime/tag_resolver.shen-derive.test.ts
+npm run check        # shengen drift check + build + runtime tests
+```
+
+The derive sampler prepends three correlated fixture rows for the resolver:
+signed complete, unsigned complete, and partial. That keeps the phase-critical
+cases covered even when generic cartesian sampling changes.

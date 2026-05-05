@@ -1,7 +1,7 @@
 #!/usr/bin/env -S npx tsx
 // shen-derive-ts — Verification gate for Shen specs (TypeScript port).
 //
-// Given a .shen spec file containing a (define ...) block, generate a
+// Given one or more .shen spec files containing a (define ...) block, generate a
 // TypeScript test file that asserts a hand-written implementation matches
 // the spec pointwise on sampled inputs.
 //
@@ -9,10 +9,18 @@
 // for the full design.
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { parseFile, findDefine } from "./specfile/parse.ts";
 import { buildTypeTable } from "./specfile/typetable.ts";
-import { buildHarness, emit, type HarnessConfig } from "./verify/harness.ts";
+import {
+  buildHarnessAsync,
+  emit,
+  type ExternBinding,
+  type HarnessConfig,
+} from "./verify/harness.ts";
+import type { Value } from "./core/eval.ts";
 
 const VERSION = "0.1.0";
 
@@ -20,14 +28,16 @@ function usage(): void {
   process.stderr.write(
     `shen-derive-ts — Verification gate for Shen specs (v${VERSION})
 
-Usage: shen-derive-ts verify <spec.shen> [flags]
+Usage: shen-derive-ts verify <spec.shen> [more-specs...] [flags]
 
 Flags:
+  --spec FILE                 add a spec file (may be repeated)
   --func NAME                 (required) which (define ...) block to verify
   --impl-module PATH          (required) relative TS import path of the impl, e.g. ./processable
   --impl-func NAME            (required) exported TS function name
   --import PATH               (required) import path of the shengen-ts guards module, e.g. ./guards_gen
   --import-alias ALIAS        default: "shenguard"
+  --extern NAME=MOD::EXP/N    bind external function NAME to module export EXP with arity N (repeatable)
   --out FILE                  default: stdout
   --max-cases N               default: 50
   --seed N                    RNG seed (0 = deterministic boundary values only)
@@ -45,24 +55,35 @@ Example:
 }
 
 type Flags = {
+  specPaths: string[];
   func: string;
   implModule: string;
   implFunc: string;
   importPath: string;
   importAlias: string;
+  externSpecs: ExternSpec[];
   out: string;
   maxCases: number;
   seed: number;
   randomDraws: number;
 };
 
+type ExternSpec = {
+  name: string;
+  modulePath: string;
+  exportName: string;
+  arity: number | null;
+};
+
 function parseFlags(args: string[]): Flags {
   const f: Flags = {
+    specPaths: [],
     func: "",
     implModule: "",
     implFunc: "",
     importPath: "",
     importAlias: "shenguard",
+    externSpecs: [],
     out: "",
     maxCases: 50,
     seed: 0,
@@ -80,6 +101,9 @@ function parseFlags(args: string[]): Flags {
       return v;
     };
     switch (a) {
+      case "--spec":
+        f.specPaths.push(next());
+        break;
       case "--func":
         f.func = next();
         break;
@@ -95,6 +119,9 @@ function parseFlags(args: string[]): Flags {
       case "--import-alias":
         f.importAlias = next();
         break;
+      case "--extern":
+        f.externSpecs.push(parseExternSpec(next()));
+        break;
       case "--out":
         f.out = next();
         break;
@@ -108,22 +135,111 @@ function parseFlags(args: string[]): Flags {
         f.randomDraws = Number(next());
         break;
       default:
-        process.stderr.write(`error: unknown flag ${a}\n`);
-        process.exit(1);
+        if (a.startsWith("-")) {
+          process.stderr.write(`error: unknown flag ${a}\n`);
+          process.exit(1);
+        }
+        f.specPaths.push(a);
     }
   }
   return f;
 }
 
-function cmdVerify(args: string[]): void {
+function parseExternSpec(raw: string): ExternSpec {
+  const eq = raw.indexOf("=");
+  if (eq <= 0) {
+    throw new Error(`bad --extern ${JSON.stringify(raw)}: expected name=module::export/arity`);
+  }
+  const name = raw.slice(0, eq).trim();
+  const rhs = raw.slice(eq + 1).trim();
+  const sep = rhs.lastIndexOf("::");
+  if (sep <= 0 || sep + 2 >= rhs.length) {
+    throw new Error(`bad --extern ${JSON.stringify(raw)}: expected name=module::export/arity`);
+  }
+  const modulePath = rhs.slice(0, sep);
+  let exportName = rhs.slice(sep + 2);
+  let arity: number | null = null;
+  const slash = exportName.lastIndexOf("/");
+  if (slash !== -1) {
+    const rawArity = exportName.slice(slash + 1);
+    exportName = exportName.slice(0, slash);
+    arity = Number(rawArity);
+    if (!Number.isInteger(arity) || arity <= 0) {
+      throw new Error(`bad --extern ${JSON.stringify(raw)}: arity must be a positive integer`);
+    }
+  }
+  if (name === "" || modulePath === "" || exportName === "") {
+    throw new Error(`bad --extern ${JSON.stringify(raw)}: empty name, module, or export`);
+  }
+  return { name, modulePath, exportName, arity };
+}
+
+async function loadExterns(specs: ExternSpec[]): Promise<ExternBinding[]> {
+  const out: ExternBinding[] = [];
+  for (const spec of specs) {
+    const mod = await import(resolveModuleSpecifier(spec.modulePath));
+    const adapter = (mod as Record<string, unknown>)[spec.exportName];
+    if (typeof adapter !== "function") {
+      throw new Error(
+        `extern ${spec.name}: ${spec.modulePath}::${spec.exportName} is not a function`,
+      );
+    }
+    const adapterFn = adapter as ((...args: Value[]) => unknown) & {
+      arity?: unknown;
+    };
+    const exposedArity = typeof adapterFn.arity === "number"
+      ? adapterFn.arity
+      : adapter.length;
+    const arity = spec.arity ?? exposedArity;
+    if (!Number.isInteger(arity) || arity <= 0) {
+      throw new Error(
+        `extern ${spec.name}: provide /arity or set a positive numeric arity property`,
+      );
+    }
+    const binding: ExternBinding = {
+      name: spec.name,
+      arity,
+      async: adapterFn.constructor.name === "AsyncFunction",
+      fn: (...args: Value[]) => {
+        const value = adapterFn(...args);
+        if (isPromiseLike(value)) {
+          binding.async = true;
+          return Promise.resolve(value).then((v) => v as Value);
+        }
+        return value as Value;
+      },
+    };
+    out.push(binding);
+  }
+  return out;
+}
+
+function resolveModuleSpecifier(modulePath: string): string {
+  if (modulePath.startsWith(".") || modulePath.startsWith("/")) {
+    return pathToFileURL(resolve(process.cwd(), modulePath)).href;
+  }
+  return modulePath;
+}
+
+function isPromiseLike(value: unknown): boolean {
+  return typeof value === "object" && value !== null && "then" in value;
+}
+
+async function cmdVerify(args: string[]): Promise<void> {
   if (args.length === 0) {
     usage();
     process.exit(1);
   }
-  const specPath = args[0];
-  const flags = parseFlags(args.slice(1));
+  let flags: Flags;
+  try {
+    flags = parseFlags(args);
+  } catch (e) {
+    process.stderr.write(`${(e as Error).message}\n`);
+    process.exit(1);
+  }
 
   const missing: string[] = [];
+  if (flags.specPaths.length === 0) missing.push("<spec.shen>");
   if (!flags.func) missing.push("--func");
   if (!flags.implModule) missing.push("--impl-module");
   if (!flags.implFunc) missing.push("--impl-func");
@@ -134,33 +250,47 @@ function cmdVerify(args: string[]): void {
     process.exit(1);
   }
 
-  let src: string;
-  try {
-    src = readFileSync(specPath, "utf8");
-  } catch (e) {
-    process.stderr.write(`read ${specPath}: ${(e as Error).message}\n`);
-    process.exit(1);
-  }
+  const sf = { datatypes: [], defines: [] } as ReturnType<typeof parseFile>;
+  for (const specPath of flags.specPaths) {
+    let src: string;
+    try {
+      src = readFileSync(specPath, "utf8");
+    } catch (e) {
+      process.stderr.write(`read ${specPath}: ${(e as Error).message}\n`);
+      process.exit(1);
+    }
 
-  let sf;
-  try {
-    sf = parseFile(src);
-  } catch (e) {
-    process.stderr.write(`parse spec: ${(e as Error).message}\n`);
-    process.exit(1);
+    try {
+      const parsed = parseFile(src);
+      sf.datatypes.push(...parsed.datatypes);
+      sf.defines.push(...parsed.defines);
+    } catch (e) {
+      process.stderr.write(`parse ${specPath}: ${(e as Error).message}\n`);
+      process.exit(1);
+    }
   }
 
   if (!findDefine(sf, flags.func)) {
-    process.stderr.write(`define ${JSON.stringify(flags.func)} not found in ${specPath}\n`);
+    process.stderr.write(
+      `define ${JSON.stringify(flags.func)} not found in ${flags.specPaths.join(", ")}\n`,
+    );
     process.exit(1);
   }
 
   const tt = buildTypeTable(sf.datatypes, flags.importPath, flags.importAlias);
+  let externs: ExternBinding[];
+  try {
+    externs = await loadExterns(flags.externSpecs);
+  } catch (e) {
+    process.stderr.write(`load externs: ${(e as Error).message}\n`);
+    process.exit(1);
+  }
 
   const cfg: HarnessConfig = {
     spec: sf,
     tt,
     allDefines: sf.defines,
+    externs,
     funcName: flags.func,
     implModule: flags.implModule,
     implFunc: flags.implFunc,
@@ -173,7 +303,7 @@ function cmdVerify(args: string[]): void {
 
   let harness;
   try {
-    harness = buildHarness(cfg);
+    harness = await buildHarnessAsync(cfg);
   } catch (e) {
     process.stderr.write(`build harness: ${(e as Error).message}\n`);
     process.exit(1);
@@ -194,7 +324,7 @@ function cmdVerify(args: string[]): void {
   process.stderr.write(`wrote ${flags.out} (${harness.cases.length} cases)\n`);
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const args = process.argv.slice(2);
   if (args.length === 0) {
     usage();
@@ -202,7 +332,7 @@ function main(): void {
   }
   switch (args[0]) {
     case "verify":
-      cmdVerify(args.slice(1));
+      await cmdVerify(args.slice(1));
       return;
     case "version":
     case "--version":
@@ -221,4 +351,7 @@ function main(): void {
   }
 }
 
-main();
+main().catch((e) => {
+  process.stderr.write(`${(e as Error).message}\n`);
+  process.exit(1);
+});

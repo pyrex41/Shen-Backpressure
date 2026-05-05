@@ -553,6 +553,70 @@ test("generateTs: sum-type variant emits a class, not a type alias", () => {
   );
 });
 
+test("generateTs: tag resolver outcomes emit union and variant helpers", () => {
+  const spec = `(datatype tag-id
+  X : string;
+  (> (length X) 0) : verified;
+  ==============
+  X : tag-id;)
+
+(datatype tag-signature
+  X : string;
+  ==============
+  X : tag-signature;)
+
+(datatype tag-block
+  Id : tag-id;
+  Body : string;
+  ChildRefs : (list tag-id);
+  Signature : tag-signature;
+  ===================================
+  [Id Body ChildRefs Signature] : tag-block;)
+
+(datatype signed-complete
+  Kind : string;
+  Root : tag-block;
+  Children : (list tag-block);
+  Signature : tag-signature;
+  (= Kind "signed-complete") : verified;
+  =====================================
+  [Kind Root Children Signature] : tag-resolve-outcome;)
+
+(datatype unsigned-complete
+  Kind : string;
+  Root : tag-block;
+  Children : (list tag-block);
+  (= Kind "unsigned-complete") : verified;
+  ================================
+  [Kind Root Children] : tag-resolve-outcome;)
+
+(datatype partial
+  Kind : string;
+  Root : tag-block;
+  Children : (list tag-block);
+  Missing : (list tag-id);
+  (= Kind "partial") : verified;
+  =================================
+  [Kind Root Children Missing] : tag-resolve-outcome;)`;
+  const types = parseFileString(spec);
+  const st = new SymbolTable();
+  st.build(types);
+  const out = generateTs(types, st, "tag-resolver.shen");
+
+  const outcome = st.lookup("tag-resolve-outcome");
+  assert.equal(outcome?.category, "sumtype");
+  assert.ok(
+    out.includes("export type TagResolveOutcome = SignedComplete | UnsignedComplete | Partial;"),
+    `missing TagResolveOutcome union; output was:\n${out}`
+  );
+  for (const helper of ["mustSignedComplete", "mustUnsignedComplete", "mustPartial"]) {
+    assert.ok(out.includes(`export function ${helper}`), `missing ${helper}`);
+  }
+  assert.ok(out.includes(`kind === "signed-complete"`));
+  assert.ok(out.includes(`kind === "unsigned-complete"`));
+  assert.ok(out.includes(`kind === "partial"`));
+});
+
 // ============================================================================
 // §3.3 regression: inferTargetFields + precise structuralMatchFallback.
 // ============================================================================
@@ -927,7 +991,11 @@ test("generateTs: single-clause define emits an exported function", () => {
   );
 });
 
-test("generateTs: multi-clause define with \"\" literal emits if-chain", () => {
+test("generateTs: linear-recursive define rewrites to a while-loop (no self-call)", () => {
+  // The `BC -> BR | V -> (and HBODY (FNAME STEP))` shape has a clean
+  // iterative form. JS engines do not TCO self-tail-calls, so the recursive
+  // emission would blow the stack at ~10k characters even though the
+  // algorithm is O(n) in time and O(1) in space when expressed as a loop.
   const src = `(define base64url?
   {string --> boolean}
   "" -> true
@@ -943,19 +1011,33 @@ test("generateTs: multi-clause define with \"\" literal emits if-chain", () => {
     /export function base64url\(x: string\): boolean/.test(out),
     "missing base64url function signature"
   );
+  // Loop-form emission, not the recursive if-chain.
   assert.ok(
-    /if \(x === ""\)/.test(out),
-    "missing empty-string check"
+    /while \(!\(x === ""\)\)/.test(out),
+    `expected while-loop guarded on empty-string base case; got:\n${out}`
   );
-  // `head-char` and `tail-chars` are recognized primitives — they translate
-  // to inline `x[0] ?? ""` / `x.slice(1)` rather than function calls.
+  // Per-step predicate runs inside the loop — `head-char` translates to
+  // `x[0] ?? ""` and the bare predicate call goes through definePascalName.
   assert.ok(
-    /base64urlChar\(\(x\[0\] \?\? ""\)\)/.test(out),
-    `missing (head-char x) → (x[0] ?? "") translation; got:\n${out}`
+    /if \(!\(base64urlChar\(\(x\[0\] \?\? ""\)\)\)\) return false;/.test(out),
+    `missing per-step predicate guard; got:\n${out}`
   );
+  // STEP is the loop's iteration update, not a recursive call.
   assert.ok(
-    /base64url\(x\.slice\(1\)\)/.test(out),
-    `missing (tail-chars x) → x.slice(1) translation; got:\n${out}`
+    /x = x\.slice\(1\);/.test(out),
+    `missing tail-chars iteration update; got:\n${out}`
+  );
+  // Terminal value comes back from the base case after the loop exits.
+  assert.ok(
+    /\}\s+return true;\s+\}/.test(out),
+    `missing post-loop terminal return; got:\n${out}`
+  );
+  // No self-call to base64url is left in the body.
+  const body = out.match(/export function base64url\([\s\S]*?\n\}/);
+  assert.ok(body, "could not isolate base64url function body");
+  assert.ok(
+    !/\bbase64url\(/.test(body![0].replace(/^export function base64url/, "")),
+    `unexpected recursive self-call in body; got:\n${body![0]}`
   );
 });
 

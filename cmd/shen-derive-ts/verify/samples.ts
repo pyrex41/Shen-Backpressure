@@ -18,8 +18,13 @@ import {
 } from "../core/eval.ts";
 import { parseSexpr } from "../core/sexpr-parse.ts";
 import {
+  headSym,
+  sexprIntVal,
+  symName,
+  type Sexpr,
+} from "../core/sexpr.ts";
+import {
   elemType,
-  tsType,
   type TypeEntry,
   type TypeTable,
 } from "../specfile/typetable.ts";
@@ -65,11 +70,28 @@ export type Sample = {
 
 export type SampleCtx = {
   tt: TypeTable;
+  /** Optional environment used when constrained-type predicates call defines. */
+  constraintEnv?: Env;
   /** null → deterministic, boundary values only. */
   rand: SeededRng | null;
   /** Number of extra random draws for primitive number/string types. */
   randomDraws: number;
 };
+
+const SIG_VERIFY_AGREEMENT_FIXTURE = {
+  encodedFragment:
+    "SzXSccusKCktSlWoUbS0YLRRc3RyDDDydEotNjbJNilLy3Q1Kgoz8i3yd_b38bAISjdzdvTxLXGucvQ0ttAxMtHJBAA",
+  signatureBytes: [
+    235, 218, 60, 170, 184, 72, 173, 197, 100, 18, 179, 62, 210, 118, 72, 89,
+    94, 180, 237, 205, 243, 139, 100, 245, 79, 59, 234, 128, 76, 249, 50, 74,
+    27, 183, 197, 41, 41, 179, 199, 14, 182, 222, 192, 54, 85, 229, 10, 132,
+    133, 74, 120, 41, 40, 137, 48, 203, 232, 229, 165, 82, 134, 233, 147, 172,
+  ],
+  pubkeyBytes: [
+    132, 191, 117, 98, 38, 43, 189, 105, 64, 8, 87, 72, 243, 190, 106, 250,
+    82, 174, 49, 113, 85, 24, 30, 206, 49, 182, 99, 81, 204, 255, 164, 176,
+  ],
+} as const;
 
 // --- Boundary pools. MUST match Go exactly. ---
 //
@@ -90,6 +112,13 @@ const NUMBER_RAW: ReadonlyArray<
 ];
 
 const STRING_POOL: ReadonlyArray<string> = ["", "alice", "bob"];
+const CONSTRAINED_STRING_EXTRA_POOL: ReadonlyArray<string> = [
+  " ",
+  "A",
+  "A".repeat(43),
+  "A".repeat(44),
+  "abc_def-123",
+];
 const BOOL_POOL: ReadonlyArray<boolean> = [true, false];
 
 // --- Entry point ---
@@ -101,7 +130,7 @@ export function genSamples(ctx: SampleCtx, shenType: string): Sample[] {
   const elem = elemType(t);
   if (elem !== "") {
     const elemSamples = genSamples(ctx, elem);
-    return listSamples(ctx.tt, elem, elemSamples);
+    return listSamples(elemSamples);
   }
 
   // primitives
@@ -145,15 +174,42 @@ export function genSamples(ctx: SampleCtx, shenType: string): Sample[] {
     case "guarded":
       return compositeSamples(ctx, entry);
     case "alias":
-      throw new Error(`alias type "${t}" not supported in samples yet`);
+      if (!entry.aliasOf) {
+        throw new Error(`alias type "${t}" has no target type`);
+      }
+      return genSamples(ctx, entry.aliasOf);
     case "sumtype":
-      throw new Error(`sum type "${t}" sampling not supported yet`);
+      if (!entry.variants || entry.variants.length === 0) {
+        throw new Error(`sum type "${t}" has no variants`);
+      }
+      return entry.variants.flatMap((variant) => genSamples(ctx, variant));
     default: {
       // Exhaustive check.
       const _never: never = entry.category;
       throw new Error(`unhandled category for "${t}": ${String(_never)}`);
     }
   }
+}
+
+export function fixtureRowsForDefine(
+  ctx: SampleCtx,
+  funcName: string,
+  paramTypes: readonly string[],
+): Sample[][] {
+  if (
+    funcName.trim() === "resolve-tag-block-children" &&
+    paramTypes.map((t) => t.trim()).join("|") === "tag-block|ref-table"
+  ) {
+    return tagBlockResolverFixtureRows(ctx);
+  }
+  if (
+    funcName.trim() !== "sig-verify-agreement?" ||
+    paramTypes.map((t) => t.trim()).join("|") !==
+      "encoded-fragment|schnorr-sig|xonly-pubkey"
+  ) {
+    return [];
+  }
+  return [sigVerifyAgreementFixtureRow(ctx)];
 }
 
 // --- Primitive number pool ---
@@ -165,6 +221,145 @@ function numberSamples(): Sample[] {
   }));
 }
 
+function sigVerifyAgreementFixtureRow(ctx: SampleCtx): Sample[] {
+  const fragment = SIG_VERIFY_AGREEMENT_FIXTURE.encodedFragment;
+  const sigBytes = [...SIG_VERIFY_AGREEMENT_FIXTURE.signatureBytes];
+  const pubkeyBytes = [...SIG_VERIFY_AGREEMENT_FIXTURE.pubkeyBytes];
+  const eventDataValue = listVal(
+    stringVal(""),
+    stringVal("Fixture Root"),
+    stringVal(""),
+    stringVal(""),
+    stringVal(""),
+  );
+
+  return [
+    {
+      value: listVal(eventDataValue, stringVal(fragment)),
+      tsExpr: `${helper(ctx, "encoded-fragment")}(${
+        helper(ctx, "event-data")
+      }(${helper(ctx, "empty-pubkey")}(""), ${helper(ctx, "event-name")}("Fixture Root"), ${
+        helper(ctx, "event-description")
+      }(""), ${helper(ctx, "event-image")}(""), ${
+        helper(ctx, "event-tag-block")
+      }("")), ${helper(ctx, "bounded-base64url")}(${
+        helper(ctx, "base64url")
+      }(${JSON.stringify(fragment)})))`,
+    },
+    {
+      value: byteListValue(sigBytes),
+      tsExpr: `${helper(ctx, "schnorr-sig")}(${byteGuardExpr(ctx, sigBytes)})`,
+    },
+    {
+      value: byteListValue(pubkeyBytes),
+      tsExpr: `${helper(ctx, "xonly-pubkey")}(${byteGuardExpr(ctx, pubkeyBytes)})`,
+    },
+  ];
+}
+
+function tagBlockResolverFixtureRows(ctx: SampleCtx): Sample[][] {
+  const signedRoot = tagBlockSample(ctx, {
+    id: "root-signed",
+    body: "Signed root",
+    childRefs: ["child-a"],
+    signature: "sig-root",
+  });
+  const unsignedRoot = tagBlockSample(ctx, {
+    id: "root-unsigned",
+    body: "Unsigned root",
+    childRefs: ["child-a"],
+    signature: "",
+  });
+  const partialRoot = tagBlockSample(ctx, {
+    id: "root-partial",
+    body: "Partial root",
+    childRefs: ["child-a", "missing-child"],
+    signature: "sig-root",
+  });
+  const child = {
+    id: "child-a",
+    body: "Child A",
+    childRefs: [] as string[],
+    signature: "",
+  };
+  const refTable = refTableSample(ctx, [
+    { ref: "child-a", block: child },
+  ]);
+
+  return [
+    [signedRoot, refTable],
+    [unsignedRoot, refTable],
+    [partialRoot, refTable],
+  ];
+}
+
+type TagBlockFixture = {
+  id: string;
+  body: string;
+  childRefs: string[];
+  signature: string;
+};
+
+type RefTableEntryFixture = {
+  ref: string;
+  block: TagBlockFixture;
+};
+
+function tagBlockSample(ctx: SampleCtx, block: TagBlockFixture): Sample {
+  return {
+    value: tagBlockValue(block),
+    tsExpr: tagBlockExpr(ctx, block),
+  };
+}
+
+function refTableSample(ctx: SampleCtx, entries: RefTableEntryFixture[]): Sample {
+  return {
+    value: listVal(...entries.map((entry) =>
+      listVal(stringVal(entry.ref), tagBlockValue(entry.block))
+    )),
+    tsExpr: `${helper(ctx, "ref-table")}([${entries.map((entry) =>
+      `${helper(ctx, "ref-table-entry")}(${helper(ctx, "tag-id")}(${
+        JSON.stringify(entry.ref)
+      }), ${tagBlockExpr(ctx, entry.block)})`
+    ).join(", ")}])`,
+  };
+}
+
+function tagBlockValue(block: TagBlockFixture): Value {
+  return listVal(
+    stringVal(block.id),
+    stringVal(block.body),
+    listVal(...block.childRefs.map((ref) => stringVal(ref))),
+    stringVal(block.signature),
+  );
+}
+
+function tagBlockExpr(ctx: SampleCtx, block: TagBlockFixture): string {
+  return `${helper(ctx, "tag-block")}(${helper(ctx, "tag-id")}(${
+    JSON.stringify(block.id)
+  }), ${JSON.stringify(block.body)}, [${block.childRefs.map((ref) =>
+    `${helper(ctx, "tag-id")}(${JSON.stringify(ref)})`
+  ).join(", ")}], ${helper(ctx, "tag-signature")}(${
+    JSON.stringify(block.signature)
+  }))`;
+}
+
+function helper(ctx: SampleCtx, shenType: string): string {
+  const entry = ctx.tt.get(shenType);
+  if (entry === undefined) {
+    throw new Error(`fixture ${shenType}: type not found`);
+  }
+  return `${entry.importAlias || "shenguard"}.must${entry.tsName}`;
+}
+
+function byteListValue(bytes: readonly number[]): Value {
+  return listVal(...bytes.map((byte) => intVal(byte)));
+}
+
+function byteGuardExpr(ctx: SampleCtx, bytes: readonly number[]): string {
+  return `${helper(ctx, "bytes")}([${bytes.join(", ")}])`;
+}
+
 // --- Wrapper / constrained types ---
 //
 // Sample the underlying primitive, drop any candidate that fails the
@@ -173,9 +368,25 @@ function numberSamples(): Sample[] {
 // through unchanged — wrapping is invisible at eval time.
 
 function wrapperSamples(ctx: SampleCtx, entry: TypeEntry): Sample[] {
-  let primSamples = genSamples(ctx, entry.shenPrim);
+  const innerType = wrappedInnerType(entry);
+  if (innerType === "") {
+    throw new Error(`wrapped type "${entry.shenName}" has no inner type`);
+  }
+  let primSamples = genSamples(ctx, innerType);
+  if (entry.category === "constrained" && innerType === "string") {
+    primSamples = primSamples.concat(
+      CONSTRAINED_STRING_EXTRA_POOL.map((s) => ({
+        value: stringVal(s),
+        tsExpr: JSON.stringify(s),
+      })),
+    );
+  }
   if (entry.category === "constrained") {
-    primSamples = filterByConstraints(entry, primSamples);
+    primSamples = primSamples.concat(exactLengthSamples(ctx, entry, innerType));
+    primSamples = dedupeSamples(primSamples);
+  }
+  if (entry.category === "constrained") {
+    primSamples = filterByConstraints(ctx, entry, primSamples);
   }
   const helper = `${entry.importAlias || "shenguard"}.must${entry.tsName}`;
   return primSamples.map((ps) => ({
@@ -184,7 +395,139 @@ function wrapperSamples(ctx: SampleCtx, entry: TypeEntry): Sample[] {
   }));
 }
 
+function wrappedInnerType(entry: TypeEntry): string {
+  return entry.shenPrim !== "" ? entry.shenPrim : entry.aliasOf ?? "";
+}
+
+function exactLengthSamples(
+  ctx: SampleCtx,
+  entry: TypeEntry,
+  innerType: string,
+): Sample[] {
+  const lengths = exactLengthConstraints(entry);
+  const out: Sample[] = [];
+  for (const length of lengths) {
+    const sample = sampleForExactLength(ctx, innerType, length);
+    if (sample !== null) out.push(sample);
+  }
+  return out;
+}
+
+function exactLengthConstraints(entry: TypeEntry): number[] {
+  if (entry.varName === "") return [];
+  const out: number[] = [];
+  for (const raw of entry.verified) {
+    let expr: Sexpr;
+    try {
+      expr = parseSexpr(raw);
+    } catch {
+      continue;
+    }
+    if (headSym(expr) !== "=" || expr.kind !== "list" || expr.elems.length !== 3) {
+      continue;
+    }
+    const left = expr.elems[1]!;
+    const right = expr.elems[2]!;
+    const [leftInt, leftOk] = sexprIntVal(left);
+    const [rightInt, rightOk] = sexprIntVal(right);
+    if (leftOk && isLengthOfVar(right, entry.varName)) out.push(leftInt);
+    if (rightOk && isLengthOfVar(left, entry.varName)) out.push(rightInt);
+  }
+  return [...new Set(out)].filter((n) => n >= 0);
+}
+
+function isLengthOfVar(expr: Sexpr, varName: string): boolean {
+  if (headSym(expr) !== "length" || expr.kind !== "list" || expr.elems.length !== 2) {
+    return false;
+  }
+  return isVarRef(expr.elems[1]!, varName);
+}
+
+function isVarRef(expr: Sexpr, varName: string): boolean {
+  const [name, ok] = symName(expr);
+  if (ok) return name === varName;
+  if (headSym(expr) === "val" && expr.kind === "list" && expr.elems.length === 2) {
+    const [innerName, innerOk] = symName(expr.elems[1]!);
+    return innerOk && innerName === varName;
+  }
+  return false;
+}
+
+function sampleForExactLength(
+  ctx: SampleCtx,
+  shenType: string,
+  length: number,
+): Sample | null {
+  const elem = elemType(shenType);
+  if (elem !== "") {
+    return listOfLengthSample(ctx, elem, length);
+  }
+
+  const entry = ctx.tt.get(shenType.trim());
+  if (entry === undefined) return null;
+
+  if (entry.category === "alias") {
+    if (!entry.aliasOf) return null;
+    return sampleForExactLength(ctx, entry.aliasOf, length);
+  }
+
+  if (entry.category === "wrapper" || entry.category === "constrained") {
+    const innerType = wrappedInnerType(entry);
+    if (innerType === "") return null;
+    const inner = sampleForExactLength(ctx, innerType, length);
+    if (inner === null) return null;
+    if (
+      entry.category === "constrained" &&
+      filterByConstraints(ctx, entry, [inner]).length === 0
+    ) {
+      return null;
+    }
+    const helper = `${entry.importAlias || "shenguard"}.must${entry.tsName}`;
+    return {
+      value: inner.value,
+      tsExpr: `${helper}(${inner.tsExpr})`,
+    };
+  }
+
+  return null;
+}
+
+function listOfLengthSample(
+  ctx: SampleCtx,
+  elemShenType: string,
+  length: number,
+): Sample | null {
+  if (elemShenType.trim() === "number") {
+    const values = Array.from({ length }, (_, i) => intVal(i % 256));
+    const exprs = Array.from({ length }, (_, i) => String(i % 256));
+    return {
+      value: listVal(...values),
+      tsExpr: `[${exprs.join(", ")}]`,
+    };
+  }
+
+  const elemSamples = genSamples(ctx, elemShenType);
+  const first = elemSamples[0];
+  if (first === undefined) return null;
+  return {
+    value: listVal(...Array.from({ length }, () => first.value)),
+    tsExpr: `[${Array.from({ length }, () => first.tsExpr).join(", ")}]`,
+  };
+}
+
+function dedupeSamples(samples: Sample[]): Sample[] {
+  const seen = new Set<string>();
+  const out: Sample[] = [];
+  for (const sample of samples) {
+    if (seen.has(sample.tsExpr)) continue;
+    seen.add(sample.tsExpr);
+    out.push(sample);
+  }
+  return out;
+}
+
 function filterByConstraints(
+  ctx: SampleCtx,
   entry: TypeEntry,
   candidates: Sample[],
 ): Sample[] {
@@ -204,7 +547,7 @@ function filterByConstraints(
 
   const out: Sample[] = [];
   for (const s of candidates) {
-    const env = Env.empty().extend(entry.varName, s.value);
+    const env = (ctx.constraintEnv ?? Env.empty()).extend(entry.varName, s.value);
     let ok = true;
     for (const p of preds) {
       try {
@@ -274,14 +617,9 @@ function compositeSamples(ctx: SampleCtx, entry: TypeEntry): Sample[] {
 // invariant that keeps tricky elem samples (e.g. a fractional number
 // at index 4) from being silently excluded from every list.
 
-function listSamples(
-  tt: TypeTable,
-  elemShenType: string,
-  elemSamples: Sample[],
-): Sample[] {
-  const tsElemType = tsType(tt, elemShenType);
+function listSamples(elemSamples: Sample[]): Sample[] {
   const out: Sample[] = [
-    { value: listVal(), tsExpr: `[] as ${tsElemType}[]` },
+    { value: listVal(), tsExpr: `[]` },
   ];
 
   if (elemSamples.length === 0) return out;
