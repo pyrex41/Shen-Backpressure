@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"time"
 )
 
 func cmdDerive(args []string) {
@@ -93,6 +94,19 @@ Flags:
 	drifted := 0
 	goImplPkgs := map[string]bool{}
 	tsTestFiles := []string{}
+	// Per-spec discharge reports accumulated during the first pass;
+	// after `go test` runs we patch counter-examples in and emit the
+	// final aggregated project report.
+	var partialReports []*DischargeReport
+	// Temp report files we asked shen-derive to write — cleaned up
+	// at the end of this command.
+	var reportTempFiles []string
+	defer func() {
+		for _, p := range reportTempFiles {
+			os.Remove(p)
+		}
+	}()
+
 	for i, spec := range cfg.DeriveSpecs {
 		if err := validateDeriveSpec(spec); err != nil {
 			fmt.Fprintf(os.Stderr, "sb derive: spec[%d]: %v\n", i, err)
@@ -110,6 +124,25 @@ Flags:
 			runDir    string
 			tempGlob  string
 		)
+		// Per-spec discharge report tempfile. Aggregated into
+		// .sb/discharge_report.json after `go test` runs.
+		reportTmp, err := os.CreateTemp("", "sb-discharge-*.json")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "sb derive: report tempfile: %v\n", err)
+			os.Exit(1)
+		}
+		reportTmpPath := reportTmp.Name()
+		reportTmp.Close()
+		reportTempFiles = append(reportTempFiles, reportTmpPath)
+
+		// Resolve guard file (impl-relative) so shen-derive can write
+		// code_references into the report. Best-effort: if the file
+		// is missing the report just omits code_references.
+		absGuardFile := ""
+		if cfg.Output != "" {
+			absGuardFile, _ = filepath.Abs(cfg.Output)
+		}
+
 		switch spec.Lang {
 		case "go":
 			goImplPkgs[spec.ImplPkg] = true
@@ -121,6 +154,10 @@ Flags:
 				"--impl-pkg", spec.ImplPkg,
 				"--impl-func", spec.ImplFunc,
 				"--import", spec.GuardPkg,
+				"--report-out", reportTmpPath,
+			}
+			if absGuardFile != "" {
+				runArgs = append(runArgs, "--guard-file", absGuardFile)
 			}
 			runDir = absDeriveDir
 			tempGlob = "shen-derive-*.go"
@@ -154,6 +191,10 @@ Flags:
 			if err := runInDir(runDir, runCmd, runArgs...); err != nil {
 				fmt.Fprintf(os.Stderr, "sb derive: regen %s: %v\n", spec.Func, err)
 				os.Exit(1)
+			}
+			if pr, err := loadDischarge(reportTmpPath); err == nil && pr != nil {
+				normaliseDischargePaths(pr, spec)
+				partialReports = append(partialReports, pr)
 			}
 			continue
 		}
@@ -195,6 +236,14 @@ Flags:
 			diffOut, _ := exec.Command("diff", "-u", absOut, tmpPath).CombinedOutput()
 			fmt.Fprintln(os.Stderr, string(diffOut))
 		}
+
+		// Pick up the per-spec discharge report if shen-derive
+		// produced one. TS specs don't write reports yet — that's
+		// fine, the aggregated report just won't cover them.
+		if pr, err := loadDischarge(reportTmpPath); err == nil && pr != nil {
+			normaliseDischargePaths(pr, spec)
+			partialReports = append(partialReports, pr)
+		}
 	}
 
 	if drifted > 0 {
@@ -202,24 +251,42 @@ Flags:
 		os.Exit(1)
 	}
 
-	if *regen || *skipTest {
+	// In --regen mode we skip tests but still want to emit a
+	// discharge report so the user can inspect the structural
+	// classification before running gates.
+	if *regen {
+		if len(partialReports) > 0 {
+			finalizeDischargeReport(partialReports, cfg, nil)
+		}
+		return
+	}
+	if *skipTest {
+		if len(partialReports) > 0 {
+			finalizeDischargeReport(partialReports, cfg, nil)
+		}
 		return
 	}
 
-	// Second pass: run tests on the regenerated files.
-	// Go specs → `go test ./impl-pkg/...` per distinct package.
+	// Second pass: run tests on the regenerated files. We capture
+	// combined stdout/stderr so failures can be parsed into
+	// counter-examples for the discharge report.
 	goPkgs := make([]string, 0, len(goImplPkgs))
 	for p := range goImplPkgs {
 		goPkgs = append(goPkgs, p+"/...")
 	}
 	sort.Strings(goPkgs)
+	var combinedTestOutput bytes.Buffer
+	testFailed := false
 	for _, p := range goPkgs {
 		if *verbose {
-			printDeriveCommand("", "go", []string{"test", p})
+			printDeriveCommand("", "go", []string{"test", "-v", p})
 		}
-		if err := runInDir("", "go", "test", p); err != nil {
-			fmt.Fprintf(os.Stderr, "sb derive: go test %s failed: %v\n", p, err)
-			os.Exit(1)
+		out, err := runCaptured("", "go", "test", "-v", p)
+		combinedTestOutput.Write(out)
+		// Echo to user so they see the same output as before.
+		os.Stderr.Write(out)
+		if err != nil {
+			testFailed = true
 		}
 	}
 	// TS specs → `node --import tsx --test <outfile>` per generated file.
@@ -231,9 +298,59 @@ Flags:
 		}
 		if err := runInDir("", "node", tsArgs...); err != nil {
 			fmt.Fprintf(os.Stderr, "sb derive: node --test %s failed: %v\n", f, err)
-			os.Exit(1)
+			testFailed = true
 		}
 	}
+
+	// Emit the project-level discharge report whether tests passed
+	// or failed; the report's whole point is to surface failures
+	// alongside successes.
+	if len(partialReports) > 0 {
+		failures := parseGoTestFailures(combinedTestOutput.String())
+		finalizeDischargeReport(partialReports, cfg, failures)
+	}
+
+	if testFailed {
+		os.Exit(1)
+	}
+}
+
+// finalizeDischargeReport merges per-spec partial reports, fills in
+// project-level metadata (git commit, history-derived
+// `discharged_since_commit`), patches in counter-examples parsed from
+// `go test` output, writes the canonical .sb/discharge_report.json,
+// and rotates a copy into .sb/history/.
+func finalizeDischargeReport(parts []*DischargeReport, cfg *Config, failures []parsedFailure) {
+	r := mergeDischargeReports(parts)
+	r.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
+	if r.Tools.SBVersion == "" {
+		r.Tools.SBVersion = version
+	}
+	fillImplGit(r)
+	if len(failures) > 0 {
+		applyCounterExamples(r, failures, cfg.DeriveSpecs)
+	}
+	computeDischargedSinceCommit(r)
+	if err := writeDischarge(DischargeReportPath, r); err != nil {
+		fmt.Fprintf(os.Stderr, "sb derive: write discharge report: %v\n", err)
+		return
+	}
+	if err := rotateDischargeHistory(r, DischargeReportPath); err != nil {
+		fmt.Fprintf(os.Stderr, "sb derive: rotate discharge history: %v\n", err)
+	}
+	fmt.Fprintf(os.Stderr, "sb derive: discharge report → %s (%d/%d rules discharged)\n",
+		DischargeReportPath, r.Summary.RulesDischarged, r.Summary.RuleCount)
+}
+
+// runCaptured runs a command and returns its combined stdout/stderr
+// alongside the run error. The error mirrors exec.Cmd.Run's
+// semantics.
+func runCaptured(dir, name string, args ...string) ([]byte, error) {
+	cmd := exec.Command(name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	return cmd.CombinedOutput()
 }
 
 // printDeriveCommand prints a shell-pastable representation of the
