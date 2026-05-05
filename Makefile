@@ -19,10 +19,8 @@ help:
 # `make check-skilldata` enforces equality in CI.
 sync-skilldata:
 	rm -rf cmd/sb/skilldata
-	mkdir -p cmd/sb/skilldata/commands cmd/sb/skilldata/skills/shen-backpressure
-	cp sb/AGENT_PROMPT.md cmd/sb/skilldata/
-	cp sb/skills/shen-backpressure/SKILL.md cmd/sb/skilldata/skills/shen-backpressure/
-	cp sb/commands/*.md cmd/sb/skilldata/commands/
+	mkdir -p cmd/sb/skilldata
+	cp -R sb/. cmd/sb/skilldata/
 
 check-skilldata:
 	@diff -qr sb/ cmd/sb/skilldata/ && echo "skilldata in sync" || \
