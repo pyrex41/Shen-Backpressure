@@ -20,9 +20,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/core"
+	"github.com/pyrex41/Shen-Backpressure/shen-derive/report"
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/specfile"
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/verify"
 )
@@ -210,6 +213,8 @@ func cmdVerify(args []string) {
 	maxCases := fs.Int("max-cases", 50, "maximum number of test cases")
 	seed := fs.Int64("seed", 0, "RNG seed for random sampling (0 = deterministic boundary values only)")
 	randomDraws := fs.Int("random-draws", 0, "number of random primitive draws per type when --seed != 0 (default 8)")
+	reportOut := fs.String("report-out", "", "if non-empty, write a per-spec discharge report (JSON) to this path")
+	guardFile := fs.String("guard-file", "", "path to shengen-emitted guards file (used to populate code_references in the discharge report)")
 
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: shen-derive verify <spec.shen> [flags]")
@@ -282,11 +287,42 @@ func cmdVerify(args []string) {
 
 	if *out == "" {
 		fmt.Print(source)
-		return
+	} else {
+		if err := os.WriteFile(*out, []byte(source), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "write %s: %v\n", *out, err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "wrote %s (%d cases)\n", *out, len(h.Cases))
 	}
-	if err := os.WriteFile(*out, []byte(source), 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "write %s: %v\n", *out, err)
-		os.Exit(1)
+
+	if *reportOut != "" {
+		seedLabel := "deterministic-default"
+		if *seed != 0 {
+			seedLabel = strconv.FormatInt(*seed, 10)
+		}
+		dischargeRules, err := report.ClassifyDatatypes(sf, *guardFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "discharge classify: %v\n", err)
+			os.Exit(1)
+		}
+		dischargeRules = append(dischargeRules,
+			report.ClassifyDefine(specPath, def, len(h.Cases), seedLabel, *implFunc),
+		)
+		rep, err := report.Build(report.BuildOptions{
+			SpecPath:          specPath,
+			Now:               time.Now().UTC(),
+			TargetLanguage:    "go",
+			ShenDeriveVersion: version,
+			Rules:             dischargeRules,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "discharge build: %v\n", err)
+			os.Exit(1)
+		}
+		if err := rep.WriteFile(*reportOut); err != nil {
+			fmt.Fprintf(os.Stderr, "discharge write: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "wrote discharge report %s\n", *reportOut)
 	}
-	fmt.Fprintf(os.Stderr, "wrote %s (%d cases)\n", *out, len(h.Cases))
 }
