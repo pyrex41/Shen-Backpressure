@@ -22,34 +22,39 @@ plausible-looking ways, watch which gate catches each bug.
 ## Prerequisites
 
 - Go 1.24+
-- `bin/sb` and `bin/shengen` from the repo root (`make build-all`)
-- A Shen runtime for Gate 4: `brew tap Shen-Language/homebrew-shen
-  && brew install shen-sbcl`
-  (the demo also runs without it; Gate 4 will report missing
-  runtime, the rest pass)
+- `bin/sb` from the repo root (`make build-sb`). The example's
+  `bin/shengen-codegen.sh` and `bin/shenguard-audit.sh` will build
+  `bin/shengen` on first invocation by locating
+  `../../cmd/shengen/main.go`.
+- Optional: a Shen runtime for Gate 4
+  (`brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`).
+  Without it Gate 4 reports a missing runtime and fails; the other
+  five gates pass.
 
 ## Five-minute walkthrough
 
 ```bash
 # From the repo root
-make build-all
+make build-sb
 cd examples/payment
 
 # 1. Run all gates against the current (correct) implementation.
 sb gates
 ```
 
-Expected: every gate passes (the canonical case).
+Expected output. Without a Shen runtime installed, Gate 4
+(`shen-check`) fails with a missing-runtime message and the rest
+pass — 5/6. With `shen-sbcl` installed, all six pass.
 
 ```
-PASS  shengen        ~250ms
-PASS  test           ~150ms
-PASS  build          ~250ms
-PASS  shen-check     <runtime-dependent>
-PASS  tcb-audit      ~50ms
-PASS  shen-derive    ~200ms
+PASS  shengen        ~90ms
+PASS  test           ~120ms
+PASS  build          ~210ms
+FAIL  shen-check     ~2ms      ← passes once you install shen-sbcl
+PASS  tcb-audit      ~15ms
+PASS  shen-derive    ~160ms
 
-6/6 gates passed
+5/6 gates passed   (6/6 with shen-sbcl)
 ```
 
 The payment example uses the legacy five-gate shape plus the
