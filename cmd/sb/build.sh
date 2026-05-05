@@ -2,7 +2,17 @@
 set -euo pipefail
 
 # Build sb CLI with embedded skill/command data.
-# Copies from sb/ (source of truth) into skilldata/ for go:embed.
+#
+# Skill bundle dedup pattern:
+#   sb/                       canonical source of truth (edited directly)
+#   cmd/sb/skilldata/         checked-in mirror, rebuilt from sb/ before
+#                             every binary build (here, and via
+#                             `make sync-skilldata`)
+#
+# The mirror is kept under git so a fresh clone embeds the right bundle
+# without first running `make`. Drift between the two is caught by
+# `make check-skilldata` in CI; the canonical fix is always to edit sb/
+# and re-run sync.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"

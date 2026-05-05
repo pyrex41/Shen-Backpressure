@@ -13,10 +13,16 @@ help:
 	@echo "  build-all          Sync skilldata + build all supported binaries"
 
 # The sb CLI embeds the SKM skill bundle via //go:embed skilldata/*.
-# The canonical copy lives at sb/; cmd/sb/skilldata/ is a mirror rebuilt from it.
-# Always run sync-skilldata before build-sb if you edited anything under sb/.
+# Canonical source: sb/. Mirror (checked in for offline-friendly fresh
+# clones): cmd/sb/skilldata/. Edits to the bundle land in sb/; the mirror
+# is rebuilt before every binary build by build-sb (and by cmd/sb/build.sh).
+# `make check-skilldata` enforces equality in CI.
 sync-skilldata:
-	rsync -a --delete sb/ cmd/sb/skilldata/
+	rm -rf cmd/sb/skilldata
+	mkdir -p cmd/sb/skilldata/commands cmd/sb/skilldata/skills/shen-backpressure
+	cp sb/AGENT_PROMPT.md cmd/sb/skilldata/
+	cp sb/skills/shen-backpressure/SKILL.md cmd/sb/skilldata/skills/shen-backpressure/
+	cp sb/commands/*.md cmd/sb/skilldata/commands/
 
 check-skilldata:
 	@diff -qr sb/ cmd/sb/skilldata/ && echo "skilldata in sync" || \
