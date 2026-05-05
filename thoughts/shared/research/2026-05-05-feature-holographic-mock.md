@@ -1,3 +1,24 @@
+---
+date: 2026-05-05T19:00:00Z
+researcher: claude
+git_commit: 399c00a
+branch: claude/contract-shen-backpressure-kZwSZ
+repository: pyrex41/Shen-Backpressure
+topic: "Feature design prompt — Holographic Mock"
+tags: [research, feature-design, design-prompt, holographic-mock]
+status: design-prompt
+last_updated: 2026-05-05
+last_updated_by: claude
+---
+
+> Design prompt landed on main in commit `12ccd41` (`docs: add
+> feature idea design prompts`). Originally lived at
+> `feature_ideas/04-holographic-mock.md`; moved into
+> `thoughts/shared/research/` during the post-contraction cleanup so
+> design-stage material lives alongside the rest of the project's
+> research record. This file is a prompt for a future implementation,
+> not an implementation.
+
 # Feature Design Prompt: Holographic Mock
 
 You are designing a deep-tech demo and possible product feature for Shen-Backpressure: a Shen specification that acts as a stateful test double for an external system. This is a design task, not an implementation task. Produce an implementation-ready design document, but do not edit code.
