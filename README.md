@@ -143,10 +143,11 @@ post-hoc record of how this layering came to be.
 For deeper reference material — guard-type pattern catalog, Shen→Go
 side-by-side, design-decision Q&A, ASCII pipeline — see
 [`docs/REFERENCE.md`](docs/REFERENCE.md). For in-flight work, see
-[`notes/finish-line-roadmap.md`](notes/finish-line-roadmap.md), and
-the design prompts under [`feature_ideas/`](feature_ideas/) for
-mixed-evidence reports, differential verification, counterexample
-traces, holographic mocks, and compliance audit trails.
+[`thoughts/shared/research/2026-05-05-tag-resolver-finish-line.md`](thoughts/shared/research/2026-05-05-tag-resolver-finish-line.md)
+and the matching open questions, and the design prompts under
+`thoughts/shared/research/2026-05-05-feature-*.md` for mixed-evidence
+reports, differential verification, counterexample traces,
+holographic mocks, and compliance audit trails.
 
 ## Install
 
@@ -211,9 +212,9 @@ sb/                      Canonical SKM bundle (commands, skill, AGENT_PROMPT)
 cmd/sb/skilldata/        Build-time mirror of sb/, embedded into the binary
 docs/REFERENCE.md        Pattern catalog, side-by-sides, design-decision Q&A
 examples/                payment/, multi-tenant-api/, shen-web-tools/, .archive/
-feature_ideas/           Design prompts for mixed-evidence reports, differential verification, …
-notes/                   Finish-line roadmap and open questions
-thoughts/                Research notes, reviews, handoffs
+thoughts/                Research notes, reviews, handoffs (incl. tag-resolver
+                         finish line + feature design prompts under
+                         shared/research/2026-05-05-*)
 ```
 
 ## Shen Runtime (Gate 4)
