@@ -6,6 +6,42 @@ pkg  = "shenguard"
 spec   = "specs/core.shen"
 output = "internal/shenguard/guards_gen.go"
 
+[engine]
+relaxed = false
+
+# Gate topology — declared explicitly via the [[gates]] array of
+# tables (Wave-1 manifest format). Same five gates the engine would
+# synthesise from convention defaults; spelling them out here
+# dogfoods the recommended format and lets future projects diverge
+# (different test runner, an extra lint gate, a parallel group)
+# without touching the engine. The [[derive.specs]] block at the
+# bottom auto-appends a sixth shen-derive gate.
+
+[[gates]]
+name = "shengen"
+kind = "command"
+run  = "./bin/shengen-codegen.sh"
+
+[[gates]]
+name = "test"
+kind = "command"
+run  = "go test ./..."
+
+[[gates]]
+name = "build"
+kind = "command"
+run  = "go build ./..."
+
+[[gates]]
+name = "shen-check"
+kind = "command"
+run  = "./bin/shen-check.sh"
+
+[[gates]]
+name = "tcb-audit"
+kind = "command"
+run  = "./bin/shenguard-audit.sh"
+
 # Gate 6 — spec-equivalence verification via shen-derive.
 #
 # For each [[derive.specs]] entry, `sb derive` regenerates the

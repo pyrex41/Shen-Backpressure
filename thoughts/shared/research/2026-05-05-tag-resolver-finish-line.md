@@ -1,4 +1,24 @@
+---
+date: 2026-05-05T19:00:00Z
+researcher: claude
+git_commit: 399c00a
+branch: claude/contract-shen-backpressure-kZwSZ
+repository: pyrex41/Shen-Backpressure
+topic: "Tag-block resolver finish line — post-hoc record"
+tags: [research, shen-web-tools, tag-resolver, shen-derive-ts, finish-line]
+status: complete
+last_updated: 2026-05-05
+last_updated_by: claude
+---
+
 # Finish-Line Roadmap
+
+> Post-hoc record of the tag-block resolver phase that shipped on
+> main in commit `c565543` (`shen-web-tools: prove tag resolver
+> outcomes`). Originally lived at `notes/finish-line-roadmap.md`;
+> moved into `thoughts/shared/research/` during the post-contraction
+> cleanup. Companion memo:
+> [`2026-05-05-tag-resolver-open-questions.md`](2026-05-05-tag-resolver-open-questions.md).
 
 ## Finish Line
 
@@ -33,7 +53,7 @@ The contract is represented in Shen datatypes, generated TypeScript guards, a pr
 3. Renderer contract integration: all outcomes map through a single renderer-facing state function.
 4. Spec/derive retag: the example derive gate now targets `resolve-tag-block-children`.
 5. Small product fixture set: signed, unsigned, and partial rows are prepended to generated cases.
-6. Notes cleanup: this file and `notes/open-questions.md` describe the shipped finish line.
+6. Notes cleanup: this file and [`2026-05-05-tag-resolver-open-questions.md`](2026-05-05-tag-resolver-open-questions.md) describe the shipped finish line.
 
 ## Non-Goals
 
