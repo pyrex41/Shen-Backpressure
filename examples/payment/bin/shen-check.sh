@@ -1,68 +1,39 @@
 #!/bin/bash
-# Wrapper to run Shen type check and exit cleanly.
-# shen-go loops on "empty stream" after EOF instead of exiting,
-# so we scan output and kill the process once we have our answer.
+set -euo pipefail
 
-SHEN_BIN="${1:-./bin/shen}"
-SPEC_FILE="${2:-specs/core.shen}"
+# shen-check.sh — Gate 4: Verify spec internal consistency via Shen tc+.
+# Usage: ./bin/shen-check.sh [spec-path]
+#
+# Backend selection (in priority order):
+#   1. $SHEN env var          — explicit path to any Shen binary
+#   2. shen-sbcl on PATH      — shen-cl (SBCL), fastest startup
+#   3. shen-scheme on PATH    — shen-scheme (Chez), fastest compute
+#   4. shen on PATH            — any Shen port
+#
+# All Shen ports share the same eval CLI: shen eval -e '...' -l file
 
-if [ ! -f "$SHEN_BIN" ]; then
-    echo "ERROR: shen binary not found at $SHEN_BIN"
+SPEC="${1:-specs/core.shen}"
+
+if [ ! -f "$SPEC" ]; then
+    echo "ERROR: spec file not found at $SPEC"
     exit 1
 fi
 
-if [ ! -f "$SPEC_FILE" ]; then
-    echo "ERROR: spec file not found at $SPEC_FILE"
+# Find a Shen backend
+if [ -n "${SHEN:-}" ]; then
+    : # explicit override
+elif command -v shen-sbcl >/dev/null 2>&1; then
+    SHEN=shen-sbcl
+elif command -v shen-scheme >/dev/null 2>&1; then
+    SHEN=shen-scheme
+elif command -v shen >/dev/null 2>&1; then
+    SHEN=shen
+else
+    echo "ERROR: no Shen runtime found. Install shen-sbcl or shen-scheme, or set \$SHEN."
+    echo "  brew tap Shen-Language/homebrew-shen && brew install shen-sbcl"
     exit 1
 fi
 
-# Start shen in background, reading from a pipe
-TMPOUT=$(mktemp)
-printf '(load "%s")\n(tc +)\n' "$SPEC_FILE" | "$SHEN_BIN" > "$TMPOUT" 2>&1 &
-SHEN_PID=$!
-
-# Wait for output, checking periodically
-RESULT="unknown"
-for i in $(seq 1 20); do
-    sleep 0.5
-
-    if grep -q "type error" "$TMPOUT" 2>/dev/null; then
-        RESULT="type_error"
-        break
-    fi
-
-    # Look for "true" anywhere (shen outputs "(1-) true")
-    if grep -q "true" "$TMPOUT" 2>/dev/null; then
-        RESULT="pass"
-        break
-    fi
-
-    # Check if shen already died
-    if ! kill -0 "$SHEN_PID" 2>/dev/null; then
-        break
-    fi
-done
-
-# Kill shen (it loops forever otherwise)
-kill "$SHEN_PID" 2>/dev/null
-wait "$SHEN_PID" 2>/dev/null
-
-# Show relevant output (filter out empty stream noise)
-grep -v "empty stream" "$TMPOUT" | head -20
-rm -f "$TMPOUT"
-
-# Report result
-case "$RESULT" in
-    pass)
-        echo "RESULT: PASS"
-        exit 0
-        ;;
-    type_error)
-        echo "RESULT: FAIL (type error detected)"
-        exit 1
-        ;;
-    *)
-        echo "RESULT: FAIL (tc+ did not return true within 10s)"
-        exit 1
-        ;;
-esac
+echo "Gate 4: Shen tc+ — checking $SPEC (backend: $SHEN)"
+timeout 30 "$SHEN" eval -e "(tc +)" -l "$SPEC" 2>&1 || { echo "RESULT: FAIL"; exit 1; }
+echo "RESULT: PASS"

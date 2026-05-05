@@ -73,22 +73,23 @@ Out of scope for this contraction; flagged for the next pass:
 
 - The two retained example manifests (`examples/payment/sb.toml`,
   `examples/shen-web-tools/sb.toml`) still use the legacy
-  `[commands]` shape rather than `[[gates]]`. Adding a `[[gates]]`
-  block in at least one would dogfood the new format.
+  `[commands]` shape rather than `[[gates]]`. **Resolved in
+  post-contraction follow-up commit `e8af1e2`** — both manifests now
+  declare gates explicitly via `[[gates]]`, with `sb gates` output
+  identical before and after.
 - `examples/multi-tenant-api/` has no `sb.toml` and no `README.md`.
-  The 2026-04-16 readiness doc treated it as Tier-A on the strength
-  of `demo.md` and `transcript/`; a thin README that points at those
-  artifacts would help first-time readers. Same for adding the
-  helper scripts so its shengen and tcb-audit gates can pass.
+  **README added in post-contraction follow-up commit `bcba4eb`.**
+  Whether to add an `sb.toml` is a separate decision (the example
+  currently relies on the engine's default-five-gate convention) and
+  is left open.
 - `examples/multi-tenant-api/` and `examples/shen-web-tools/` could
   receive the same `bin/shengen-codegen.sh` /
   `bin/shenguard-audit.sh` treatment payment got, raising their
-  fresh-clone gate counts. Out of scope here because the payment
-  fix was the blocker the review flagged; the others are
-  proportionally lower-cost work.
+  fresh-clone gate counts. Still open. The payment fix proved the
+  pattern; rolling it out is straightforward but unscoped here.
 - The Wave-1 memo notes the duplicated decode helpers between
   `tomlConfigNew` and `tomlConfigLegacy`. Collapsing the two parsers
-  is mechanical and small.
+  is mechanical and small. Still open.
 
 None of the above is required for the contraction itself to be
 considered done.

@@ -39,7 +39,9 @@ make build-sb
 cd examples/payment
 
 # 1. Run all gates against the current (correct) implementation.
-sb gates
+#    `make build-sb` writes the binary to bin/sb at the repo root,
+#    not on $PATH; reference it explicitly from the example's cwd.
+../../bin/sb gates
 ```
 
 Expected output. Without a Shen runtime installed, Gate 4
@@ -57,8 +59,9 @@ PASS  shen-derive    ~160ms
 5/6 gates passed   (6/6 with shen-sbcl)
 ```
 
-The payment example uses the legacy five-gate shape plus the
-auto-appended `shen-derive` gate (see `sb.toml`'s `[[derive.specs]]`).
+The payment example dogfoods the Wave-1 `[[gates]]` manifest format;
+`sb.toml` declares the five gates explicitly, and the auto-appended
+`shen-derive` gate (driven by `[[derive.specs]]`) makes six total.
 
 ```bash
 # 2. Watch the gates fail on three deliberately-bad implementations.

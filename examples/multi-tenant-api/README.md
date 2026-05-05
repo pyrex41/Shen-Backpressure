@@ -52,7 +52,9 @@ expiry, tampering, and middleware.
 
 ```bash
 # Run the gate set the way an agent loop would.
-sb gates
+# `make build-sb` writes the binary to bin/sb at the repo root,
+# not on $PATH; reference it explicitly from the example's cwd.
+../../bin/sb gates
 ```
 
 Expected output. Without `shen-sbcl` installed, Gate 4 (`shen-check`)
