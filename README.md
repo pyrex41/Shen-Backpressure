@@ -60,6 +60,39 @@ Gate topology is declared in `sb.toml`. The legacy fixed five-gate
 shape still works; the new `[[gates]]` array of tables lets you
 declare a custom gate list with optional parallel groups.
 
+## Discharge Reports — Audit-Grade Verification Artifacts
+
+Every successful gate run also writes `.sb/discharge_report.json`, a
+structured artifact that distinguishes how each premise of each Shen
+rule was discharged: statically by the guard types, by runtime
+sampling against the Shen oracle, or unproven. Failed premises ship
+with concrete counter-examples — case ID, spec output, impl output,
+and a ready-to-paste `go test -run …` reproduction command.
+
+The artifact is **dual-purpose**:
+
+- **Agent-loop backpressure.** `sb context` injects a five-second
+  Markdown summary into the harness prompt. Failed cases steer the
+  next iteration without scraping log output.
+- **Audit-grade verification artifact.** `sb audit-report` renders a
+  long-form Markdown document a security reviewer or compliance
+  auditor can read end-to-end without prior knowledge of
+  Shen-Backpressure: spec hash, git commit, tool versions, per-rule
+  premise tables, history, and a "How to read this report"
+  appendix.
+
+The schema is locked at `schema_version: 1`
+([design memo](thoughts/shared/research/2026-05-05-discharge-report-schema.md))
+and time-stamped copies accumulate under `.sb/history/` so claims
+like "this invariant has been verified at every commit since X" have
+evidence on disk, not memory.
+
+What this **does not** mean: not signed, not third-party verified,
+not SOC-2 certified. The artifact is the foundation that audit and
+compliance workflows can build on — not certification itself. The
+schema reserves room for signature fields; v0 always emits
+`signature: null`.
+
 ## Quick Start
 
 ```bash

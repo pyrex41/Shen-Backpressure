@@ -87,6 +87,54 @@ The script restores the original `processable.go` on exit.
 bug is, what the spec says, why each test pool sample was chosen.
 Read it after watching the demo run.
 
+```bash
+# 3. Inspect the discharge report — Wave 4's audit-grade artifact.
+cat .sb/discharge_report.json | jq '.summary'
+../../bin/sb audit-report | head -40
+```
+
+`sb derive` (and any successful `sb gates` run) writes
+`.sb/discharge_report.json` next to the gate output. The JSON
+distinguishes how each premise of each Shen rule was discharged:
+statically by the guard types, by runtime sampling against the
+Shen oracle, or unproven. Expected `summary` against the canonical
+implementation:
+
+```json
+{
+  "rule_count": 7,
+  "rules_discharged": 7,
+  "rules_violated": 0,
+  "rules_unproven": 0,
+  "premises_total": 14,
+  "premises_static": 13,
+  "premises_runtime_sampled": 1,
+  "premises_unproven": 0
+}
+```
+
+Re-run step 2's demo (`./demo-shen-derive/run.sh`) and the report
+flips:
+
+```text
+sb derive: discharge report → .sb/discharge_report.json
+           (6/7 rules discharged)
+```
+
+The `processable` rule now carries one or more `counter_examples`
+with the case ID, the spec output, the impl output, and a
+ready-to-paste `go test -run …` reproduction command. `sb context`
+renders a five-second skim summary in the agent prompt;
+`sb audit-report` produces a long-form Markdown rendering meant for
+a human auditor or security reviewer who has never seen the
+project.
+
+Time-stamped copies of every report accumulate under `.sb/history/`,
+which feeds the schema's `discharged_since_commit` field (the
+audit-friendly answer to "since when has this invariant been
+verified?"). Both `.sb/discharge_report.json` and `.sb/history/`
+are gitignored — the artifact is local audit state, not source.
+
 ## The story
 
 `specs/core.shen` is the source of truth. Two relevant pieces:
@@ -148,6 +196,8 @@ sb.toml                            Manifest: paths, derive specs, gate config
 Makefile                           Convenience targets — wraps the underlying tools
 demo-shen-derive/                  Runnable bug-finding demo + DEMO.md narrative
 reference/                         Same five datatypes in TS, Rust, Python
+.sb/discharge_report.json          Generated each run — Wave 4 discharge report (gitignored)
+.sb/history/                       Time-stamped copies feeding `discharged_since_commit` (gitignored)
 ```
 
 ## Tool-level entry points
@@ -159,6 +209,8 @@ reference/                         Same five datatypes in TS, Rust, Python
 | Refresh the committed shen-derive test (after spec/impl change) | `sb derive --regen` |
 | See the engine's view of this project | `sb context --format markdown` |
 | Inspect the manifest | open `sb.toml` |
+| Skim discharge state for the agent loop | `sb context` (Discharge Report section) |
+| Render audit-grade discharge report for a reviewer | `sb audit-report` |
 
 ## Reference outputs
 
