@@ -11,16 +11,20 @@ import {
   Env,
   builtinFn,
   evalExpr,
+  evalExprAsync,
   type Value,
 } from "../core/eval.ts";
 import { match } from "../core/match.ts";
 import { parseSexpr } from "../core/sexpr-parse.ts";
+import { headSym, symName, type Sexpr } from "../core/sexpr.ts";
 import type { Clause, Define, SpecFile } from "../specfile/parse.ts";
 import {
   elemType,
+  type TypeEntry,
   type TypeTable,
 } from "../specfile/typetable.ts";
 import {
+  fixtureRowsForDefine,
   genSamples,
   SeededRng,
   type Sample,
@@ -34,6 +38,8 @@ export type HarnessConfig = {
   tt: TypeTable;
   /** Every define from the spec (for mutual recursion in the eval env). */
   allDefines: Define[];
+  /** External functions made available to spec evaluation. */
+  externs?: ExternBinding[];
   /** The define to be verified (must exist in spec.defines). */
   funcName: string;
   /** Relative TS path for the implementation module, e.g. "./processable". */
@@ -49,6 +55,15 @@ export type HarnessConfig = {
   randomDraws: number;
 };
 
+export type ExternAdapter = (...args: Value[]) => Value | Promise<Value>;
+
+export type ExternBinding = {
+  name: string;
+  arity: number;
+  fn: ExternAdapter;
+  async?: boolean;
+};
+
 export type Case = {
   args: Value[];
   argsTs: string[];
@@ -60,6 +75,7 @@ export type Case = {
 export type Harness = {
   cfg: HarnessConfig;
   cases: Case[];
+  asyncTests?: boolean;
 };
 
 // --- BuildHarness ---
@@ -83,9 +99,15 @@ export function buildHarness(cfg: HarnessConfig): Harness {
     throw new Error(`spec ${def.name}: no clauses`);
   }
 
+  // Shared base env with field accessors, externs, and all defines
+  // (envHolder trick). Build this before sampling so constrained-type
+  // predicates can call helper defines.
+  const baseEnv = buildBaseEnv(cfg.tt, cfg.allDefines, cfg.externs ?? []);
+
   // Sampling context. Zero seed → deterministic boundary values only.
   const ctx: SampleCtx = {
     tt: cfg.tt,
+    constraintEnv: baseEnv,
     rand: cfg.seed !== 0 ? new SeededRng(cfg.seed) : null,
     randomDraws: cfg.seed !== 0
       ? (cfg.randomDraws > 0 ? cfg.randomDraws : 8)
@@ -104,10 +126,7 @@ export function buildHarness(cfg: HarnessConfig): Harness {
   });
 
   const maxCases = cfg.maxCases > 0 ? cfg.maxCases : 50;
-  const combos = cartesian(paramSamples, maxCases);
-
-  // Shared base env with field accessors and all defines (envHolder trick).
-  const baseEnv = buildBaseEnv(cfg.tt, cfg.allDefines);
+  const combos = sampledCombos(ctx, def, maxCases, paramSamples);
 
   const cases: Case[] = [];
   for (let idx = 0; idx < combos.length; idx++) {
@@ -130,10 +149,94 @@ export function buildHarness(cfg: HarnessConfig): Harness {
     cases.push({ args: argVals, argsTs, expected, expectedTs, label });
   }
 
-  return { cfg, cases };
+  return { cfg, cases, asyncTests: (cfg.externs ?? []).some((ext) => ext.async === true) };
+}
+
+export async function buildHarnessAsync(cfg: HarnessConfig): Promise<Harness> {
+  // Validate target define.
+  const def = cfg.spec.defines.find((d) => d.name === cfg.funcName);
+  if (def === undefined) {
+    throw new Error(`buildHarness: define ${cfg.funcName} not found in spec`);
+  }
+  if (def.typeSig.paramTypes.length === 0) {
+    throw new Error(
+      `spec ${def.name}: verification requires a type signature ` +
+        `({...}) — the sampler has no way to generate inputs otherwise`,
+    );
+  }
+  if (def.paramNames.length !== def.typeSig.paramTypes.length) {
+    throw new Error(`spec ${def.name}: param count mismatch`);
+  }
+  if (def.clauses.length === 0) {
+    throw new Error(`spec ${def.name}: no clauses`);
+  }
+
+  const baseEnv = buildBaseEnvAsync(cfg.tt, cfg.allDefines, cfg.externs ?? []);
+  const sampleEnv = buildBaseEnv(cfg.tt, cfg.allDefines, cfg.externs ?? []);
+
+  const ctx: SampleCtx = {
+    tt: cfg.tt,
+    constraintEnv: sampleEnv,
+    rand: cfg.seed !== 0 ? new SeededRng(cfg.seed) : null,
+    randomDraws: cfg.seed !== 0
+      ? (cfg.randomDraws > 0 ? cfg.randomDraws : 8)
+      : 0,
+  };
+
+  const paramSamples: Sample[][] = def.typeSig.paramTypes.map((pt, i) => {
+    try {
+      return genSamples(ctx, pt);
+    } catch (e) {
+      throw new Error(
+        `samples for param ${def.paramNames[i]}: ${(e as Error).message}`,
+      );
+    }
+  });
+
+  const maxCases = cfg.maxCases > 0 ? cfg.maxCases : 50;
+  const combos = sampledCombos(ctx, def, maxCases, paramSamples);
+
+  const cases: Case[] = [];
+  for (let idx = 0; idx < combos.length; idx++) {
+    const combo = combos[idx]!;
+    const argVals: Value[] = combo.map((s) => s.value);
+    const argsTs: string[] = combo.map((s) => s.tsExpr);
+    let expected: Value;
+    try {
+      expected = await evalDefineAsync(def, argVals, baseEnv);
+    } catch (e) {
+      throw new Error(`case ${idx}: eval spec: ${(e as Error).message}`);
+    }
+    let expectedTs: string;
+    try {
+      expectedTs = tsLiteralFor(expected, def.typeSig.returnType, cfg.tt);
+    } catch (e) {
+      throw new Error(`case ${idx}: literal: ${(e as Error).message}`);
+    }
+    const label = `case_${idx.toString().padStart(2, "0")}`;
+    cases.push({ args: argVals, argsTs, expected, expectedTs, label });
+  }
+
+  return { cfg, cases, asyncTests: (cfg.externs ?? []).some((ext) => ext.async === true) };
 }
 
 // --- Cartesian product (odometer loop ported from Go) ---
+
+function sampledCombos(
+  ctx: SampleCtx,
+  def: Define,
+  maxCases: number,
+  paramSamples: Sample[][],
+): Sample[][] {
+  const fixtureRows = fixtureRowsForDefine(
+    ctx,
+    def.name,
+    def.typeSig.paramTypes,
+  ).slice(0, maxCases);
+  const remaining = maxCases - fixtureRows.length;
+  if (remaining <= 0) return fixtureRows;
+  return fixtureRows.concat(cartesian(paramSamples, remaining));
+}
 
 function cartesian(paramSamples: Sample[][], maxCases: number): Sample[][] {
   if (paramSamples.length === 0) return [];
@@ -195,6 +298,42 @@ export function evalDefine(
   );
 }
 
+export async function evalDefineAsync(
+  def: Define,
+  vals: Value[],
+  base: Env,
+): Promise<Value> {
+  if (def.clauses.length === 0) {
+    throw new Error(`define ${def.name}: no clauses`);
+  }
+  for (let i = 0; i < def.clauses.length; i++) {
+    const cl = def.clauses[i]!;
+    if (cl.patterns.length !== vals.length) {
+      throw new Error(
+        `define ${def.name} clause ${i}: ${cl.patterns.length} patterns vs ${vals.length} args`,
+      );
+    }
+    const res = bindClausePatterns(base, cl, vals);
+    if (res === null) continue;
+    const env = res;
+    if (cl.guard !== null) {
+      const guardExpr = parseSexpr(cl.guard);
+      const g = await evalExprAsync(env, guardExpr);
+      if (g.kind !== "bool") {
+        throw new Error(
+          `define ${def.name} clause ${i}: guard returned ${g.kind}, expected bool`,
+        );
+      }
+      if (!g.val) continue;
+    }
+    const bodyExpr = parseSexpr(cl.body);
+    return evalExprAsync(env, bodyExpr);
+  }
+  throw new Error(
+    `no matching clause for ${def.name} with args ${vals.map(showValue).join(" ")}`,
+  );
+}
+
 function bindClausePatterns(
   base: Env,
   clause: Clause,
@@ -229,6 +368,7 @@ function bindClausePatterns(
 export function buildBaseEnv(
   tt: TypeTable,
   defines: Define[],
+  externs: ExternBinding[] = [],
 ): Env {
   let env = Env.empty();
 
@@ -275,11 +415,86 @@ export function buildBaseEnv(
   // this shared container, so all references resolve through the
   // fully-populated env after we finish extending it below.
   const holder: { env: Env } = { env };
+  for (const ext of externs) {
+    if (ext.arity <= 0 || !Number.isInteger(ext.arity)) {
+      throw new Error(`extern ${ext.name}: arity must be a positive integer`);
+    }
+    env = env.extend(ext.name, curriedExternFn(ext));
+  }
   for (const d of defines) {
     env = env.extend(d.name, curriedDefineFn(d, holder));
   }
   holder.env = env;
   return env;
+}
+
+export function buildBaseEnvAsync(
+  tt: TypeTable,
+  defines: Define[],
+  externs: ExternBinding[] = [],
+): Env {
+  let env = Env.empty();
+
+  env = env.extend(
+    "val",
+    builtinFn("val", (v) => v),
+  );
+
+  const registered = new Set<string>();
+  for (const entry of tt.values()) {
+    for (let fi = 0; fi < entry.fields.length; fi++) {
+      const f = entry.fields[fi]!;
+      const idx = fi;
+      const registerName = (name: string): void => {
+        if (registered.has(name)) return;
+        registered.add(name);
+        env = env.extend(
+          name,
+          builtinFn(name, (v) => {
+            if (v.kind !== "list") {
+              throw new Error(
+                `field accessor "${name}": not a composite value (got ${v.kind})`,
+              );
+            }
+            if (idx < 0 || idx >= v.elems.length) {
+              throw new Error(
+                `field accessor "${name}": index ${idx} out of range`,
+              );
+            }
+            return v.elems[idx]!;
+          }),
+        );
+      };
+      registerName(f.shenName.toLowerCase());
+      registerName(f.shenName);
+    }
+  }
+
+  const holder: { env: Env } = { env };
+  for (const ext of externs) {
+    if (ext.arity <= 0 || !Number.isInteger(ext.arity)) {
+      throw new Error(`extern ${ext.name}: arity must be a positive integer`);
+    }
+    env = env.extend(ext.name, curriedExternFn(ext));
+  }
+  for (const d of defines) {
+    env = env.extend(d.name, curriedDefineFnAsync(d, holder));
+  }
+  holder.env = env;
+  return env;
+}
+
+function curriedExternFn(ext: ExternBinding): Value {
+  const build = (collected: Value[]): Value =>
+    builtinFn(ext.name, (v) => {
+      const next = collected.slice();
+      next.push(v);
+      if (next.length === ext.arity) {
+        return ext.fn(...next);
+      }
+      return build(next);
+    });
+  return build([]);
 }
 
 function curriedDefineFn(
@@ -299,12 +514,30 @@ function curriedDefineFn(
   return build([]);
 }
 
+function curriedDefineFnAsync(
+  def: Define,
+  holder: { env: Env },
+): Value {
+  const arity = def.clauses[0]?.patterns.length ?? 0;
+  const build = (collected: Value[]): Value =>
+    builtinFn(def.name, async (v) => {
+      const next = collected.slice();
+      next.push(v);
+      if (next.length === arity) {
+        return evalDefineAsync(def, next, holder.env);
+      }
+      return build(next);
+    });
+  return build([]);
+}
+
 // --- tsLiteralFor ---
 
 export function tsLiteralFor(
   v: Value,
   shenType: string,
   tt: TypeTable,
+  mode: "return" | "constructor" = "return",
 ): string {
   const t = shenType.trim();
 
@@ -314,7 +547,7 @@ export function tsLiteralFor(
     if (v.kind !== "list") {
       throw new Error(`expected list for ${t}, got ${v.kind}`);
     }
-    const parts = v.elems.map((e) => tsLiteralFor(e, elem, tt));
+    const parts = v.elems.map((e) => tsLiteralFor(e, elem, tt, "constructor"));
     return `[${parts.join(", ")}]`;
   }
 
@@ -340,8 +573,24 @@ export function tsLiteralFor(
   const entry = tt.get(t);
   if (entry !== undefined) {
     if (entry.category === "wrapper" || entry.category === "constrained") {
-      // Emit the underlying primitive literal (comparison unwraps via .val()).
-      return tsLiteralFor(v, entry.shenPrim, tt);
+      const inner = entry.shenPrim !== "" ? entry.shenPrim : entry.aliasOf ?? "";
+      if (inner === "") {
+        throw new Error(`wrapped type ${t}: no inner type`);
+      }
+      const innerLiteral = tsLiteralFor(v, inner, tt, "constructor");
+      if (mode === "return") {
+        // Top-level wrapped returns compare against got.val().
+        return tsLiteralFor(v, inner, tt, "return");
+      }
+      const helper = `${entry.importAlias || "shenguard"}.must${entry.tsName}`;
+      return `${helper}(${innerLiteral})`;
+    }
+    if (entry.category === "alias" && entry.aliasOf) {
+      return tsLiteralFor(v, entry.aliasOf, tt, mode);
+    }
+    if (entry.category === "sumtype") {
+      const variant = selectSumVariant(v, entry, tt);
+      return tsLiteralFor(v, variant.shenName, tt, "constructor");
     }
     if (entry.category === "composite" || entry.category === "guarded") {
       if (v.kind !== "list") {
@@ -356,13 +605,86 @@ export function tsLiteralFor(
       }
       const helper = `${entry.importAlias || "shenguard"}.must${entry.tsName}`;
       const parts = entry.fields.map((f, i) =>
-        tsLiteralFor(v.elems[i]!, f.typeName, tt),
+        tsLiteralFor(v.elems[i]!, f.typeName, tt, "constructor"),
       );
       return `${helper}(${parts.join(", ")})`;
     }
   }
 
   throw new Error(`cannot produce TS literal for ${t} value ${v.kind}`);
+}
+
+function selectSumVariant(v: Value, entry: TypeEntry, tt: TypeTable): TypeEntry {
+  if (v.kind !== "list") {
+    throw new Error(`expected sumtype list for ${entry.shenName}, got ${v.kind}`);
+  }
+  const variants = entry.variants ?? [];
+  const candidates = variants
+    .map((name) => tt.get(name))
+    .filter((variant): variant is TypeEntry =>
+      variant !== undefined &&
+      (variant.category === "composite" || variant.category === "guarded") &&
+      variant.fields.length === v.elems.length
+    );
+  const discriminated = candidates.filter((variant) =>
+    discriminatorMatches(variant, v),
+  );
+  if (discriminated.length === 1) return discriminated[0]!;
+  if (discriminated.length > 1) {
+    throw new Error(
+      `sumtype ${entry.shenName}: discriminator matched multiple variants: ${
+        discriminated.map((variant) => variant.shenName).join(", ")
+      }`,
+    );
+  }
+  if (candidates.length === 1) return candidates[0]!;
+  throw new Error(
+    `sumtype ${entry.shenName}: could not select variant for ${v.elems.length}-field value`,
+  );
+}
+
+function discriminatorMatches(
+  entry: TypeEntry,
+  v: Extract<Value, { kind: "list" }>,
+): boolean {
+  for (const raw of entry.verified) {
+    const disc = parseStringDiscriminator(raw, entry);
+    if (disc === null) continue;
+    const value = v.elems[disc.index];
+    return value?.kind === "string" && value.val === disc.literal;
+  }
+  return false;
+}
+
+function parseStringDiscriminator(
+  raw: string,
+  entry: TypeEntry,
+): { index: number; literal: string } | null {
+  let expr: Sexpr;
+  try {
+    expr = parseSexpr(raw);
+  } catch {
+    return null;
+  }
+  if (headSym(expr) !== "=" || expr.kind !== "list" || expr.elems.length !== 3) {
+    return null;
+  }
+  return discriminatorSide(expr.elems[1]!, expr.elems[2]!, entry) ??
+    discriminatorSide(expr.elems[2]!, expr.elems[1]!, entry);
+}
+
+function discriminatorSide(
+  maybeField: Sexpr,
+  maybeLiteral: Sexpr,
+  entry: TypeEntry,
+): { index: number; literal: string } | null {
+  const [fieldName, ok] = symName(maybeField);
+  if (!ok || maybeLiteral.kind !== "atom" || maybeLiteral.atomKind !== "string") {
+    return null;
+  }
+  const index = entry.fields.findIndex((field) => field.shenName === fieldName);
+  if (index === -1) return null;
+  return { index, literal: maybeLiteral.val };
 }
 
 function formatIntLiteral(n: number): string {
@@ -397,9 +719,11 @@ export function emit(h: Harness): string {
     retCategory === "wrapper" || retCategory === "constrained";
   const isListReturn = elemType(retType) !== "";
   const useDeepEqual = isListReturn || retCategory === "composite" ||
-    retCategory === "guarded";
+    retCategory === "guarded" || retCategory === "sumtype";
 
   const lines: string[] = [];
+  const asyncTests = h.asyncTests === true ||
+    (cfg.externs ?? []).some((ext) => ext.async === true);
   lines.push(`// Code generated by shen-derive-ts. DO NOT EDIT.`);
   if (cfg.seed !== 0) {
     lines.push(`// seed: ${cfg.seed}`);
@@ -443,8 +767,8 @@ export function emit(h: Harness): string {
     const wantExpr = c.expectedTs;
     const gotExpr = isWrappedReturn ? "got.val()" : "got";
     const assertFn = useDeepEqual ? "deepStrictEqual" : "strictEqual";
-    lines.push(`test(${JSON.stringify(c.label)}, () => {`);
-    lines.push(`  const got = ${call};`);
+    lines.push(`test(${JSON.stringify(c.label)}, ${asyncTests ? "async " : ""}() => {`);
+    lines.push(`  const got = ${asyncTests ? `await ${call}` : call};`);
     lines.push(`  const want = ${wantExpr};`);
     lines.push(
       `  assert.${assertFn}(${gotExpr}, want, \`${cfg.funcName}: spec says \${JSON.stringify(want)}, impl returned \${JSON.stringify(got)}\`);`,

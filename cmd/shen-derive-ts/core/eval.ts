@@ -37,8 +37,10 @@ export type PrimPartialVal = {
 export type BuiltinVal = {
   kind: "builtin";
   name: string;
-  fn: (arg: Value) => Value;
+  fn: (arg: Value) => MaybePromise<Value>;
 };
+
+export type MaybePromise<T> = T | Promise<T>;
 
 export type Value =
   | IntVal
@@ -88,7 +90,7 @@ export function primPartial(op: string, args: Value[]): PrimPartialVal {
 
 export function builtinFn(
   name: string,
-  fn: (arg: Value) => Value,
+  fn: (arg: Value) => MaybePromise<Value>,
 ): BuiltinVal {
   return { kind: "builtin", name, fn };
 }
@@ -139,12 +141,17 @@ function primArity(op: string): number {
     case "fst":
     case "snd":
     case "concat":
+    case "length":
+    case "trim":
+    case "head-char":
+    case "tail-chars":
       return 1;
     case "+":
     case "-":
     case "*":
     case "/":
     case "%":
+    case "shen.mod":
     case "=":
     case "!=":
     case "<":
@@ -157,11 +164,13 @@ function primArity(op: string): number {
     case "map":
     case "filter":
     case "unfoldr":
+    case "element?":
       return 2;
     case "foldr":
     case "foldl":
     case "scanl":
     case "compose":
+    case "in-range?":
       return 3;
     default:
       return 0;
@@ -256,6 +265,85 @@ export function evalExpr(env: Env, s: Sexpr): Value {
   return result;
 }
 
+export async function evalExprAsync(env: Env, s: Sexpr): Promise<Value> {
+  if (s.kind === "atom") {
+    switch (s.atomKind) {
+      case "int": {
+        const n = Number.parseInt(s.val, 10);
+        if (Number.isNaN(n)) throw new Error(`bad int literal: ${s.val}`);
+        return { kind: "int", val: n };
+      }
+      case "float": {
+        const f = Number.parseFloat(s.val);
+        if (Number.isNaN(f)) throw new Error(`bad float literal: ${s.val}`);
+        return { kind: "float", val: f };
+      }
+      case "bool":
+        return { kind: "bool", val: s.val === "true" };
+      case "string":
+        return { kind: "string", val: s.val };
+      case "symbol": {
+        if (s.val === "nil") return { kind: "list", elems: [] };
+        if (isBuiltin(s.val)) return { kind: "primPartial", op: s.val, args: [] };
+        const v = env.lookup(s.val);
+        if (v === null) throw new Error(`unbound variable "${s.val}"`);
+        return v;
+      }
+    }
+  }
+
+  if (s.elems.length === 0) return { kind: "list", elems: [] };
+
+  const head = headSym(s);
+
+  switch (head) {
+    case "lambda": {
+      if (s.elems.length !== 3) {
+        throw new Error(`lambda: expected 3 elements, got ${s.elems.length}`);
+      }
+      const [name, ok] = symName(s.elems[1]!);
+      if (!ok) throw new Error("lambda: param must be a symbol");
+      return { kind: "closure", env, param: name, body: s.elems[2]! };
+    }
+    case "let": {
+      if (s.elems.length !== 4) {
+        throw new Error(`let: expected 4 elements, got ${s.elems.length}`);
+      }
+      const [name, ok] = symName(s.elems[1]!);
+      if (!ok) throw new Error("let: name must be a symbol");
+      const val = await evalExprAsync(env, s.elems[2]!);
+      return evalExprAsync(env.extend(name, val), s.elems[3]!);
+    }
+    case "if": {
+      if (s.elems.length !== 4) {
+        throw new Error(`if: expected 4 elements, got ${s.elems.length}`);
+      }
+      const cv = await evalExprAsync(env, s.elems[1]!);
+      if (cv.kind !== "bool") {
+        throw new Error(`if: condition must be Bool, got ${cv.kind}`);
+      }
+      return cv.val
+        ? evalExprAsync(env, s.elems[2]!)
+        : evalExprAsync(env, s.elems[3]!);
+    }
+    case "@p": {
+      if (s.elems.length !== 3) {
+        throw new Error(`@p: expected 3 elements, got ${s.elems.length}`);
+      }
+      const fst = await evalExprAsync(env, s.elems[1]!);
+      const snd = await evalExprAsync(env, s.elems[2]!);
+      return { kind: "tuple", fst, snd };
+    }
+  }
+
+  let result = await evalExprAsync(env, s.elems[0]!);
+  for (let i = 1; i < s.elems.length; i++) {
+    const av = await evalExprAsync(env, s.elems[i]!);
+    result = await applyValAsync(result, av);
+  }
+  return result;
+}
+
 // --- Apply ---
 
 export function applyVal(f: Value, arg: Value): Value {
@@ -270,6 +358,26 @@ export function applyVal(f: Value, arg: Value): Value {
         return { kind: "primPartial", op: f.op, args: newArgs };
       }
       return execPrim(f.op, newArgs);
+    }
+    case "builtin":
+      return expectSyncValue(f.name, f.fn(arg));
+    default:
+      throw new Error(`cannot apply non-function value: ${f.kind}`);
+  }
+}
+
+export async function applyValAsync(f: Value, arg: Value): Promise<Value> {
+  switch (f.kind) {
+    case "closure":
+      return evalExprAsync(f.env.extend(f.param, arg), f.body);
+    case "primPartial": {
+      const newArgs = f.args.slice();
+      newArgs.push(arg);
+      const arity = primArity(f.op);
+      if (newArgs.length < arity) {
+        return { kind: "primPartial", op: f.op, args: newArgs };
+      }
+      return execPrimAsync(f.op, newArgs);
     }
     case "builtin":
       return f.fn(arg);
@@ -302,7 +410,8 @@ export function execPrim(op: string, args: Value[]): Value {
           return a / b;
         },
       );
-    case "%": {
+    case "%":
+    case "shen.mod": {
       const a = asInt(args[0]!, "%");
       const b = asInt(args[1]!, "%");
       if (b === 0) throw new Error("%: modulo by zero");
@@ -442,8 +551,134 @@ export function execPrim(op: string, args: Value[]): Value {
       const x = args[2]!;
       return applyVal(f, applyVal(g, x));
     }
+
+    // String primitives — mirror shengen-ts's translateDefineExpr emission
+    // (length → x.length; trim → x.trim(); head-char → x[0] ?? "";
+    // tail-chars → x.slice(1); in-range? → lex compare; element? → set
+    // membership).
+    case "length": {
+      const v = args[0]!;
+      if (v.kind === "string") return { kind: "int", val: v.val.length };
+      if (v.kind === "list") return { kind: "int", val: v.elems.length };
+      throw new Error(`length: expected String or List, got ${v.kind}`);
+    }
+    case "trim": {
+      const s = asString(args[0]!, "trim");
+      return { kind: "string", val: s.trim() };
+    }
+    case "head-char": {
+      const s = asString(args[0]!, "head-char");
+      return { kind: "string", val: s.length === 0 ? "" : s[0]! };
+    }
+    case "tail-chars": {
+      const s = asString(args[0]!, "tail-chars");
+      return { kind: "string", val: s.slice(1) };
+    }
+    case "in-range?": {
+      const c = asString(args[0]!, "in-range?");
+      const lo = asString(args[1]!, "in-range?");
+      const hi = asString(args[2]!, "in-range?");
+      return { kind: "bool", val: c >= lo && c <= hi };
+    }
+    case "element?": {
+      const x = args[0]!;
+      const xs = asList(args[1]!, "element?");
+      for (const y of xs) {
+        if (valEqual(x, y)) return { kind: "bool", val: true };
+      }
+      return { kind: "bool", val: false };
+    }
   }
   throw new Error(`unknown primitive: ${op}`);
+}
+
+async function execPrimAsync(op: string, args: Value[]): Promise<Value> {
+  switch (op) {
+    case "map": {
+      const f = args[0]!;
+      const xs = asList(args[1]!, "map");
+      const out: Value[] = new Array(xs.length);
+      for (let i = 0; i < xs.length; i++) {
+        out[i] = await applyValAsync(f, xs[i]!);
+      }
+      return { kind: "list", elems: out };
+    }
+
+    case "foldr": {
+      const f = args[0]!;
+      const e = args[1]!;
+      const xs = asList(args[2]!, "foldr");
+      let acc = e;
+      for (let i = xs.length - 1; i >= 0; i--) {
+        const partial = await applyValAsync(f, xs[i]!);
+        acc = await applyValAsync(partial, acc);
+      }
+      return acc;
+    }
+
+    case "foldl": {
+      const f = args[0]!;
+      const e = args[1]!;
+      const xs = asList(args[2]!, "foldl");
+      let acc = e;
+      for (const x of xs) {
+        const partial = await applyValAsync(f, acc);
+        acc = await applyValAsync(partial, x);
+      }
+      return acc;
+    }
+
+    case "scanl": {
+      const f = args[0]!;
+      const e = args[1]!;
+      const xs = asList(args[2]!, "scanl");
+      const out: Value[] = [e];
+      let acc = e;
+      for (const x of xs) {
+        const partial = await applyValAsync(f, acc);
+        acc = await applyValAsync(partial, x);
+        out.push(acc);
+      }
+      return { kind: "list", elems: out };
+    }
+
+    case "filter": {
+      const p = args[0]!;
+      const xs = asList(args[1]!, "filter");
+      const out: Value[] = [];
+      for (const x of xs) {
+        const pv = await applyValAsync(p, x);
+        if (asBool(pv, "filter")) out.push(x);
+      }
+      return { kind: "list", elems: out };
+    }
+
+    case "unfoldr": {
+      const f = args[0]!;
+      let seed = args[1]!;
+      const out: Value[] = [];
+      for (let i = 0; i < 10000; i++) {
+        const pair = await applyValAsync(f, seed);
+        const tp = asTuple(pair, "unfoldr");
+        const cont = asBool(tp.fst, "unfoldr");
+        if (!cont) break;
+        const inner = asTuple(tp.snd, "unfoldr");
+        out.push(inner.fst);
+        seed = inner.snd;
+      }
+      return { kind: "list", elems: out };
+    }
+
+    case "compose": {
+      const f = args[0]!;
+      const g = args[1]!;
+      const x = args[2]!;
+      return applyValAsync(f, await applyValAsync(g, x));
+    }
+
+    default:
+      return execPrim(op, args);
+  }
 }
 
 // --- Coercion helpers ---
@@ -451,6 +686,13 @@ export function execPrim(op: string, args: Value[]): Value {
 function asInt(v: Value, ctx: string): number {
   if (v.kind !== "int") {
     throw new Error(`${ctx}: expected Int, got ${v.kind}`);
+  }
+  return v.val;
+}
+
+function asString(v: Value, ctx: string): string {
+  if (v.kind !== "string") {
+    throw new Error(`${ctx}: expected String, got ${v.kind}`);
   }
   return v.val;
 }
@@ -481,6 +723,17 @@ function asTuple(v: Value, ctx: string): TupleVal {
     throw new Error(`${ctx}: expected Tuple, got ${v.kind}`);
   }
   return v;
+}
+
+function expectSyncValue(name: string, value: MaybePromise<Value>): Value {
+  if (isPromiseLike(value)) {
+    throw new Error(`builtin ${name}: async result requires evalExprAsync`);
+  }
+  return value;
+}
+
+function isPromiseLike(value: unknown): value is Promise<Value> {
+  return typeof value === "object" && value !== null && "then" in value;
 }
 
 // numBinOp: int+int → int; anything-with-float → float. DO NOT merge

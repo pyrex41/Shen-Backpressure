@@ -34,6 +34,19 @@ walkthrough. The Go version at `shen-derive/` is the reference.
 This differs from the Go version's `--impl-pkg`: Go imports by module path,
 TS imports by relative file path.
 
+## Current Coverage
+
+The TS harness supports wrapper/constrained/composite/guarded return values,
+lists, aliases, and sum-type returns. Sum-type expected values are emitted
+through the concrete variant `must<Type>` helper by using string
+discriminators such as `(= Kind "partial") : verified` when field counts are
+ambiguous.
+
+Domain-specific fixtures can be prepended for correlated inputs that generic
+sampling cannot discover. Current fixture hooks cover signature-agreement
+crypto inputs and the `resolve-tag-block-children` product resolver's signed,
+unsigned, and partial tag/ref-table outcomes.
+
 ## Tests
 
 From this directory:
