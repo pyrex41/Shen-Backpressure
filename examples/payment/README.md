@@ -1,112 +1,91 @@
-# Payment Processor Demo
+# Payment Processor — the Canonical Demo
 
-Demonstrates Shen-Backpressure with a payment processor domain.
+This is the flagship Shen-Backpressure demo. If you only read one
+example, read this one.
 
-**Invariant**: Balance can never go negative through any sequence of transfers.
+For the project-level framing, see the [top-level
+README](../../README.md). This file walks the example end-to-end.
 
-## Quick Start
+## What you'll see
 
-### 1. Install Shen-Go (one-time)
+A payment processor with one inviolable rule: **a balance can never
+go negative through any sequence of transfers.** The rule is encoded
+twice — once in `specs/core.shen` as a Shen sequent-calculus type
+rule (structural), once as a `(define processable …)` block
+(behavioral). Two complementary tools, `shengen` and `shen-derive`,
+turn that single source into compile-time guarantees and a sampled
+spec-equivalence test.
+
+The interesting part: deliberately break the implementation in
+plausible-looking ways, watch which gate catches each bug.
+
+## Prerequisites
+
+- Go 1.24+
+- `bin/sb` and `bin/shengen` from the repo root (`make build-all`)
+- A Shen runtime for Gate 4: `brew tap Shen-Language/homebrew-shen
+  && brew install shen-sbcl`
+  (the demo also runs without it; Gate 4 will report missing
+  runtime, the rest pass)
+
+## Five-minute walkthrough
 
 ```bash
-git clone https://github.com/tiancaiamao/shen-go /tmp/shen-go
-cd /tmp/shen-go && GOTOOLCHAIN=local make shen
-cp shen ../../examples/payment/bin/
-```
-
-### 2. Run
-
-```bash
+# From the repo root
+make build-all
 cd examples/payment
 
-# Build everything and run all gates
-make all
-
-# Run demo mode (single iteration, shows all gates passing)
-make demo
-
-# Run orchestrator in strict sequential mode
-make run
-
-# Run in relaxed parallel mode
-make run-relaxed
+# 1. Run all gates against the current (correct) implementation.
+sb gates
 ```
 
-### 3. Expected output
+Expected: every gate passes (the canonical case).
 
 ```
-15:43:08 [ralph] Starting Ralph-Shen loop (mode=strict)
-15:43:08 [ralph] Tooling validated: go=OK, specs=OK, shen=OK
-15:43:08 [ralph] === Iteration 1 ===
-15:43:09 [ralph] PASS [go-test]
-15:43:09 [ralph] PASS [go-build]
-15:43:09 [ralph] PASS [shen-typecheck]
-15:43:09 [ralph] All gates passed on iteration 1
+PASS  shengen        ~250ms
+PASS  test           ~150ms
+PASS  build          ~250ms
+PASS  shen-check     <runtime-dependent>
+PASS  tcb-audit      ~50ms
+PASS  shen-derive    ~200ms
+
+6/6 gates passed
 ```
 
-## What's Here
+The payment example uses the legacy five-gate shape plus the
+auto-appended `shen-derive` gate (see `sb.toml`'s `[[derive.specs]]`).
 
-```
-├── cmd/ralph/main.go          # Go orchestrator — runs the loop
-├── bin/shen-check.sh          # Shen subprocess wrapper
-├── specs/core.shen            # Shen formal type specifications
-├── src/payment/
-│   ├── processor.go           # Balance invariant enforcement
-│   └── processor_test.go      # 8 tests including invariant test
-├── prompts/main_prompt.md     # LLM instruction template
-├── plans/fix_plan.md          # Dynamic task plan
-├── Makefile                   # build / test / shen-check / demo
-└── go.mod
+```bash
+# 2. Watch the gates fail on three deliberately-bad implementations.
+./demo-shen-derive/run.sh
 ```
 
-## What gets checked
+Expected summary:
 
-`make all` runs four checks:
+```
+bug                     go build        shen-derive verify
+----------------------  --------------  ----------------------
+bug1_sign_flip          PASS            FAIL
+bug2_b0_truncate        PASS            FAIL
+bug3_strict_zero        PASS            FAIL
+```
 
-- **`go build`** — does the code compile?
-- **`go test ./...`** — do the specific test cases pass?
-- **`./bin/shen-check.sh`** — do the Shen sequent-calculus type proofs hold for all inputs?
-- **`make shen-derive-verify`** — does `internal/derived/Processable` still match the `(define processable ...)` spec in `specs/core.shen`?
+Every bug compiles cleanly — `shengen`'s types prove the inputs are
+well-formed, but say nothing about behavior. `shen-derive`
+evaluates the spec on 35 sampled inputs and catches the divergence.
+The script restores the original `processable.go` on exit.
 
-Each check is a separate kind of evidence. Tests cover the specific
-cases the author thought of. `go build` catches type mismatches from
-spec changes. `shen tc+` proves the domain invariants hold for all
-possible inputs (the sequent-calculus rules in `specs/core.shen`).
-`shen-derive verify` pins the hand-written `Processable` loop against
-a Shen `(define ...)` oracle on sampled inputs, and fails the build
-if the committed generated test drifts from what the current
-spec+sampler would produce.
+`demo-shen-derive/DEMO.md` is the long-form walkthrough: what each
+bug is, what the spec says, why each test pool sample was chosen.
+Read it after watching the demo run.
 
-A full `sb gates` run (outside this example's `make all`) also
-regenerates guard types via `shengen` and audits the TCB. See the
-root README for the canonical pipeline — this example focuses on
-the subset relevant to the balance invariant.
+## The story
 
-### How `shen-derive verify` works here
-
-`specs/core.shen` contains a `(define processable ...)` block that
-expresses the obvious-correct version of the balance-check as a fold
-over the running balances. `shen-derive verify` evaluates that spec
-on a set of sampled inputs (boundary values by default, optionally
-plus seeded random draws) and emits
-`internal/derived/processable_spec_test.go` — a table-driven test
-that calls the real implementation and asserts pointwise equality
-against the spec's outputs.
-
-The committed copy of that test file is the drift gate. Changing
-`processable.go`, the spec, or the sampling strategy without
-regenerating the test file fails the check. `make shen-derive-regen`
-(or `sb derive --regen`) rewrites it.
-
-See `sb.toml` for the `[[derive.specs]]` entry and
-`../../shen-derive/DESIGN.md` for how the harness builds its samples
-and evaluation environment.
-
-## Shen Type Specs
-
-The key rule in `specs/core.shen`:
+`specs/core.shen` is the source of truth. Two relevant pieces:
 
 ```shen
+;; Structural: a [Balance Transaction] pair is only balance-checked
+;; when the balance covers the transaction's amount.
 (datatype balance-invariant
   Bal : number;
   Tx : transaction;
@@ -115,4 +94,77 @@ The key rule in `specs/core.shen`:
   [Bal Tx] : balance-checked;)
 ```
 
-This proves that a `[Balance Transaction]` pair is only `balance-checked` if the balance covers the transaction amount — for *all* possible values, not just test cases.
+```shen
+;; Behavioral: processable folds over the transaction list, fails
+;; the moment the running balance would cross zero.
+(define processable
+  B0 [] -> true
+  B0 [Tx | Rest] -> (and (>= (- B0 Tx) 0)
+                         (processable (- B0 Tx) Rest)))
+```
+
+`shengen` lowers the structural rule into Go:
+
+```go
+type BalanceChecked struct { bal float64; tx Transaction }
+
+func NewBalanceChecked(bal float64, tx Transaction) (BalanceChecked, error) {
+    if !(bal >= tx.amount.Val()) {
+        return BalanceChecked{}, fmt.Errorf("bal must be >= tx.amount")
+    }
+    return BalanceChecked{bal: bal, tx: tx}, nil
+}
+```
+
+`SafeTransfer` requires a `BalanceChecked` proof. Because the
+constructor is the only path that yields one, the type system rejects
+any unsafe transfer at compile time.
+
+`shen-derive` evaluates the `(define processable …)` block on a
+boundary pool plus optional seeded random draws and emits
+`internal/derived/processable_spec_test.go` — a regular `go test`
+file that asserts the hand-written `Processable` matches the spec on
+each sampled input. The committed copy is the drift gate: change the
+spec, the impl, or the sampler without regenerating, and the gate
+fails.
+
+## What's here
+
+```
+specs/core.shen                    Source of truth — datatypes + processable spec
+internal/shenguard/guards_gen.go   Generated by `sb gen` (do not hand-edit)
+internal/derived/processable.go    Hand-written impl, pinned by shen-derive
+internal/derived/processable_spec_test.go  Generated by `shen-derive verify`
+src/payment/                       Application code that uses guard types
+sb.toml                            Manifest: paths, derive specs, gate config
+Makefile                           Convenience targets — wraps the underlying tools
+demo-shen-derive/                  Runnable bug-finding demo + DEMO.md narrative
+reference/                         Same five datatypes in TS, Rust, Python
+```
+
+## Tool-level entry points
+
+| Want to … | Run |
+|---|---|
+| Run every gate the manifest declares | `sb gates` |
+| Regenerate guard types | `sb gen` |
+| Refresh the committed shen-derive test (after spec/impl change) | `sb derive --regen` |
+| See the engine's view of this project | `sb context --format markdown` |
+| Inspect the manifest | open `sb.toml` |
+
+## Reference outputs
+
+`reference/guards_gen.{go,ts,rs,py}` and the two `_hardened.{rs,py}`
+variants emit the same balance-invariant proof chain in TypeScript,
+Rust, and Python. Every variant is generated from the same
+`specs/core.shen`. This is the polyglot story for this example —
+one spec, four target languages.
+
+## Further reading
+
+- `demo-shen-derive/DEMO.md` — long-form walkthrough of the three
+  bugs and why each one slips past `go build`
+- `../../shen-derive/DESIGN.md` — how `shen-derive`'s sample pool
+  and evaluation environment are built
+- `../../thoughts/shared/research/2026-04-09-shen-derive-vision-gap-analysis.md`
+  — design rationale for the spec-equivalence approach
