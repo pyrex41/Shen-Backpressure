@@ -1,0 +1,173 @@
+# Multi-Tenant API — Authorization Proof Chain Demo
+
+A live Go HTTP service where every data access carries a compile-time
+proof of authentication and tenant-scoped authorization. The proof
+chain — JWT → AuthenticatedUser → TenantAccess → ResourceAccess —
+is generated from a Shen sequent-calculus spec and enforced by the
+Go type system.
+
+For the project-level framing, see the [top-level
+README](../../README.md). This file walks the example end-to-end.
+
+## What you'll see
+
+**Cross-tenant data access is impossible by construction.** A
+handler that wants to read a resource needs a `ResourceAccess`
+value. The only way to construct one is to thread a verified
+`TenantAccess` through `NewResourceAccess`, which in turn requires
+proof that the principal is a member of the tenant that owns the
+resource. There is no escape hatch — the constructors enforce every
+predicate the Shen spec declares.
+
+The handler tests in `internal/handlers/handlers_test.go` include
+`TestCrossTenantAccessRejected` and `TestCrossTenantResourceAccessRejected`,
+which exercise this through the live HTTP layer. `demo.md` is the
+live curl transcript (real JWTs, real `go test -v` output) recorded
+from a Showboat session that drove the example end-to-end.
+
+## Prerequisites
+
+- Go 1.24+
+- `bin/sb` from the repo root (`make build-sb`)
+- Optional for Gate 4: `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`
+
+The example does not have an `sb.toml`, so `sb gates` runs the
+default five-gate pipeline against convention paths
+(`specs/core.shen`, `internal/shenguard/guards_gen.go`).
+
+## Walkthrough
+
+```bash
+# From the repo root
+make build-sb
+cd examples/multi-tenant-api
+
+# Run the test suite — this is the canonical pass case.
+go test ./...
+```
+
+Expected: all tests pass. The handler suite includes the
+cross-tenant rejection tests; the auth suite covers JWT signing,
+expiry, tampering, and middleware.
+
+```bash
+# Run the gate set the way an agent loop would.
+# `make build-sb` writes the binary to bin/sb at the repo root,
+# not on $PATH; reference it explicitly from the example's cwd.
+../../bin/sb gates
+```
+
+Expected output. Without `shen-sbcl` installed, Gate 4 (`shen-check`)
+fails with a missing-runtime message and the `shengen`/`tcb-audit`
+gates fail because the example's `bin/shengen-codegen.sh` and
+`bin/shenguard-audit.sh` look for `cmd/shengen/main.go` relative to
+the example's working directory rather than the repo root. With
+`shen-sbcl` installed and shengen pre-built (e.g. via
+`make build-shengen` at the repo root and a symlink into the
+example's `bin/`), all five gates pass.
+
+```
+FAIL  shengen        ~5ms       ← needs shengen on PATH
+PASS  test           ~13s
+PASS  build          ~1s
+FAIL  shen-check     ~2ms       ← needs shen-sbcl
+FAIL  tcb-audit      ~5ms       ← needs shengen on PATH
+
+2/5 gates passed   (5/5 with shen-sbcl + shengen wired in)
+```
+
+Tests and build are the meaningful guardrails for a fresh-clone
+read; the other three gates need environment plumbing this example
+has not adopted yet.
+
+## The proof chain
+
+`specs/core.shen` declares the chain. Each datatype is a sequent
+rule: the things above the line must hold for the thing below the
+line to be constructable.
+
+```shen
+;; A JWT must be non-empty.
+(datatype jwt-token
+  X : string;
+  (not (= X "")) : verified;
+  ============================
+  X : jwt-token;)
+
+;; A token-expiry pair holds only while the token is unexpired.
+(datatype token-expiry
+  Exp : number;
+  Now : number;
+  (> Exp Now) : verified;
+  =======================
+  [Exp Now] : token-expiry;)
+
+;; AuthenticatedUser pulls the two together with a user-id.
+(datatype authenticated-user
+  Token : jwt-token;
+  Expiry : token-expiry;
+  User : user-id;
+  ===================================
+  [Token Expiry User] : authenticated-user;)
+```
+
+The shengen output gives every Go handler the same guarantee:
+
+```go
+func NewTenantAccess(p AuthenticatedPrincipal, t TenantId, isMember bool) (TenantAccess, error) {
+    if !(isMember == true) {
+        return TenantAccess{}, fmt.Errorf("isMember must be true")
+    }
+    return TenantAccess{principal: p, tenant: t, isMember: isMember}, nil
+}
+
+func NewResourceAccess(a TenantAccess, r ResourceId, isOwned bool) (ResourceAccess, error) {
+    if !(isOwned == true) {
+        return ResourceAccess{}, fmt.Errorf("isOwned must be true")
+    }
+    return ResourceAccess{access: a, resource: r, isOwned: isOwned}, nil
+}
+```
+
+`AuthenticatedPrincipal` is a sum type generated from two
+contributing datatype blocks (`human-principal` and
+`service-principal`) — this is how the same proof chain handles
+both interactive logins and background-job service credentials.
+
+The handler can demand `ResourceAccess` as a parameter, knowing the
+caller could not have produced one without going through the whole
+chain.
+
+## What's here
+
+```
+specs/core.shen                Source of truth — full proof chain
+internal/shenguard/guards_gen.go  Generated by shengen (do not hand-edit)
+internal/auth/                 JWT signing, parsing, middleware, tenant membership
+internal/handlers/             HTTP handlers; admin endpoints; cross-tenant tests
+internal/db/                   SQLite-backed storage layer
+cmd/server/main.go             HTTP server entry point
+cmd/ralph/main.go              Pre-engine Ralph loop (predates sb loop)
+demo.md                        Showboat-format curl transcript with real JWTs
+transcript/                    JSONL session record from the Ralph build-out
+Makefile                       all / shengen / test / build / shen-check / audit / run / run-relaxed
+```
+
+## Running the live API
+
+```bash
+go run ./cmd/server
+```
+
+The server starts on localhost and exposes the auth + tenant +
+resource endpoints used in `demo.md`. The transcript shows real
+curl invocations: login produces a JWT, subsequent calls thread it
+through the proof chain, and cross-tenant attempts return 403 from
+the constructor layer rather than from a hand-written check.
+
+## Reference: the curl walkthrough
+
+`demo.md` is the canonical transcript. It is structured Showboat
+output, so the prose, commands, and expected output all interleave.
+Read it after this README — it shows the chain in action against a
+running server with real tokens.

@@ -1,32 +1,60 @@
 # Archived Examples
 
-These examples were scoped out during the 2026-04-16 demo-readiness pass (see `thoughts/shared/research/2026-04-16-demo-readiness-buttoning-up.md`). They remain git-tracked for reference but are not part of the focused demo surface.
+These directories were scoped out of the curated demo set during the
+2026-04-16 demo-readiness pass and the 2026-05-05 contraction pass. They
+are kept under git history for reference — the prompts and specs are
+useful as a starting point for future variants, even though none are
+part of the live demo surface.
 
-## Why archived
-
-The live `examples/` tree holds six focused examples:
+The live `examples/` tree holds three focused demos:
 
 | Kept | Role |
 |---|---|
 | `payment/` | Flagship Tier-A demo — payment processor with balance invariants, shengen generated, shen-derive gate wired, reference outputs in Go/TS/Rust/Python |
 | `multi-tenant-api/` | Tier-A HTTP service — JWT → AuthenticatedUser → TenantAccess → ResourceAccess proof chain with live curl transcript |
-| `shen-web-tools/` | Tier-B polyglot — Shen/SBCL backend + Arrow.js frontend, three specs, TS derive gate |
-| `order-state-machine/` | State machine example (invalid transition = type error) |
-| `shenguard-bolt-on/` | Infrastructure story — bolt `shenguard` onto existing Argo + Crossplane |
-| `category-showcase/` | Teaching aid — all six shengen categories in one spec |
+| `shen-web-tools/` | Polyglot end-to-end — Shen/SBCL backend + Arrow.js frontend, three specs, TS derive gate |
 
-Everything else was archived under one of these reasons.
+Everything else lives here.
 
-## Overlap clusters resolved
+## Inventory
 
-- **K8s / infra** — `k8s-infra/` (near-duplicate of `shenguard-bolt-on`), `shenplane/` (clean-sheet counterpart); `INFRA_COMPARISON.md` is here too.
-- **Anti-hallucination** — `ai-grounding/`, `llm-hallucination-guard/` are stubs on the same thesis as `shen-web-tools/`.
-- **State machines** — `workflow-saga/`, `circuit-breaker/`, `pipeline-state-machine/` teach the same lesson as the kept `order-state-machine/`.
-- **Authorization proof chains** — `rbac-capabilities/` is a spec-only stub redundant with the built-out `multi-tenant-api/`.
-- **Polyglot duplicates** — `polyglot-comparison/` and `sum-type-showcase/` overlap with `payment/reference/` and `category-showcase/`.
-- **Framework scaffolds** — `shen-hono/`, `shen-fastapi/`, `shen-go-api/`, `shen-go-advanced/`, `shen-rust-axum/` were PROMPT-only scaffolds; the direction is still valid but waits for Wave-4 framework buildout. `FRAMEWORK_EXAMPLES.md` documents the original vision.
-- **Domain stubs** — `audit-trail/`, `consensus-quorum/`, `crispr-pipeline/`, `data-pipeline/`, `defi-invariants/`, `feature-flags/`, `relational-constraints/`, `shen-prolog-ui/` are spec-only stubs.
-- **Scaffolded-but-never-generated** — `dosage-calculator/` has a Makefile and Go scaffolding but `internal/shenguard/` was never emitted; `email-crud/` has a full Go app but guards live in `reference/` rather than the build hot path.
+Each row carries the original direction plus the reason it was scoped
+out. Cluster groupings explain why a thesis appears multiple times.
+
+| Directory | What it explored | Scoped out because |
+|---|---|---|
+| `ai-grounding/` | Anti-hallucination — closed-enum guard types so an LLM can only return grounded values | Anti-hallucination cluster: `shen-web-tools/` is built end-to-end on the same thesis |
+| `audit-trail/` | Append-only audit log with provenance-typed records | Domain stub — spec + guards only, no app code |
+| `category-showcase/` | Teaching aid — all six shengen categories (wrapper, constrained, composite, guarded, proof-chain, sum) in one spec | Reference material now lives in `docs/REFERENCE.md` and `examples/payment/reference/` |
+| `circuit-breaker/` | State-machine flow control variant (closed/open/half-open) | State-machine cluster: same thesis as `order-state-machine/`, `workflow-saga/`, `pipeline-state-machine/` |
+| `consensus-quorum/` | Quorum-typed votes, prevents counting without N agreements | Domain stub — spec + guards only |
+| `crispr-pipeline/` | Bio-domain pipeline with dose-and-genome-typed steps | Domain stub — spec + guards only |
+| `data-pipeline/` | Pipeline stages typed with stage-of-origin proofs | Domain stub — spec + guards only |
+| `defi-invariants/` | DeFi balance/conservation invariants | Domain stub — overlaps with `payment/`'s balance-invariant story |
+| `dosage-calculator/` | Healthcare dosage calculator | Scaffolded but `internal/shenguard/` was never generated |
+| `email-crud/` | Full Go CRUD app, but guards live in `reference/` rather than the build hot path | Shengen never wired into the build path |
+| `feature-flags/` | Feature-flag rollout with cohort-typed targeting | Domain stub — spec + guards only |
+| `k8s-infra/` | Kubernetes admission scanners | K8s/infra cluster: near-duplicate of `shenguard-bolt-on/` |
+| `llm-hallucination-guard/` | Closed-enum variant of the anti-hallucination thesis | Anti-hallucination cluster: simpler dup of `ai-grounding/`, both subsumed by `shen-web-tools/` |
+| `order-state-machine/` | Order state machine — invalid transitions become compile errors | State-machine cluster: kept as `category-showcase`-style stub, no end-to-end demo |
+| `pipeline-state-machine/` | Generic state-machine pipeline | State-machine cluster — duplicate thesis |
+| `polyglot-comparison/` | Multi-language guard comparison | Duplicates `examples/payment/reference/`, which already shows all four target languages |
+| `rbac-capabilities/` | RBAC capability proof chain | Authorization-proof-chain cluster: spec-only stub redundant with built-out `multi-tenant-api/` |
+| `relational-constraints/` | Cross-record constraints between rows | Domain stub — spec + guards only |
+| `shen-fastapi/` | Python FastAPI framework scaffold | Framework-scaffolds cluster (Wave-4 vintage): no end-to-end app, prompt-only |
+| `shen-go-advanced/` | Advanced Go service variant | Framework-scaffolds cluster — variant of `shen-go-api/` |
+| `shen-go-api/` | Go HTTP service framework scaffold | Framework-scaffolds cluster — no app code |
+| `shen-hono/` | TypeScript Hono framework scaffold | Framework-scaffolds cluster — no app code |
+| `shen-prolog-ui/` | Prolog/UI exploration | Out-of-band exploration, never integrated |
+| `shen-rust-axum/` | Rust Axum framework scaffold | Framework-scaffolds cluster — no app code |
+| `shenguard-bolt-on/` | Bolt `shenguard` onto existing Argo + Crossplane control planes | K8s/infra cluster: same thesis as `k8s-infra/` and `shenplane/` |
+| `shenplane/` | Clean-sheet K8s control plane counterpart to `shenguard-bolt-on` | K8s/infra cluster: ambitious vision but not built out |
+| `sum-type-showcase/` | Sum-type variant of `category-showcase` | Teaching-aid duplicate of `category-showcase/` |
+| `workflow-saga/` | Saga state-machine variant | State-machine cluster — duplicate thesis |
+
+`FRAMEWORK_EXAMPLES.md` and `INFRA_COMPARISON.md` document the original
+framework-scaffolds and infra-cluster comparisons; both are now reference
+docs that live alongside the archived directories they describe.
 
 ## Reviving one
 
