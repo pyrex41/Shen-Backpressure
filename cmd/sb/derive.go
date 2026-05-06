@@ -251,18 +251,21 @@ Flags:
 		os.Exit(1)
 	}
 
-	// In --regen mode we skip tests but still want to emit a
-	// discharge report so the user can inspect the structural
-	// classification before running gates.
+	// In --regen and --skip-test modes the spec ≡ impl oracle does
+	// not actually run. We still emit a discharge report so users
+	// can inspect the structural classification, but runtime-sampled
+	// premises are downgraded to "unproven" (with an explicit
+	// rationale) so the report cannot claim sampled equivalence
+	// passed when zero samples were checked.
 	if *regen {
 		if len(partialReports) > 0 {
-			finalizeDischargeReport(partialReports, cfg, nil)
+			finalizeDischargeReport(partialReports, cfg, nil, false, "report generated with --regen; spec ≡ impl oracle did not run")
 		}
 		return
 	}
 	if *skipTest {
 		if len(partialReports) > 0 {
-			finalizeDischargeReport(partialReports, cfg, nil)
+			finalizeDischargeReport(partialReports, cfg, nil, false, "report generated with --skip-test; spec ≡ impl oracle did not run")
 		}
 		return
 	}
@@ -307,7 +310,7 @@ Flags:
 	// alongside successes.
 	if len(partialReports) > 0 {
 		failures := parseGoTestFailures(combinedTestOutput.String())
-		finalizeDischargeReport(partialReports, cfg, failures)
+		finalizeDischargeReport(partialReports, cfg, failures, true, "")
 	}
 
 	if testFailed {
@@ -320,13 +323,22 @@ Flags:
 // `discharged_since_commit`), patches in counter-examples parsed from
 // `go test` output, writes the canonical .sb/discharge_report.json,
 // and rotates a copy into .sb/history/.
-func finalizeDischargeReport(parts []*DischargeReport, cfg *Config, failures []parsedFailure) {
+//
+// testsRan indicates whether the spec ≡ impl oracle actually
+// executed. When false (--regen / --skip-test), runtime-sampled
+// premises are downgraded to "unproven" with the supplied rationale
+// so the artifact never claims sampled equivalence passed when no
+// samples were checked.
+func finalizeDischargeReport(parts []*DischargeReport, cfg *Config, failures []parsedFailure, testsRan bool, skipReason string) {
 	r := mergeDischargeReports(parts)
 	r.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
 	if r.Tools.SBVersion == "" {
 		r.Tools.SBVersion = version
 	}
 	fillImplGit(r)
+	if !testsRan {
+		downgradeRuntimeSampledToUnproven(r, skipReason)
+	}
 	if len(failures) > 0 {
 		applyCounterExamples(r, failures, cfg.DeriveSpecs)
 	}
