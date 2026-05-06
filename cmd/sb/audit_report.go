@@ -260,9 +260,18 @@ func emptyDash(s string) string {
 	return s
 }
 
+// escapeMarkdownInline is a best-effort escape for content rendered
+// inside a markdown table cell. We escape the table separator (`|`)
+// and newlines (which would otherwise break a row); other markdown
+// metacharacters (backticks, asterisks, brackets) survive and may
+// distort cosmetic rendering when a spec expression contains them.
+// Callers are expected not to render this content through HTML
+// without further sanitisation.
 func escapeMarkdownInline(s string) string {
-	r := strings.ReplaceAll(s, "|", "\\|")
-	return r
+	s = strings.ReplaceAll(s, "|", "\\|")
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return s
 }
 
 const auditAppendix = `This report categorises every premise of every Shen rule by **how**

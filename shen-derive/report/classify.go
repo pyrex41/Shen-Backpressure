@@ -35,11 +35,12 @@ func ClassifyDatatypes(sf *specfile.SpecFile, guardOutputPath string) ([]Rule, e
 func classifyDatatypeRule(specPath string, dt specfile.Datatype, r specfile.Rule, guardPath string, guardLines map[string]int) Rule {
 	kind := classifyKind(r)
 	rule := Rule{
-		Name:        dt.Name,
-		Kind:        kind,
-		SpecFile:    specPath,
-		SpecExcerpt: renderDatatypeExcerpt(dt, r),
-		Status:      StatusDischarged,
+		Name:            dt.Name,
+		Kind:            kind,
+		SpecFile:        specPath,
+		SpecExcerpt:     renderDatatypeExcerpt(dt, r),
+		Status:          StatusDischarged,
+		CounterExamples: []CounterExample{},
 	}
 	rule.HumanDescription, rule.HumanDescriptionSource = describeDatatype(dt, r, kind)
 
@@ -112,11 +113,12 @@ func classifyDatatypeRule(specPath string, dt specfile.Datatype, r specfile.Rule
 // filled in by the consumer (sb derive) after `go test` runs.
 func ClassifyDefine(specPath string, def *specfile.Define, sampleCount int, seedLabel string, implFunc string) Rule {
 	rule := Rule{
-		Name:        def.Name,
-		Kind:        "define",
-		SpecFile:    specPath,
-		SpecExcerpt: renderDefineExcerpt(def),
-		Status:      StatusDischarged,
+		Name:            def.Name,
+		Kind:            "define",
+		SpecFile:        specPath,
+		SpecExcerpt:     renderDefineExcerpt(def),
+		Status:          StatusDischarged,
+		CounterExamples: []CounterExample{},
 	}
 	rule.HumanDescription, rule.HumanDescriptionSource = describeDefine(def)
 
