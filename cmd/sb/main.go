@@ -11,6 +11,7 @@
 //   gates     Run manifest-defined verification gates
 //   derive    Run spec-equivalence verification
 //   context   Emit project context from the manifest
+//   audit-report  Long-form Markdown rendering of the latest discharge report
 //   loop      Launch a Ralph loop (headless LLM + gate verification)
 
 package main
@@ -39,6 +40,8 @@ func main() {
 		cmdDerive(os.Args[2:])
 	case "context":
 		cmdContext(os.Args[2:])
+	case "audit-report":
+		cmdAuditReport(os.Args[2:])
 	case "loop":
 		cmdLoop(os.Args[2:])
 	case "version", "--version", "-v":
@@ -63,6 +66,7 @@ Commands:
   gates     Run manifest-defined verification gates
   derive    Run spec-equivalence verification
   context   Emit project context from the manifest
+  audit-report  Long-form Markdown rendering of the latest discharge report
   loop      Launch a Ralph loop (headless LLM + gates)
   version   Print version
 

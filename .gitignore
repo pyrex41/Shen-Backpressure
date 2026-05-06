@@ -25,6 +25,11 @@ cmd/sb/sb
 # Backpressure logs (generated at runtime)
 demo/*/plans/backpressure.log
 
+# Wave 4 discharge reports — local-only audit trail.
+# .sb/discharge_report.json is rewritten on every gate run; .sb/history/
+# accumulates time-stamped copies. Both are per-clone state, not source.
+.sb/
+
 # Repomix output
 repomix-output.xml
 

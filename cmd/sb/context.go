@@ -13,11 +13,45 @@ import (
 // `sb context` for both JSON and Markdown output, and by the Ralph loop to
 // hydrate LLM harness prompts.
 type ProjectContext struct {
-	Project      ProjectInfo       `json:"project"`
-	Types        []TypeInfo        `json:"types"`
-	Derive       *DeriveInfo       `json:"derive,omitempty"`
-	Gates        []GateInfo        `json:"gates"`
-	Backpressure *BackpressureInfo `json:"backpressure,omitempty"`
+	Project      ProjectInfo            `json:"project"`
+	Types        []TypeInfo             `json:"types"`
+	Derive       *DeriveInfo            `json:"derive,omitempty"`
+	Gates        []GateInfo             `json:"gates"`
+	Discharge    *DischargeContextInfo  `json:"discharge,omitempty"`
+	Backpressure *BackpressureInfo      `json:"backpressure,omitempty"`
+}
+
+// DischargeContextInfo is the context-rendering view of the latest
+// discharge report. It carries only the summary fields the agent
+// needs in-prompt — full detail lives in .sb/discharge_report.json.
+type DischargeContextInfo struct {
+	GeneratedAt            string                  `json:"generated_at"`
+	ReportPath             string                  `json:"report_path"`
+	GitCommit              *string                 `json:"git_commit"`
+	RuleCount              int                     `json:"rule_count"`
+	RulesDischarged        int                     `json:"rules_discharged"`
+	RulesViolated          int                     `json:"rules_violated"`
+	RulesUnproven          int                     `json:"rules_unproven"`
+	PremisesStatic         int                     `json:"premises_static"`
+	PremisesRuntimeSampled int                     `json:"premises_runtime_sampled"`
+	PremisesUnproven       int                     `json:"premises_unproven"`
+	Violations             []DischargeViolationCtx `json:"violations,omitempty"`
+}
+
+// DischargeViolationCtx summarises one violated rule for the context
+// renderer. At most one counter-example per violation is surfaced
+// (the first); auditors who need more detail open the JSON or the
+// audit-report Markdown.
+type DischargeViolationCtx struct {
+	Rule         string            `json:"rule"`
+	PremiseID    string            `json:"premise_id"`
+	CaseID       string            `json:"case_id"`
+	Input        map[string]string `json:"input,omitempty"`
+	SpecOutput   string            `json:"spec_output"`
+	ImplOutput   string            `json:"impl_output"`
+	ImplFunction string            `json:"impl_function,omitempty"`
+	ImplFile     string            `json:"impl_file,omitempty"`
+	Rationale    string            `json:"rationale,omitempty"`
 }
 
 // ProjectInfo holds the project-level manifest fields.
@@ -109,11 +143,66 @@ func BuildContext(cfg *Config) (*ProjectContext, error) {
 		ctx.Derive = di
 	}
 
+	if di := readDischargeContext(DischargeReportPath); di != nil {
+		ctx.Discharge = di
+	}
+
 	if bp := readBackpressure("plans/backpressure.log"); bp != nil {
 		ctx.Backpressure = bp
 	}
 
 	return ctx, nil
+}
+
+// readDischargeContext reads .sb/discharge_report.json and projects
+// it into the small DischargeContextInfo shape used by both the JSON
+// and Markdown context renderers. Returns nil when no report exists,
+// matching Wave 4's "omit the section entirely" requirement.
+func readDischargeContext(path string) *DischargeContextInfo {
+	r, err := loadDischarge(path)
+	if err != nil || r == nil {
+		return nil
+	}
+	out := &DischargeContextInfo{
+		GeneratedAt:            r.GeneratedAt,
+		ReportPath:             path,
+		GitCommit:              r.Impl.GitCommit,
+		RuleCount:              r.Summary.RuleCount,
+		RulesDischarged:        r.Summary.RulesDischarged,
+		RulesViolated:          r.Summary.RulesViolated,
+		RulesUnproven:          r.Summary.RulesUnproven,
+		PremisesStatic:         r.Summary.PremisesStatic,
+		PremisesRuntimeSampled: r.Summary.PremisesRuntimeSampled,
+		PremisesUnproven:       r.Summary.PremisesUnproven,
+	}
+	for _, rule := range r.Rules {
+		if rule.Status != DischargeStatusViolated {
+			continue
+		}
+		premiseID := ""
+		for _, p := range rule.Premises {
+			if p.SamplesFailed > 0 {
+				premiseID = p.ID
+				break
+			}
+		}
+		var ce DischargeCounter
+		if len(rule.CounterExamples) > 0 {
+			ce = rule.CounterExamples[0]
+		}
+		out.Violations = append(out.Violations, DischargeViolationCtx{
+			Rule:         rule.Name,
+			PremiseID:    premiseID,
+			CaseID:       ce.CaseID,
+			Input:        ce.Input,
+			SpecOutput:   ce.SpecOutput,
+			ImplOutput:   ce.ImplOutput,
+			ImplFunction: ce.ImplFunction,
+			ImplFile:     ce.ImplFile,
+			Rationale:    ce.Rationale,
+		})
+	}
+	return out
 }
 
 // buildGateInfos produces the public GateInfo list for the context. When the
@@ -227,12 +316,69 @@ func (ctx *ProjectContext) RenderMarkdown() string {
 		}
 	}
 
+	if ctx.Discharge != nil {
+		renderDischargeSection(&b, ctx.Discharge)
+	}
+
 	if ctx.Backpressure != nil && ctx.Backpressure.HasFailures {
 		b.WriteString("\n### Backpressure\n\n")
 		fmt.Fprintf(&b, "Latest failure: %s\n", ctx.Backpressure.LatestFailure)
 	}
 
 	return b.String()
+}
+
+// renderDischargeSection writes the terse Wave 4 discharge-report
+// summary into b. The block is intentionally short — enough for an
+// agent to skim in five seconds and find the failing case. Full
+// detail lives in .sb/discharge_report.json (machine) or
+// `sb audit-report` (human).
+func renderDischargeSection(b *strings.Builder, di *DischargeContextInfo) {
+	b.WriteString("\n### Discharge Report\n\n")
+	fmt.Fprintf(b, "%d premises proven statically (via guard types)\n", di.PremisesStatic)
+	fmt.Fprintf(b, "%d premises sampled clean (deterministic seed)\n", di.PremisesRuntimeSampled-violatedSampledCount(di))
+	if di.PremisesUnproven > 0 {
+		fmt.Fprintf(b, "%d premises unproven\n", di.PremisesUnproven)
+	}
+	if di.RulesViolated == 0 {
+		fmt.Fprintf(b, "%d/%d rules discharged.\n", di.RulesDischarged, di.RuleCount)
+	} else {
+		fmt.Fprintf(b, "%d/%d rules discharged; %d violated.\n",
+			di.RulesDischarged, di.RuleCount, di.RulesViolated)
+	}
+	for _, v := range di.Violations {
+		b.WriteString("\nCounter-example for ")
+		b.WriteString(v.Rule)
+		if v.PremiseID != "" {
+			fmt.Fprintf(b, ".%s", v.PremiseID)
+		}
+		b.WriteString(":\n")
+		fmt.Fprintf(b, "  Case:        %s\n", v.CaseID)
+		if v.SpecOutput != "" {
+			fmt.Fprintf(b, "  Spec says:   %s\n", v.SpecOutput)
+		}
+		if v.ImplOutput != "" {
+			fmt.Fprintf(b, "  Impl says:   %s\n", v.ImplOutput)
+		}
+		if v.ImplFile != "" {
+			fmt.Fprintf(b, "  Impl file:   %s\n", v.ImplFile)
+		}
+		if v.ImplFunction != "" {
+			fmt.Fprintf(b, "  Reproduce:   go test -run TestSpec_%s/%s\n", v.ImplFunction, v.CaseID)
+		}
+	}
+	fmt.Fprintf(b, "\nLatest report: %s (full JSON for tooling)\n", di.ReportPath)
+}
+
+// violatedSampledCount returns the count of runtime-sampled premises
+// that have been flipped to violated (i.e. `samples_failed > 0`).
+// Used to subtract from the "sampled clean" line so the rendering
+// stays accurate when failures land.
+func violatedSampledCount(di *DischargeContextInfo) int {
+	// The discharge context summary doesn't carry per-premise detail,
+	// so we approximate: every violation contributes one failing
+	// sampled premise.
+	return len(di.Violations)
 }
 
 // proofChain returns a best-effort ordering of types following the
