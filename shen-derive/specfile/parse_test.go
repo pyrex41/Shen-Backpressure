@@ -1,6 +1,7 @@
 package specfile
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -481,6 +482,59 @@ func TestSplitPatterns(t *testing.T) {
 				t.Errorf("splitPatterns(%q)[%d]: got %q, want %q", tc.in, i, got[i], tc.want[i])
 			}
 		}
+	}
+}
+
+func TestParseDocAnnotations(t *testing.T) {
+	content := `
+\* :doc "An Amount is a non-negative number representing money." *\
+(datatype amount
+  X : number;
+  (>= X 0) : verified;
+  ====================
+  X : amount;)
+
+\* :doc "Processable folds over a transaction list checking the running balance never goes negative." *\
+(define processable
+  {amount --> (list transaction) --> boolean}
+  B0 Txs -> true)
+
+\* unrelated comment *\
+(datatype account-id
+  X : string;
+  ==============
+  X : account-id;)
+`
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "test.shen")
+	if err := os.WriteFile(specPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write tmp: %v", err)
+	}
+
+	sf, err := ParseFile(specPath)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	amount := sf.FindDatatype("amount")
+	if amount == nil {
+		t.Fatal("amount datatype missing")
+	}
+	if want := "An Amount is a non-negative number representing money."; amount.Doc != want {
+		t.Errorf("amount.Doc = %q, want %q", amount.Doc, want)
+	}
+	processable := sf.FindDefine("processable")
+	if processable == nil {
+		t.Fatal("processable define missing")
+	}
+	if want := "Processable folds over a transaction list checking the running balance never goes negative."; processable.Doc != want {
+		t.Errorf("processable.Doc = %q, want %q", processable.Doc, want)
+	}
+	accountID := sf.FindDatatype("account-id")
+	if accountID == nil {
+		t.Fatal("account-id datatype missing")
+	}
+	if accountID.Doc != "" {
+		t.Errorf("account-id.Doc = %q, want empty (only :doc annotations populate this field)", accountID.Doc)
 	}
 }
 

@@ -29,6 +29,10 @@ type SpecFile struct {
 type Datatype struct {
 	Name  string
 	Rules []Rule
+	// Doc is the optional plain-English description sourced from a
+	// preceding `:doc "..."` annotation in the spec file. Empty when
+	// the spec has no annotation.
+	Doc string
 }
 
 // Rule is a single inference rule inside a datatype block.
@@ -78,6 +82,10 @@ type Define struct {
 	TypeSig    TypeSig  // may be zero-value if the define is untyped
 	ParamNames []string // derived from the first clause's patterns
 	Clauses    []Clause
+	// Doc is the optional plain-English description sourced from a
+	// preceding `:doc "..."` annotation in the spec file. Empty when
+	// the spec has no annotation.
+	Doc string
 }
 
 // Clause is one pattern-match clause inside a (define ...) block.
@@ -108,7 +116,9 @@ func ParseFile(path string) (*SpecFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	content := stripShenComments(string(data))
+	raw := string(data)
+	docs := extractDocAnnotations(raw)
+	content := stripShenComments(raw)
 
 	sf := &SpecFile{Path: path}
 
@@ -116,6 +126,9 @@ func ParseFile(path string) (*SpecFile, error) {
 		if dt, err := parseDatatype(block); err != nil {
 			return nil, fmt.Errorf("%s: datatype: %w", path, err)
 		} else if dt != nil {
+			if d, ok := docs["(datatype "+dt.Name]; ok {
+				dt.Doc = d
+			}
 			sf.Datatypes = append(sf.Datatypes, *dt)
 		}
 	}
@@ -124,11 +137,153 @@ func ParseFile(path string) (*SpecFile, error) {
 		if def, err := parseDefine(block); err != nil {
 			return nil, fmt.Errorf("%s: define: %w", path, err)
 		} else if def != nil {
+			if d, ok := docs["(define "+def.Name]; ok {
+				def.Doc = d
+			}
 			sf.Defines = append(sf.Defines, *def)
 		}
 	}
 
 	return sf, nil
+}
+
+// extractDocAnnotations scans a raw Shen source file for `:doc "..."`
+// annotations inside block comments and pairs each with the next
+// `(datatype NAME` or `(define NAME` form that follows.
+//
+// Format expected:
+//
+//	\* :doc "An Amount is a non-negative number." *\
+//	(datatype amount
+//	  X : number; ...)
+//
+// The annotation is one block-comment whose content begins with
+// `:doc "..."`. Multiple annotations before a single block use the
+// last one. Annotations not followed by a datatype/define within the
+// remaining file are ignored.
+//
+// Returns a map keyed by the form-prefix-and-name string, e.g.
+// "(datatype amount" -> "An Amount is a non-negative number."
+func extractDocAnnotations(raw string) map[string]string {
+	out := map[string]string{}
+	i := 0
+	for i < len(raw) {
+		// Skip strings as-is so embedded `\*` inside string literals
+		// isn't misinterpreted as a comment opener.
+		if raw[i] == '"' {
+			i++
+			for i < len(raw) {
+				if raw[i] == '\\' && i+1 < len(raw) {
+					i += 2
+					continue
+				}
+				if raw[i] == '"' {
+					i++
+					break
+				}
+				i++
+			}
+			continue
+		}
+		if i+1 < len(raw) && raw[i] == '\\' && raw[i+1] == '*' {
+			end := strings.Index(raw[i+2:], "*\\")
+			if end == -1 {
+				return out
+			}
+			body := strings.TrimSpace(raw[i+2 : i+2+end])
+			i += end + 4
+			if !strings.HasPrefix(body, ":doc ") {
+				continue
+			}
+			docText, ok := parseDocText(body[5:])
+			if !ok {
+				continue
+			}
+			// Find the next (datatype NAME or (define NAME after i,
+			// skipping intervening whitespace and other block
+			// comments.
+			key := nextFormKey(raw, i)
+			if key == "" {
+				continue
+			}
+			out[key] = docText
+		}
+		i++
+	}
+	return out
+}
+
+// parseDocText extracts the string literal that starts a doc annotation
+// body. Returns the unescaped string and true on success.
+func parseDocText(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "\"") {
+		return "", false
+	}
+	var b strings.Builder
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if c == '\\' && i+1 < len(s) {
+			next := s[i+1]
+			switch next {
+			case 'n':
+				b.WriteByte('\n')
+			case 't':
+				b.WriteByte('\t')
+			case '"', '\\':
+				b.WriteByte(next)
+			default:
+				b.WriteByte(next)
+			}
+			i++
+			continue
+		}
+		if c == '"' {
+			return b.String(), true
+		}
+		b.WriteByte(c)
+	}
+	return "", false
+}
+
+// nextFormKey scans raw[start:] for the next "(datatype NAME" or
+// "(define NAME" prefix and returns it. Returns "" if none found.
+func nextFormKey(raw string, start int) string {
+	for i := start; i < len(raw); i++ {
+		// Skip nested block comments and whitespace.
+		if i+1 < len(raw) && raw[i] == '\\' && raw[i+1] == '*' {
+			end := strings.Index(raw[i+2:], "*\\")
+			if end == -1 {
+				return ""
+			}
+			i += end + 3 // loop's i++ adds one
+			continue
+		}
+		if raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\n' || raw[i] == '\r' {
+			continue
+		}
+		// We're at the first non-whitespace, non-comment byte.
+		for _, prefix := range []string{"(datatype ", "(define "} {
+			if strings.HasPrefix(raw[i:], prefix) {
+				rest := raw[i+len(prefix):]
+				// Read up to the first whitespace or paren.
+				end := 0
+				for end < len(rest) {
+					c := rest[end]
+					if c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '(' || c == ')' {
+						break
+					}
+					end++
+				}
+				if end == 0 {
+					return ""
+				}
+				return prefix + rest[:end]
+			}
+		}
+		return ""
+	}
+	return ""
 }
 
 // FindDefine returns the named define block or nil.
