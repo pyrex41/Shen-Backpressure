@@ -198,6 +198,55 @@ A new discharge-report system with three coupled components:
   The schema's `discharge_basis` field is forward-compatible with
   more rigorous bases (`flow-analysis`, `prover-z3`).
 
+## Review feedback addressed (2026-05-05, follow-up commits)
+
+The first review of this branch flagged three audit-integrity issues
+that landed as follow-up commits before merge:
+
+- **Critical #1:** `--regen` and `--skip-test` previously emitted
+  reports claiming runtime-sampled premises had been discharged
+  even though the spec ≡ impl oracle never executed. Fixed in
+  `cmd/sb/discharge.go:downgradeRuntimeSampledToUnproven`: when
+  tests do not run, every runtime-sampled premise flips to
+  `discharge: "unproven"`, `discharge_basis: "tests-not-run"`,
+  with a rationale carrying the explicit reason; the parent rule
+  rolls to `unproven` (unless already `violated`, which takes
+  precedence). The summary's `rules_unproven` and
+  `premises_unproven` counters update accordingly.
+- **Critical #2:** `computeDischargedSinceCommit` previously
+  collapsed to "since HEAD" on a recovery commit instead of
+  pointing at the successor of the violated state. Fixed by
+  walking history newest-first, tracking the most-recent commit
+  seen at `status: discharged`, and emitting that commit on the
+  first non-discharged hit. The exhausted-history fallback now
+  reports the *oldest* still-discharged commit rather than the
+  current HEAD, which is a tighter, more useful audit claim.
+- **Critical #3:** `pruneDischargeHistory` previously kept only
+  the 50 newest entries and silently dropped older history. The
+  documented per-month carve-out is now implemented:
+  `keep = newest 50 ∪ oldest entry of each (year, month)
+  bucket`.
+
+Plus minor fixes: `counter_examples: null` → `counter_examples:
+[]` for the locked v1 contract; `parseGoTestFailures` resets on
+consume so misattribution can't happen on stray body lines;
+`applyCounterExamples` now computes `passed = total - failed`
+instead of decrementing in place; the hand-rolled `min` is gone
+(go 1.24); the schema doc clarifies that `spec_excerpt` is a
+canonical re-rendering, not verbatim source bytes; the audit-table
+inline escaper handles newlines so spec expressions with embedded
+linebreaks can't break the markdown table.
+
+The follow-up commits also added 13 unit tests in
+`cmd/sb/discharge_test.go` covering `parseGoTestFailures`,
+`mergeDischargeReports`, `applyCounterExamples`,
+`downgradeRuntimeSampledToUnproven`, both branches of
+`computeDischargedSinceCommit` (recovery and all-clean), the
+per-month retention carve-out, and a wire-format round-trip; plus
+two more in `shen-derive/report/roundtrip_test.go` pinning the
+canonical schema's required keys and the
+`samples_passed + samples_failed = total` invariant.
+
 ## What's open
 
 - **TS path.** shen-derive-ts does not yet implement `--report-out`.
@@ -205,11 +254,6 @@ A new discharge-report system with three coupled components:
   report covering only their Go specs (none, in
   `examples/shen-web-tools/`'s case). Adding the flag to the TS
   port mirrors the Go change.
-- **Schema test.** The schema mirror in `cmd/sb/discharge.go` and
-  the canonical schema in `shen-derive/report/schema.go` are
-  expected to round-trip identical bytes. A unit test that loads
-  one and serialises through the other (and vice-versa) would lock
-  the wire-format contract and catch silent drift.
 - **Determinism.** `generated_at` is the only intentional
   non-determinism. A flag (`--frozen-time` or similar) for
   reproducible-build use cases is plausible but not implemented.
@@ -218,8 +262,14 @@ A new discharge-report system with three coupled components:
   generated test file. Auditors who want the raw inputs in the
   report itself need a richer marshaller — straightforward but not
   shipped.
-- **`discharged_since_commit` audit semantics.** v0 scans local
-  history. A team running gates only on CI will have an empty local
-  history, so the field will say "since the current commit" on
-  every fresh clone. The fix is off-machine sync (see "Off-machine
-  sync" rejection above).
+- **`discharged_since_commit` semantics on fresh clones.** A team
+  running gates only on CI will have an empty local history on a
+  developer's first clone, so the field will report a tighter
+  "since the current commit" boundary than the team's true
+  verification record warrants. The fix is off-machine sync (see
+  the "Off-machine sync" rejection above), separate from this wave.
+- **Verbatim `spec_excerpt`.** The schema doc now explicitly says
+  the field is a canonical re-rendering. Switching to verbatim
+  byte-range extraction requires the parser to track source
+  offsets — a small follow-up that would let auditors quote the
+  spec exactly as written.
