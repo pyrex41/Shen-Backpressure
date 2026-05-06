@@ -229,6 +229,15 @@ func mergeDischargeReports(parts []*DischargeReport) *DischargeReport {
 	sort.SliceStable(out.Rules, func(i, j int) bool {
 		return out.Rules[i].Name < out.Rules[j].Name
 	})
+	// Normalise: every "always present, possibly empty" array
+	// (counter_examples is required by the schema) surfaces as []
+	// in JSON, never null. code_references stays `omitempty` so
+	// premises that don't have refs don't carry an empty array.
+	for i := range out.Rules {
+		if out.Rules[i].CounterExamples == nil {
+			out.Rules[i].CounterExamples = []DischargeCounter{}
+		}
+	}
 	out.Summary = computeDischargeSummary(out.Rules)
 	return &out
 }
@@ -339,12 +348,51 @@ func parseGoTestFailures(output string) []parsedFailure {
 				specOutput: strings.TrimSpace(m[2]),
 				implOutput: strings.TrimSpace(m[3]),
 			})
-			// Don't reset currentImplFunc/currentCase — go test
-			// prints subsequent === RUN lines for siblings, and the
-			// failure body of the current case can only appear once.
+			// Reset on consume. Subsequent body lines without a
+			// fresh `=== RUN` header would otherwise be silently
+			// re-attributed to the same subtest.
+			currentImplFunc = ""
+			currentCase = ""
 		}
 	}
 	return out
+}
+
+// downgradeRuntimeSampledToUnproven flips every runtime-sampled
+// premise to "unproven" and rolls the parent rule's status to
+// "unproven" (unless it is already "violated", which takes
+// precedence). Used by sb derive when the spec ≡ impl oracle did
+// not actually execute (--regen, --skip-test): without this, the
+// classifier's optimistic SamplesPassed = total / Status =
+// discharged shape would let the report claim sampled equivalence
+// held when zero inputs were checked.
+//
+// reason is the explicit English rationale recorded on each affected
+// premise so the audit-grade Markdown rendering can show why the
+// premise is unproven.
+func downgradeRuntimeSampledToUnproven(r *DischargeReport, reason string) {
+	if reason == "" {
+		reason = "tests did not run; sampled equivalence is unverified"
+	}
+	for i := range r.Rules {
+		ruleHasUnproven := false
+		for j := range r.Rules[i].Premises {
+			p := &r.Rules[i].Premises[j]
+			if p.Discharge != DischargeRuntimeSampled {
+				continue
+			}
+			p.Discharge = DischargeUnproven
+			p.DischargeBasis = "tests-not-run"
+			p.SamplesPassed = 0
+			p.SamplesFailed = 0
+			p.Rationale = reason
+			ruleHasUnproven = true
+		}
+		if ruleHasUnproven && r.Rules[i].Status != DischargeStatusViolated {
+			r.Rules[i].Status = DischargeStatusUnproven
+		}
+	}
+	r.Summary = computeDischargeSummary(r.Rules)
 }
 
 // applyCounterExamples mutates the report by attaching counter-example
@@ -360,6 +408,13 @@ func applyCounterExamples(r *DischargeReport, failures []parsedFailure, specs []
 		implFuncToRule[s.ImplFunc] = s.Func
 		implFuncToFile[s.ImplFunc] = guessImplFile(s)
 	}
+	// Per-rule failure tally so the runtime-sampled premise's
+	// passed/failed counts can be computed as
+	//     failed  = N
+	//     passed  = total - N
+	// rather than incrementing in place. This avoids an off-by-one
+	// risk if the parser ever double-counts a body line.
+	failsByRule := map[string]int{}
 	for _, f := range failures {
 		ruleName, ok := implFuncToRule[f.implFunc]
 		if !ok {
@@ -380,14 +435,28 @@ func applyCounterExamples(r *DischargeReport, failures []parsedFailure, specs []
 			}
 			r.Rules[i].Status = DischargeStatusViolated
 			r.Rules[i].CounterExamples = append(r.Rules[i].CounterExamples, ce)
-			// Bump the runtime-sampled premise's failed count.
+		}
+		failsByRule[ruleName]++
+	}
+	for ruleName, failed := range failsByRule {
+		for i := range r.Rules {
+			if r.Rules[i].Name != ruleName {
+				continue
+			}
 			for j := range r.Rules[i].Premises {
-				if r.Rules[i].Premises[j].Discharge == DischargeRuntimeSampled {
-					r.Rules[i].Premises[j].SamplesFailed++
-					if r.Rules[i].Premises[j].SamplesPassed > 0 {
-						r.Rules[i].Premises[j].SamplesPassed--
-					}
+				p := &r.Rules[i].Premises[j]
+				if p.Discharge != DischargeRuntimeSampled {
+					continue
 				}
+				total := p.SamplesPassed + p.SamplesFailed
+				p.SamplesFailed = failed
+				if failed > total {
+					// Defensive: parser yielded more failures than
+					// total cases. Cap at total; passed cannot be
+					// negative.
+					p.SamplesFailed = total
+				}
+				p.SamplesPassed = total - p.SamplesFailed
 			}
 		}
 	}
@@ -449,6 +518,12 @@ func rotateDischargeHistory(r *DischargeReport, currentPath string) error {
 	return nil
 }
 
+// pruneDischargeHistory enforces the documented retention policy:
+// keep the `retain` newest entries plus the oldest entry of each
+// (year, month) bucket. The per-month carve-out preserves
+// long-horizon audit evidence (e.g. "this rule has been verified
+// every month since 2026-04") that pure-modtime pruning would
+// silently drop after a busy week.
 func pruneDischargeHistory(retain int) {
 	entries, err := os.ReadDir(DischargeHistoryDir)
 	if err != nil {
@@ -472,18 +547,45 @@ func pruneDischargeHistory(retain int) {
 	if len(items) <= retain {
 		return
 	}
+	// Newest first.
 	sort.Slice(items, func(i, j int) bool { return items[i].mod.After(items[j].mod) })
-	for _, item := range items[retain:] {
+
+	keep := make(map[string]bool, len(items))
+	// 1) The N newest entries.
+	for i := 0; i < retain && i < len(items); i++ {
+		keep[items[i].name] = true
+	}
+	// 2) The oldest entry per (year, month) bucket. Walk the slice
+	//    oldest-first (reverse order) so the first time we see a
+	//    new bucket we are at its earliest entry.
+	monthSeen := map[string]bool{}
+	for i := len(items) - 1; i >= 0; i-- {
+		bucket := items[i].mod.UTC().Format("2006-01")
+		if !monthSeen[bucket] {
+			monthSeen[bucket] = true
+			keep[items[i].name] = true
+		}
+	}
+	for _, item := range items {
+		if keep[item.name] {
+			continue
+		}
 		os.Remove(filepath.Join(DischargeHistoryDir, item.name))
 	}
 }
 
-// computeDischargedSinceCommit walks the history backward to find the
-// last commit at which each rule's status differed from the current
-// status. The successor commit becomes `discharged_since_commit`. If
-// no history exists or all history shows the same status, the field
-// is set to the current git commit (or left null when git is
-// unavailable).
+// computeDischargedSinceCommit walks the history newest -> oldest
+// tracking the previously seen (newer) entry's commit. When we
+// encounter an entry where the rule was *not* discharged, the
+// previous (newer) commit is the one where the rule returned to
+// discharged — that is the audit-friendly "verified continuously
+// since" boundary.
+//
+// If no boundary is found before we exhaust history, the rule has
+// been discharged for as long as we have on-disk evidence; the
+// oldest entry's commit becomes the boundary (a tighter claim than
+// "since the current commit"). When git is unavailable for the
+// current run the field is left null.
 func computeDischargedSinceCommit(r *DischargeReport) {
 	if r.Impl.GitCommit == nil {
 		return
@@ -498,32 +600,30 @@ func computeDischargedSinceCommit(r *DischargeReport) {
 			rule.DischargedSinceCommit = nil
 			continue
 		}
-		since := currentCommit
-		// Walk history newest -> oldest. Find the most recent entry
-		// where this rule's status was NOT discharged. Its successor
-		// is `discharged_since_commit`. If we never find one, the
-		// rule has been discharged for as long as we have history,
-		// in which case we use the oldest history entry's commit.
-		var oldest *DischargeReport
+
+		// Initial boundary: the current commit. We move it back as
+		// we walk history newest -> oldest while every entry shows
+		// the rule discharged.
+		boundary := currentCommit
+		foundFlip := false
 		for _, h := range history {
-			oldest = h
 			matching := findRule(h, rule.Name)
 			if matching == nil || matching.Status != DischargeStatusDischarged {
-				if h.Impl.GitCommit != nil {
-					since = currentCommit // we flipped recently; current commit is the boundary
-				}
+				// This entry is the oldest non-discharged state we
+				// can see. The successor commit (the newer one we
+				// most recently walked through) is when the rule
+				// returned to discharged.
+				foundFlip = true
 				break
 			}
-		}
-		if oldest != nil && oldest.Impl.GitCommit != nil {
-			// If the oldest history entry has this rule discharged,
-			// we know it's been clean since at least that commit.
-			matching := findRule(oldest, rule.Name)
-			if matching != nil && matching.Status == DischargeStatusDischarged && oldest.Impl.GitCommit != nil {
-				since = *oldest.Impl.GitCommit
+			// Still discharged at this entry; this commit is the
+			// new lower bound.
+			if h.Impl.GitCommit != nil {
+				boundary = *h.Impl.GitCommit
 			}
 		}
-		s := since
+		_ = foundFlip
+		s := boundary
 		rule.DischargedSinceCommit = &s
 	}
 }
@@ -572,13 +672,6 @@ func findRule(r *DischargeReport, name string) *DischargeRule {
 		}
 	}
 	return nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // normaliseDischargePaths replaces absolute paths in a per-spec
