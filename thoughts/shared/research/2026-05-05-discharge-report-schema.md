@@ -109,7 +109,7 @@ The same JSON file feeds both renderings; a single source of truth.
 | `name` | required | Shen name as written in the spec (`balance-invariant`, `processable`). |
 | `kind` | required | One of: `wrapper`, `constrained`, `composite`, `guarded`, `alias`, `sumtype`, `define`. Mirrors `specfile.TypeCategory` plus `define`. |
 | `spec_file` | required | Relative path to the spec file containing this rule. |
-| `spec_excerpt` | required | Multi-line spec block, verbatim. |
+| `spec_excerpt` | required | Canonical re-rendering of the spec block, derived from the parsed AST. Whitespace, separator widths, and ordering are normalised; this is *not* a byte-for-byte slice of the source file. The intent is a stable, diffable rendering — verbatim source extraction is a future change that requires the parser to track byte offsets. |
 | `human_description` | required | Plain-English summary. Required even when no `:doc` annotation exists. |
 | `human_description_source` | required | One of: `:doc` (sourced from a `:doc "..."` annotation in the spec), `auto-generated` (synthesised). Auditors can tell whether a human signed off on the description. |
 | `premises` | required | At least one entry. Empty rules are filtered out. |
