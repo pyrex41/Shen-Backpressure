@@ -104,7 +104,7 @@ sb loop        # run the Ralph loop
 
 `sb init` does both the project scaffold and the Claude Code skill
 install in one go; the skill bundle comes from the binary's embedded
-copy of `sb/`. Install Option C below describes the same flow if you
+copy of `sb/`. Install Option D below describes the same flow if you
 already have a project and only want the skills. Run
 `sb gates` between iterations if you'd rather drive the loop yourself.
 `examples/payment/` is the canonical end-to-end walkthrough.
@@ -184,7 +184,18 @@ holographic mocks, and compliance audit trails.
 
 ## Install
 
-### Option A: SKM (recommended)
+### Option A: Claude Code plugin (recommended)
+
+```
+/plugin marketplace add pyrex41/Shen-Backpressure
+/plugin install sb@shen-backpressure
+```
+
+Run those two slash commands inside Claude Code. This installs the
+`/sb:*` commands and the `shen-backpressure` skill globally — no files
+copied into your project, and `/plugin` keeps it updated.
+
+### Option B: SKM
 
 ```bash
 skm sources add https://github.com/pyrex41/Shen-Backpressure
@@ -192,7 +203,7 @@ cd your-project
 skm sb
 ```
 
-### Option B: Manual Claude Code install
+### Option C: Manual Claude Code install
 
 ```bash
 mkdir -p .claude/commands/sb .claude/skills/shen-backpressure
@@ -201,14 +212,14 @@ cp Shen-Backpressure/sb/AGENT_PROMPT.md .claude/commands/sb/
 cp Shen-Backpressure/sb/skills/shen-backpressure/SKILL.md .claude/skills/shen-backpressure/
 ```
 
-### Option C: `sb init`
+### Option D: `sb init`
 
-`sb init` is the same skill-install flow as Option B, plus a project
+`sb init` is the same skill-install flow as Option C, plus a project
 scaffold (specs/core.shen, sb.toml, prompts/, plans/). It reads the
 binary's embedded copy of `sb/`; that copy is a build-time mirror,
 and `make check-skilldata` enforces equality with the canonical
-`sb/` tree. Use it when you also want the project files; use Option
-A or B when you only want the skills.
+`sb/` tree. Use it when you also want the project files; use another
+option when you only want the skills.
 
 ## Commands
 
