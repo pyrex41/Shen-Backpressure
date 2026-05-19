@@ -1,0 +1,12 @@
+{
+  "name": "sb",
+  "description": "Shen Backpressure — formal verification for AI coding via Shen sequent-calculus types, shengen guard generation, and the shen-derive spec-equivalence gate.",
+  "version": "0.1.0",
+  "author": {
+    "name": "pyrex41",
+    "email": "reub.brooks@gmail.com"
+  },
+  "homepage": "https://github.com/pyrex41/Shen-Backpressure",
+  "repository": "https://github.com/pyrex41/Shen-Backpressure",
+  "keywords": ["shen", "formal-verification", "codegen", "ralph", "backpressure"]
+}
