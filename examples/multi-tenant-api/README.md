@@ -31,9 +31,9 @@ from a Showboat session that drove the example end-to-end.
 - `bin/sb` from the repo root (`make build-sb`)
 - Optional for Gate 4: `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl`
 
-The example does not have an `sb.toml`, so `sb gates` runs the
-default five-gate pipeline against convention paths
-(`specs/core.shen`, `internal/shenguard/guards_gen.go`).
+The example ships an `sb.toml` that declares the five-gate pipeline
+explicitly via the `[[gates]]` array. `sb gates` reads the gate
+topology straight from the manifest.
 
 ## Walkthrough
 
@@ -51,34 +51,29 @@ cross-tenant rejection tests; the auth suite covers JWT signing,
 expiry, tampering, and middleware.
 
 ```bash
-# Run the gate set the way an agent loop would.
-# `make build-sb` writes the binary to bin/sb at the repo root,
-# not on $PATH; reference it explicitly from the example's cwd.
+# Run the gate set the way an agent loop would. `sb gates` reads the
+# pipeline from sb.toml. `make build-sb` writes the binary to bin/sb
+# at the repo root, not on $PATH; reference it explicitly.
 ../../bin/sb gates
 ```
 
-Expected output. Without `shen-sbcl` installed, Gate 4 (`shen-check`)
-fails with a missing-runtime message and the `shengen`/`tcb-audit`
-gates fail because the example's `bin/shengen-codegen.sh` and
-`bin/shenguard-audit.sh` look for `cmd/shengen/main.go` relative to
-the example's working directory rather than the repo root. With
-`shen-sbcl` installed and shengen pre-built (e.g. via
-`make build-shengen` at the repo root and a symlink into the
-example's `bin/`), all five gates pass.
+Expected output — all five gates pass:
 
 ```
-FAIL  shengen        ~5ms       ← needs shengen on PATH
-PASS  test           ~13s
-PASS  build          ~1s
-FAIL  shen-check     ~2ms       ← needs shen-sbcl
-FAIL  tcb-audit      ~5ms       ← needs shengen on PATH
+PASS  shengen        12ms
+PASS  test           136ms
+PASS  build          512ms
+PASS  shen-check     149ms
+PASS  tcb-audit      19ms
 
-2/5 gates passed   (5/5 with shen-sbcl + shengen wired in)
+5/5 gates passed
 ```
 
-Tests and build are the meaningful guardrails for a fresh-clone
-read; the other three gates need environment plumbing this example
-has not adopted yet.
+The `shengen` and `tcb-audit` gates locate `shengen` via the
+repo-root `cmd/shengen`, building it into `bin/` on first run; Gate 4
+(`shen-check`) needs `shen-sbcl` on the system (see Prerequisites).
+From a checkout that has neither the repo-root sources nor
+`shen-sbcl`, `test` and `build` still run as the baseline guardrails.
 
 ## The proof chain
 
@@ -116,14 +111,14 @@ The shengen output gives every Go handler the same guarantee:
 ```go
 func NewTenantAccess(p AuthenticatedPrincipal, t TenantId, isMember bool) (TenantAccess, error) {
     if !(isMember == true) {
-        return TenantAccess{}, fmt.Errorf("isMember must be true")
+        return TenantAccess{}, fmt.Errorf("isMember must equal true")
     }
     return TenantAccess{principal: p, tenant: t, isMember: isMember}, nil
 }
 
 func NewResourceAccess(a TenantAccess, r ResourceId, isOwned bool) (ResourceAccess, error) {
     if !(isOwned == true) {
-        return ResourceAccess{}, fmt.Errorf("isOwned must be true")
+        return ResourceAccess{}, fmt.Errorf("isOwned must equal true")
     }
     return ResourceAccess{access: a, resource: r, isOwned: isOwned}, nil
 }

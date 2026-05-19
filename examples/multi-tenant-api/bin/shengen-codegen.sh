@@ -8,25 +8,33 @@ SPEC="${1:-specs/core.shen}"
 PKG="${2:-shenguard}"
 OUT="${3:-internal/shenguard/guards_gen.go}"
 
-# Find shengen binary — check local bin/ first, then repo root
+# Find shengen binary — check local bin/, the script's dir, and the
+# parent repo's bin/ (when the example is nested under a Shen-Backpressure
+# checkout).
 SHENGEN=""
-if [ -f bin/shengen ]; then
-    SHENGEN=bin/shengen
-elif [ -f "$(dirname "$0")/shengen" ]; then
-    SHENGEN="$(dirname "$0")/shengen"
-fi
+for candidate in bin/shengen "$(dirname "$0")/shengen" ../../bin/shengen; do
+    if [ -f "$candidate" ]; then
+        SHENGEN="$candidate"
+        break
+    fi
+done
 
 # Build from source if not found
 if [ -z "$SHENGEN" ]; then
-    SHENGEN_SRC="${SHENGEN_SRC:-cmd/shengen}"
-    if [ -f "$SHENGEN_SRC/main.go" ]; then
-        echo "Building shengen from $SHENGEN_SRC..."
-        (cd "$SHENGEN_SRC" && go build -o "$(pwd)/../../bin/shengen" .)
-        SHENGEN=bin/shengen
-    else
-        echo "ERROR: shengen binary not found and source not at $SHENGEN_SRC/main.go"
-        exit 1
-    fi
+    for src in "${SHENGEN_SRC:-cmd/shengen}" ../../cmd/shengen; do
+        if [ -f "$src/main.go" ]; then
+            echo "Building shengen from $src..."
+            mkdir -p bin
+            (cd "$src" && go build -o "$OLDPWD/bin/shengen" .)
+            SHENGEN=bin/shengen
+            break
+        fi
+    done
+fi
+
+if [ -z "$SHENGEN" ]; then
+    echo "ERROR: shengen binary not found and source not at cmd/shengen/main.go (or ../../cmd/shengen)"
+    exit 1
 fi
 
 if [ ! -f "$SPEC" ]; then
