@@ -1,21 +1,22 @@
 # Multi-Tenant SaaS API — Shen Backpressure Demo
 
-*2026-03-27T03:59:08Z by Showboat 0.6.1*
-<!-- showboat-id: 1d5ad352-0161-4ca8-9e6a-57b35483b670 -->
+*2026-05-19T03:52:46Z by Showboat 0.6.1*
+<!-- showboat-id: b85018c6-796e-480d-8ba5-7de412e0009e -->
 
 A multi-tenant SaaS API in Go where every data access carries proof of authentication and tenant-scoped authorization. The proof chain — JWT → AuthenticatedUser → TenantAccess → ResourceAccess — is enforced at compile time through Shen sequent-calculus guard types. Cross-tenant data access is impossible by construction.
+
+Every code block below was executed by [Showboat](https://github.com/sutt/showboat) and its output captured verbatim. Run `showboat verify demo.md` to re-execute the blocks and confirm the outputs still hold.
 
 ## Project Structure
 
 ```bash
-find . -type f -not -path './bin/*' -not -path './.claude/*' -not -path './transcript/*' -not -path './.git/*' -not -name 'data.db*' -not -name '*.sum' | sort
+find . -type f -not -path './bin/*' -not -path './.claude/*' -not -path './transcript/*' -not -path './.git/*' -not -name '*.db' -not -name '*.sum' | sort
 ```
 
 ```output
 ./.gitignore
 ./cmd/ralph/main.go
 ./cmd/server/main.go
-./DEMO_START_PROMPT.md
 ./demo.md
 ./go.mod
 ./internal/auth/jwt_test.go
@@ -32,13 +33,16 @@ find . -type f -not -path './bin/*' -not -path './.claude/*' -not -path './trans
 ./internal/shenguard/guards_gen.go
 ./Makefile
 ./plans/fix_plan.md
+./PROMPT.md
 ./prompts/main_prompt.md
+./README.md
+./sb.toml
 ./specs/core.shen
 ```
 
 ## Shen Formal Specification
 
-The proof chain is defined in `specs/core.shen` using Shen's sequent calculus. Each datatype encodes an invariant that becomes a validated constructor in Go.
+The proof chain lives in `specs/core.shen`. Each `datatype` block lists its premises above the line; the conclusion below the line can only be formed once every premise — including `verified` predicates — is satisfied. `shengen` lowers each block into a Go type with an opaque field set and a validated constructor.
 
 ```bash
 cat specs/core.shen
@@ -98,15 +102,42 @@ cat specs/core.shen
   ===================================
   [Token Expiry User] : authenticated-user;)
 
-\* --- TenantAccess — requires authenticated user who is a member --- *\
+\* --- Service credentials for background jobs / cron --- *\
+
+(datatype service-id
+  X : string;
+  ==============
+  X : service-id;)
+
+(datatype service-credential
+  Service : service-id;
+  Secret : string;
+  (not (= Secret "")) : verified;
+  ================================
+  [Service Secret] : service-credential;)
+
+\* --- Authenticated principal — sum type: human OR service account --- *\
+\* Two blocks produce the same conclusion type → generates a Go interface *\
+
+(datatype human-principal
+  Auth : authenticated-user;
+  ===========================
+  Auth : authenticated-principal;)
+
+(datatype service-principal
+  Cred : service-credential;
+  ============================
+  Cred : authenticated-principal;)
+
+\* --- TenantAccess — requires authenticated principal who is a member --- *\
 
 (datatype tenant-access
-  Auth : authenticated-user;
+  Principal : authenticated-principal;
   Tenant : tenant-id;
   IsMember : boolean;
   (= IsMember true) : verified;
   ================================
-  [Auth Tenant IsMember] : tenant-access;)
+  [Principal Tenant IsMember] : tenant-access;)
 
 \* --- ResourceAccess — requires tenant access + tenant owns resource --- *\
 
@@ -121,36 +152,39 @@ cat specs/core.shen
 
 ## Five Verification Gates
 
-The Ralph loop enforces correctness through five gates that run in sequence:
+The gate pipeline is declared in `sb.toml` as a `[[gates]]` array. `sb gates` reads the topology from the manifest and runs each gate in turn:
 
-1. **shengen** — Regenerate Go guard types from `specs/core.shen`
-2. **go test** — Run tests against the regenerated types
-3. **go build** — Compile everything (catches type mismatches)
-4. **shen tc+** — Verify spec internal consistency via Shen's type checker (using shen-sbcl)
+1. **shengen** — regenerate Go guard types from `specs/core.shen`
+2. **test** — run the suite against the regenerated types
+3. **build** — compile everything (catches type-signature mismatches)
+4. **shen-check** — Shen's type checker confirms the spec is internally consistent
+5. **tcb-audit** — re-run shengen and reject any drift or hand-edits in the `shenguard/` package
+
+In a Ralph loop a failing gate feeds its error back into the next prompt as backpressure. (Color codes from `sb`'s output are stripped so the capture stays clean.)
 
 ```bash
-make all
+../../bin/sb gates 2>&1 | perl -pe 's/\e\[[0-9;]*m//g'
 ```
 
 ```output
-./bin/shengen-codegen.sh specs/core.shen shenguard internal/shenguard/guards_gen.go
-Generated internal/shenguard/guards_gen.go from specs/core.shen (package shenguard)
-go test ./...
-?   	multi-tenant-api/cmd/ralph	[no test files]
-?   	multi-tenant-api/cmd/server	[no test files]
-ok  	multi-tenant-api/internal/auth	(cached)
-ok  	multi-tenant-api/internal/db	(cached)
-ok  	multi-tenant-api/internal/handlers	(cached)
-?   	multi-tenant-api/internal/shenguard	[no test files]
-go build ./...
-./bin/shen-check.sh
-RESULT: PASS
-Shen type check passed for specs/core.shen
+PASS [shengen] 12ms
+PASS [test] 128ms
+PASS [build] 399ms
+PASS [shen-check] 151ms
+PASS [tcb-audit] 18ms
+
+  PASS  shengen        12ms
+  PASS  test           128ms
+  PASS  build          399ms
+  PASS  shen-check     151ms
+  PASS  tcb-audit      18ms
+
+5/5 gates passed
 ```
 
 ## Generated Guard Types
 
-`shengen` compiles the Shen spec into Go types with opaque fields and validated constructors. You cannot bypass the proof chain — the Go compiler enforces it.
+`shengen` compiles the Shen spec into Go types with unexported fields and validated constructors. The constructors are the only way to build these values, so the proof chain cannot be forged from outside the package — the Go compiler enforces it.
 
 ```bash
 cat internal/shenguard/guards_gen.go
@@ -168,6 +202,13 @@ package shenguard
 import (
 	"fmt"
 )
+
+// --- AuthenticatedPrincipal (sum type) ---
+// Multiple Shen datatype blocks produce this type.
+// Variants: human-principal, service-principal
+type AuthenticatedPrincipal interface {
+	isAuthenticatedPrincipal()
+}
 
 // --- UserId ---
 // Shen: (datatype user-id)
@@ -261,26 +302,93 @@ func (t AuthenticatedUser) Expiry() TokenExpiry { return t.expiry }
 func (t AuthenticatedUser) User() UserId { return t.user }
 
 
+// --- ServiceId ---
+// Shen: (datatype service-id)
+type ServiceId struct{ v string }
+
+func NewServiceId(x string) ServiceId { return ServiceId{v: x} }
+
+func (t ServiceId) Val() string { return t.v }
+
+func (t ServiceId) String() string { return t.v }
+
+
+// --- ServiceCredential ---
+// Shen: (datatype service-credential)
+type ServiceCredential struct {
+	service ServiceId
+	secret string
+}
+
+func NewServiceCredential(service ServiceId, secret string) (ServiceCredential, error) {
+	if !(!(secret == "")) {
+		return ServiceCredential{}, fmt.Errorf("not: secret must equal \"\"")
+	}
+	return ServiceCredential{
+		service: service,
+		secret: secret,
+	}, nil
+}
+
+func (t ServiceCredential) Service() ServiceId { return t.service }
+
+func (t ServiceCredential) Secret() string { return t.secret }
+
+
+// --- HumanPrincipal ---
+// Shen: (datatype human-principal)
+type HumanPrincipal struct {
+	auth AuthenticatedUser
+}
+
+func NewHumanPrincipal(auth AuthenticatedUser) HumanPrincipal {
+	return HumanPrincipal{
+		auth: auth,
+	}
+}
+
+func (t HumanPrincipal) Auth() AuthenticatedUser { return t.auth }
+
+func (t HumanPrincipal) isAuthenticatedPrincipal() {}
+
+
+// --- ServicePrincipal ---
+// Shen: (datatype service-principal)
+type ServicePrincipal struct {
+	cred ServiceCredential
+}
+
+func NewServicePrincipal(cred ServiceCredential) ServicePrincipal {
+	return ServicePrincipal{
+		cred: cred,
+	}
+}
+
+func (t ServicePrincipal) Cred() ServiceCredential { return t.cred }
+
+func (t ServicePrincipal) isAuthenticatedPrincipal() {}
+
+
 // --- TenantAccess ---
 // Shen: (datatype tenant-access)
 type TenantAccess struct {
-	auth AuthenticatedUser
+	principal AuthenticatedPrincipal
 	tenant TenantId
 	isMember bool
 }
 
-func NewTenantAccess(auth AuthenticatedUser, tenant TenantId, isMember bool) (TenantAccess, error) {
+func NewTenantAccess(principal AuthenticatedPrincipal, tenant TenantId, isMember bool) (TenantAccess, error) {
 	if !(isMember == true) {
 		return TenantAccess{}, fmt.Errorf("isMember must equal true")
 	}
 	return TenantAccess{
-		auth: auth,
+		principal: principal,
 		tenant: tenant,
 		isMember: isMember,
 	}, nil
 }
 
-func (t TenantAccess) Auth() AuthenticatedUser { return t.auth }
+func (t TenantAccess) Principal() AuthenticatedPrincipal { return t.principal }
 
 func (t TenantAccess) Tenant() TenantId { return t.tenant }
 
@@ -317,92 +425,104 @@ func (t ResourceAccess) IsOwned() bool { return t.isOwned }
 
 ## Live API Demo
 
-Starting the server with seeded demo data (2 tenants, 3 users, resources).
-
-### Login — constructs AuthenticatedUser proof
+The server seeds two tenants (Acme, Globex), three users, and a handful of resources. Alice is a member of Acme only. The block below builds and starts the server, logs in as Alice, and exercises the proof chain across both tenants — member access succeeds, cross-tenant access is rejected at the boundary.
 
 ```bash
-curl -s -X POST http://localhost:8080/auth/login -H "Content-Type: application/json" -d "{\"email\":\"alice@acme.com\",\"password\":\"alice123\"}" | python3 -m json.tool
+set -e
+go build -o /tmp/mtapi-server ./cmd/server
+DB=$(mktemp -u /tmp/mtapi-demo-XXXXX.db)
+/tmp/mtapi-server -addr 127.0.0.1:8899 -db "$DB" -seed > /tmp/mtapi-server.log 2>&1 &
+SRV=$!
+trap 'kill $SRV 2>/dev/null; rm -f "$DB"' EXIT
+for i in $(seq 1 50); do
+  curl -s -o /dev/null -X POST http://127.0.0.1:8899/auth/login \
+    -H 'Content-Type: application/json' -d '{}' 2>/dev/null && break
+  sleep 0.2
+done
+
+echo '=== Login (alice@acme.com): issues a JWT and seeds the AuthenticatedUser proof ==='
+LOGIN=$(curl -s -X POST http://127.0.0.1:8899/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"alice@acme.com","password":"alice123"}')
+echo "$LOGIN" | python3 -m json.tool
+TOKEN=$(echo "$LOGIN" | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')
+
+echo
+echo '=== Alice lists Acme resources (she is a member: TenantAccess proof succeeds) ==='
+curl -s http://127.0.0.1:8899/tenants/t-acme/resources \
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+
+echo
+echo '=== Alice lists Globex resources (not a member: no TenantAccess can be built) ==='
+curl -s http://127.0.0.1:8899/tenants/t-globex/resources \
+  -H "Authorization: Bearer $TOKEN"
+echo
+
+echo
+echo '=== Alice reads Acme resource r-1 (owned by Acme: ResourceAccess proof succeeds) ==='
+curl -s http://127.0.0.1:8899/tenants/t-acme/resources/r-1 \
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+
+echo
+echo '=== Alice reads Globex resource r-3 (cross-tenant: rejected) ==='
+curl -s http://127.0.0.1:8899/tenants/t-globex/resources/r-3 \
+  -H "Authorization: Bearer $TOKEN"
+echo
+
+echo
+echo '=== No Authorization header at all (rejected before any proof is attempted) ==='
+curl -s http://127.0.0.1:8899/tenants/t-acme/resources
+echo
 ```
 
 ```output
+=== Login (alice@acme.com): issues a JWT and seeds the AuthenticatedUser proof ===
 {
-    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1LWFsaWNlIiwiZW1haWwiOiJhbGljZUBhY21lLmNvbSIsImV4cCI6MTc3NDY3MDQxNiwiaWF0IjoxNzc0NTg0MDE2fQ.ubC3CZ5fLHBu1TGlpJv8veKztHk4rw8TVb1MCV8fSMY",
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1LWFsaWNlIiwiZW1haWwiOiJhbGljZUBhY21lLmNvbSIsImV4cCI6MTc3OTI0OTE2NywiaWF0IjoxNzc5MTYyNzY3fQ.8Pp6Ujgd4CXTF5CAoLgcMwEE6DvlJQHI4gFt76OMRbk",
     "user_id": "u-alice"
 }
-```
 
-### Proof chain enforcement — TenantAccess
-
-Alice is a member of Acme but NOT Globex. The guard types enforce this at the boundary.
-
-```bash
-TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1LWFsaWNlIiwiZW1haWwiOiJhbGljZUBhY21lLmNvbSIsImV4cCI6MTc3NDY3MDQzMCwiaWF0IjoxNzc0NTg0MDMwfQ.i7nlcJbPUUAkfpnndirNzI7ITF9AnaG3jTL2GZ8Gd00"
-echo '=== Alice requests Acme resources (member — should succeed) ==='
-curl -s http://localhost:8080/tenants/t-acme/resources -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
-
-echo ''
-echo '=== Alice requests Globex resources (NOT member — should fail) ==='
-curl -s http://localhost:8080/tenants/t-globex/resources -H "Authorization: Bearer $TOKEN"
-
-echo ''
-echo '=== No token at all (should fail) ==='
-curl -s http://localhost:8080/tenants/t-acme/resources
-```
-
-```output
-=== Alice requests Acme resources (member — should succeed) ===
+=== Alice lists Acme resources (she is a member: TenantAccess proof succeeds) ===
 [
     {
         "id": "r-1",
         "title": "Acme Roadmap",
         "body": "Q3 priorities...",
-        "created_at": "2026-03-27 03:42:34"
+        "created_at": "2026-05-19 03:52:47"
     },
     {
         "id": "r-2",
         "title": "Acme Budget",
         "body": "FY26 budget draft",
-        "created_at": "2026-03-27 03:42:34"
+        "created_at": "2026-05-19 03:52:47"
     }
 ]
 
-=== Alice requests Globex resources (NOT member — should fail) ===
-tenant access denied: user u-alice is not a member of tenant t-globex
+=== Alice lists Globex resources (not a member: no TenantAccess can be built) ===
+tenant access denied: u-alice is not a member of tenant t-globex
 
-=== No token at all (should fail) ===
-missing authorization header
-```
 
-### ResourceAccess proof — single resource lookup
-
-```bash
-TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1LWFsaWNlIiwiZW1haWwiOiJhbGljZUBhY21lLmNvbSIsImV4cCI6MTc3NDY3MDQ0MCwiaWF0IjoxNzc0NTg0MDQwfQ.IKox7QXbhxPTe71nUcQZo1uYjf3grCYzsfIMKqOY8u8"
-echo '=== Alice reads Acme resource r-1 (owned by Acme — should succeed) ==='
-curl -s http://localhost:8080/tenants/t-acme/resources/r-1 -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
-
-echo ''
-echo '=== Alice reads Globex resource r-3 (not her tenant — should fail) ==='
-curl -s http://localhost:8080/tenants/t-globex/resources/r-3 -H "Authorization: Bearer $TOKEN"
-```
-
-```output
-=== Alice reads Acme resource r-1 (owned by Acme — should succeed) ===
+=== Alice reads Acme resource r-1 (owned by Acme: ResourceAccess proof succeeds) ===
 {
     "body": "Q3 priorities...",
-    "created_at": "2026-03-27 03:42:34",
+    "created_at": "2026-05-19 03:52:47",
     "id": "r-1",
     "tenant_id": "t-acme",
     "title": "Acme Roadmap"
 }
 
-=== Alice reads Globex resource r-3 (not her tenant — should fail) ===
-tenant access denied: user u-alice is not a member of tenant t-globex
+=== Alice reads Globex resource r-3 (cross-tenant: rejected) ===
+tenant access denied: u-alice is not a member of tenant t-globex
+
+
+=== No Authorization header at all (rejected before any proof is attempted) ===
+missing authorization header
+
 ```
 
 ## Test Suite
 
-Integration tests verify the proof chain rejects all invalid access patterns.
+The integration tests exercise the proof chain through the live HTTP layer, including `TestCrossTenantAccessRejected` and `TestCrossTenantResourceAccessRejected`.
 
 ```bash
 go test -v ./... 2>&1 | grep -E '=== RUN|--- PASS|--- FAIL|ok |FAIL'
@@ -441,7 +561,7 @@ go test -v ./... 2>&1 | grep -E '=== RUN|--- PASS|--- FAIL|ok |FAIL'
 --- PASS: TestCheckResourceAccessDeniedNonexistent (0.00s)
 === RUN   TestLogAccess
 --- PASS: TestLogAccess (0.00s)
-ok  	multi-tenant-api/internal/auth	0.674s
+ok  	multi-tenant-api/internal/auth	0.016s
 === RUN   TestOpenCreatesAllTables
 --- PASS: TestOpenCreatesAllTables (0.00s)
 === RUN   TestSeedPopulatesData
@@ -450,7 +570,7 @@ ok  	multi-tenant-api/internal/auth	0.674s
 --- PASS: TestForeignKeysEnforced (0.00s)
 === RUN   TestSeedIsIdempotent
 --- PASS: TestSeedIsIdempotent (0.00s)
-ok  	multi-tenant-api/internal/db	(cached)
+ok  	multi-tenant-api/internal/db	0.012s
 === RUN   TestValidAccessAccepted
 --- PASS: TestValidAccessAccepted (0.00s)
 === RUN   TestValidResourceAccessAccepted
@@ -473,12 +593,12 @@ ok  	multi-tenant-api/internal/db	(cached)
 --- PASS: TestCreateResourceValidAccess (0.00s)
 === RUN   TestLoginAndUseToken
 --- PASS: TestLoginAndUseToken (0.00s)
-ok  	multi-tenant-api/internal/handlers	1.055s
+ok  	multi-tenant-api/internal/handlers	0.018s
 ```
 
 ## Shen Type Consistency Check (Gate 4)
 
-The Shen type checker verifies the spec is internally consistent — all proof chains are satisfiable and no contradictions exist. Uses shen-sbcl (Shen on SBCL) with a pre-baked image for instant startup.
+Shen's type checker verifies the spec itself is internally consistent — every proof chain is satisfiable and no rule contradicts another. This runs on `shen-sbcl` (Shen on SBCL) with a pre-baked image for fast startup.
 
 ```bash
 shen-sbcl -e '(tc +)' -l specs/core.shen
@@ -492,27 +612,20 @@ type#resource-id : symbol
 type#jwt-token : symbol
 type#token-expiry : symbol
 type#authenticated-user : symbol
+type#service-id : symbol
+type#service-credential : symbol
+type#human-principal : symbol
+type#service-principal : symbol
 type#tenant-access : symbol
 type#resource-access : symbol
-run time: 0.08173400163650513 secs
+run time: 0.13229099288582802 secs
 
-typechecked in 104 inferences
+typechecked in 152 inferences
 ```
 
 ## How It Was Built
 
-The entire project was built autonomously by a Ralph loop — an outer loop that calls Claude Code repeatedly with five-gate Shen backpressure. The loop completed all 8 plan items in 8 iterations with zero gate failures:
-
-1. SQLite database schema
-2. JWT signing and validation
-3. Authentication proof construction with guard types
-4. Tenant membership lookup and TenantAccess proof
-5. Resource ownership check and ResourceAccess proof
-6. HTTP handlers (login, resource CRUD)
-7. htmx admin dashboard
-8. Integration tests for proof chain
-
-Each iteration: Claude implements one plan item → shengen regenerates guard types → tests run → build compiles → Shen type checker verifies spec consistency. If any gate fails, errors are fed back as backpressure into the next iteration.
+This project was built by a Ralph loop — an outer `bash` loop that calls a coding agent repeatedly, with the five Shen-backpressure gates run after every iteration. Each iteration implements one plan item; `shengen` regenerates the guard types, the gates run, and any gate failure is fed back into the next prompt as concrete context. The plan it worked from:
 
 ```bash
 cat plans/fix_plan.md

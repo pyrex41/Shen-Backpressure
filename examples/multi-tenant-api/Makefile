@@ -21,7 +21,7 @@ shen-check:
 
 # Gate 5: TCB audit — verify shenguard package integrity
 audit:
-	../../bin/shenguard-audit.sh
+	./bin/shenguard-audit.sh
 
 # Run Ralph loop (strict mode)
 run:

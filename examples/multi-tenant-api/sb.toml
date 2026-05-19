@@ -1,0 +1,46 @@
+# Shen-Backpressure manifest for the multi-tenant-api example.
+#
+# Declares the gate topology explicitly via the [[gates]] array of
+# tables (Wave-1 manifest format). These are the same five gates the
+# engine would otherwise synthesise from convention defaults — spelling
+# them out here lets `sb gates` / `sb loop` read the pipeline straight
+# from the manifest instead of relying on path conventions.
+
+[project]
+lang = "go"
+pkg  = "shenguard"
+
+[paths]
+spec   = "specs/core.shen"
+output = "internal/shenguard/guards_gen.go"
+
+[engine]
+relaxed = false
+
+[[gates]]
+name = "shengen"
+kind = "command"
+run  = "./bin/shengen-codegen.sh"
+
+[[gates]]
+name = "test"
+kind = "command"
+run  = "go test ./..."
+
+[[gates]]
+name = "build"
+kind = "command"
+run  = "go build ./..."
+
+[[gates]]
+name = "shen-check"
+kind = "command"
+run  = "./bin/shen-check.sh"
+
+[[gates]]
+name = "tcb-audit"
+kind = "command"
+run  = "./bin/shenguard-audit.sh"
+
+[loop]
+harness = "claude -p"
