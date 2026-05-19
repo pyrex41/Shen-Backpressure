@@ -1,0 +1,14 @@
+{
+  "name": "shen-backpressure",
+  "owner": {
+    "name": "pyrex41",
+    "email": "reub.brooks@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "sb",
+      "source": "./sb",
+      "description": "Shen Backpressure — formal verification for AI coding via Shen sequent-calculus types, shengen guard generation, and the shen-derive spec-equivalence gate. Provides /sb:init, /sb:loop, /sb:derive, /sb:create-shengen, /sb:ralph-scaffold, /sb:help."
+    }
+  ]
+}
