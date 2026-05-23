@@ -42,5 +42,30 @@ name = "tcb-audit"
 kind = "command"
 run  = "./bin/shenguard-audit.sh"
 
+# Gate 6 — spec-equivalence verification via shen-derive.
+#
+# Anchors the discharge report on the trivial `same-user?`
+# oracle (a one-line wrapper-unwrap predicate). Without this entry
+# `sb derive` has no rules to classify and produces an empty report.
+# The wider goal is to get every datatype in specs/core.shen
+# enumerated in transcript/discharge_report.json with its `static`
+# discharge classification — including the W2.1 cross-field premise
+# `(= User (head (head Jwt)))` inside `authenticated-user`.
+#
+# See specs/core.shen for the doc comment explaining why this is the
+# simplest possible derive anchor (shen-derive's sampler doesn't yet
+# filter guarded composites like parsed-claims, so we anchor on a
+# wrapper input).
+[derive]
+dir = "../../shen-derive"
+
+[[derive.specs]]
+path      = "specs/core.shen"
+func      = "same-user?"
+impl_pkg  = "multi-tenant-api/internal/derived"
+impl_func = "SameUser"
+guard_pkg = "multi-tenant-api/internal/shenguard"
+out_file  = "internal/derived/same_user_spec_test.go"
+
 [loop]
 harness = "claude -p"
