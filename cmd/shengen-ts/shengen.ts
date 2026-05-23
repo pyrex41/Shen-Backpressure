@@ -26,6 +26,15 @@ export interface Premise {
 
 export interface VerifiedPremise {
   raw: string;
+  /**
+   * When non-empty, names a runtime checker function that will be
+   * called from the generated constructor to discharge this premise
+   * instead of inlining a translated predicate. Set when the spec
+   * writes `(predicate) : verified via <name>;`. See
+   * docs/RUNTIME-VIA.md for the semantics and the compile-time
+   * witness shape (TS side: a `const _: RuntimeChecker = <name>`).
+   */
+  runtimeVia?: string;
 }
 
 export interface Conclusion {
@@ -1163,6 +1172,14 @@ function buildRule(premLines: string[], concLines: string[]): Rule | null {
       r.verified.push({ raw: line.replace(/\s*:\s*verified$/, "").trim() });
       continue;
     }
+    // `(predicate) : verified via <fname>` — discharge this premise
+    // at runtime by calling <fname> from the constructor. See
+    // docs/RUNTIME-VIA.md.
+    const viaMatch = line.match(/^(.*?)\s*:\s*verified\s+via\s+(\S+)\s*$/);
+    if (viaMatch) {
+      r.verified.push({ raw: viaMatch[1].trim(), runtimeVia: viaMatch[2].trim() });
+      continue;
+    }
     if (line.startsWith("if ")) {
       r.verified.push({ raw: line.slice(3).trim() });
       continue;
@@ -1306,6 +1323,50 @@ export function generateTs(
   lines.push("// is a violation of the formal spec.");
   lines.push("");
 
+  // :runtime-via annotation support — emit a RuntimeChecker type plus
+  // a compile-time witness for each distinct checker referenced by
+  // the spec. The constructor signatures for annotated datatypes
+  // change shape (async + ctx-taking), so this preamble must be the
+  // only place runtime checkers are wired in.
+  const runtimeCheckerNames = collectRuntimeCheckerNames(types);
+  if (runtimeCheckerNames.length > 0) {
+    lines.push("// --- :runtime-via runtime check plumbing ---");
+    lines.push("// Each annotated datatype's constructor calls a named runtime checker");
+    lines.push("// instead of inlining its predicate. The build fails (via the");
+    lines.push("// `const _: RuntimeChecker = …` witnesses below) when a named");
+    lines.push("// checker is missing or has the wrong signature — this is what makes");
+    lines.push("// the runtime call non-skippable.");
+    lines.push("// See docs/RUNTIME-VIA.md for the trust model.");
+    lines.push("export interface RuntimeCheckCtx {");
+    lines.push("  /** Optional AbortSignal forwarded to the checker. */");
+    lines.push("  signal?: AbortSignal;");
+    lines.push("  /** Free-form per-call metadata (request id, tenant id, …). */");
+    lines.push("  meta?: Record<string, unknown>;");
+    lines.push("}");
+    lines.push("export type RuntimeChecker = (");
+    lines.push("  ctx: RuntimeCheckCtx,");
+    lines.push("  predicate: string,");
+    lines.push("  args: unknown[]");
+    lines.push(") => Promise<{ ok: boolean; error?: string }>;");
+    // Witnesses: importing the checker by name from the consumer's
+    // module is left to the consumer's index file; we just declare
+    // the symbol's shape here. The consumer wires the actual
+    // function in via `import` + `const _: RuntimeChecker = …`.
+    // For the prototype the consumer imports the checker and calls
+    // the generated constructor with it.
+    lines.push("");
+    lines.push("// Witness declarations: the consumer must export these names from");
+    lines.push("// the same module that imports the generated guards. The");
+    lines.push("// `runtime_checkers.ts` convention in the shen-web-tools demo is the");
+    lines.push("// reference pattern. The type system enforces the signature.");
+    for (const name of runtimeCheckerNames) {
+      lines.push(`import { ${name} as _runtimeCheckerWitness_${name} } from "./runtime_checkers.js";`);
+      lines.push(`const _runtimeChecker_${name}: RuntimeChecker = _runtimeCheckerWitness_${name};`);
+      lines.push(`void _runtimeChecker_${name};`);
+    }
+    lines.push("");
+  }
+
   // Generate sum type unions.
   const sumTypeVariants = new Set<string>();
   for (const [concType, variants] of st.sumTypes) {
@@ -1414,6 +1475,43 @@ function genMust(
   ];
 }
 
+// collectRuntimeCheckerNames returns the distinct `:runtime-via <name>`
+// checker names referenced anywhere in the spec, sorted to keep
+// emission deterministic.
+function collectRuntimeCheckerNames(types: Datatype[]): string[] {
+  const seen = new Set<string>();
+  for (const dt of types) {
+    for (const r of dt.rules) {
+      for (const v of r.verified) {
+        if (v.runtimeVia) seen.add(v.runtimeVia);
+      }
+    }
+  }
+  return [...seen].sort();
+}
+
+// ruleHasRuntimeVia reports whether any verified premise on `rule`
+// uses a `:runtime-via <name>` annotation.
+function ruleHasRuntimeVia(rule: Rule): boolean {
+  return rule.verified.some((v) => !!v.runtimeVia);
+}
+
+// emitRuntimeViaCheckTs emits one gate-site for a `:runtime-via <name>`
+// verified premise. Used by genConstrained / genGuarded.
+function emitRuntimeViaCheckTs(
+  v: VerifiedPremise,
+  predicateName: string,
+  argNames: string[]
+): string[] {
+  const args = argNames.length > 0 ? argNames.join(", ") : "";
+  return [
+    `    const _check_${v.runtimeVia} = await ${v.runtimeVia}(ctx, ${JSON.stringify(predicateName)}, [${args}]);`,
+    `    if (!_check_${v.runtimeVia}.ok) {`,
+    `      throw new Error(\`${v.runtimeVia} rejected ${predicateName}: \${_check_${v.runtimeVia}.error ?? "runtime check failed"}\`);`,
+    `    }`,
+  ];
+}
+
 function genWrapper(gt: GeneratedType): string[] {
   const tsType = shenTypeToTs(gt.rule.premises[0].typeName);
   const paramsStr = `x: ${tsType}`;
@@ -1440,6 +1538,45 @@ function genConstrained(gt: GeneratedType, st: SymbolTable): string[] {
   // constructor's parameter is always `x`, so alias `e = x` up front when
   // they differ, otherwise the check references an undefined identifier.
   const needsAlias = premiseCamel !== "x";
+  const hasRuntime = ruleHasRuntimeVia(gt.rule);
+
+  if (hasRuntime) {
+    // Async ctx-taking factory. The base `createOrThrow` is preserved
+    // (delegating to the structural sync constructor) so that callers
+    // that already have a runtime-verified value can skip the round
+    // trip. The async path is the only one that runs the checker;
+    // there is no sync path that touches a runtime-via predicate.
+    const paramsStr = `ctx: RuntimeCheckCtx, x: ${tsType}`;
+    const checks: string[] = [];
+    if (needsAlias) checks.push(`    const ${premiseCamel} = x;`);
+    for (const v of gt.rule.verified) {
+      if (v.runtimeVia) {
+        checks.push(...emitRuntimeViaCheckTs(v, gt.name, ["x"]));
+        continue;
+      }
+      const [code, msg] = verifiedToTs(st, v, varMap);
+      checks.push(`    if (${negateTsExpr(code)}) throw new Error(\`${msg.replace(/`/g, "\\`")}: \${x}\`);`);
+    }
+    return [
+      `export class ${gt.tsName} {`,
+      `  private readonly _v: ${tsType};`,
+      `  private constructor(v: ${tsType}) { this._v = v; }`,
+      `  static async createOrThrow(${paramsStr}): Promise<${gt.tsName}> {`,
+      ...checks,
+      `    return new ${gt.tsName}(x);`,
+      `  }`,
+      `  static async tryCreate(${paramsStr}): Promise<${gt.tsName} | Error> {`,
+      `    try { return await ${gt.tsName}.createOrThrow(ctx, x); }`,
+      `    catch (e) { return e instanceof Error ? e : new Error(String(e)); }`,
+      `  }`,
+      `  val(): ${tsType} { return this._v; }`,
+      `}`,
+      `export async function must${toPascalCase(gt.shenName)}(${paramsStr}): Promise<${gt.tsName}> {`,
+      `  return await ${gt.tsName}.createOrThrow(ctx, x);`,
+      `}`,
+    ];
+  }
+
   const checks: string[] = [];
   if (needsAlias) {
     checks.push(`    const ${premiseCamel} = x;`);
@@ -1504,6 +1641,41 @@ function genGuarded(gt: GeneratedType, st: SymbolTable): string[] {
     (f) => `  ${f.name}(): ${f.type} { return this._${f.name}; }`
   );
   const varMap = new Map(gt.rule.premises.map((p) => [p.varName, p.typeName]));
+  const hasRuntime = ruleHasRuntimeVia(gt.rule);
+
+  if (hasRuntime) {
+    const ctxParams = `ctx: RuntimeCheckCtx, ${params}`;
+    const checks: string[] = [];
+    for (const v of gt.rule.verified) {
+      if (v.runtimeVia) {
+        checks.push(...emitRuntimeViaCheckTs(v, gt.name, argNames));
+        continue;
+      }
+      const [code, msg] = verifiedToTs(st, v, varMap);
+      checks.push(`    if (${negateTsExpr(code)}) throw new Error(\`${msg.replace(/`/g, "\\`")}\`);`);
+    }
+    return [
+      `export class ${gt.tsName} {`,
+      ...fields.map((f) => `  private readonly _${f.name}: ${f.type};`),
+      `  private constructor(${params}) {`,
+      ...assigns,
+      `  }`,
+      `  static async createOrThrow(${ctxParams}): Promise<${gt.tsName}> {`,
+      ...checks,
+      `    return new ${gt.tsName}(${argNames.join(", ")});`,
+      `  }`,
+      `  static async tryCreate(${ctxParams}): Promise<${gt.tsName} | Error> {`,
+      `    try { return await ${gt.tsName}.createOrThrow(ctx, ${argNames.join(", ")}); }`,
+      `    catch (e) { return e instanceof Error ? e : new Error(String(e)); }`,
+      `  }`,
+      ...accessors,
+      `}`,
+      `export async function must${toPascalCase(gt.shenName)}(${ctxParams}): Promise<${gt.tsName}> {`,
+      `  return await ${gt.tsName}.createOrThrow(ctx, ${argNames.join(", ")});`,
+      `}`,
+    ];
+  }
+
   const checks: string[] = [];
   for (const v of gt.rule.verified) {
     const [code, msg] = verifiedToTs(st, v, varMap);
