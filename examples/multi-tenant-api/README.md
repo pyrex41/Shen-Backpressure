@@ -166,3 +166,16 @@ the constructor layer rather than from a hand-written check.
 output, so the prose, commands, and expected output all interleave.
 Read it after this README — it shows the chain in action against a
 running server with real tokens.
+
+## Auditor workflow
+
+If you're reviewing this demo for security or compliance purposes,
+start with [`AUDIT.md`](AUDIT.md) — a one-page reviewer workflow
+that walks through verifying the spec hash, reading the committed
+audit report, re-running gates at the recorded commit, and reading
+the named TCB (JWT parser, `CheckTenantAccess`, the SQL queries).
+`AUDIT.md` also calls out two known convention-only bindings in
+this demo's spec (token ↔ user, and `CheckTenantAccess`'s
+redundant `userID` parameter) so a reviewer sees them explicitly.
+The project-level trust model lives at
+[`../../docs/TRUST-MODEL.md`](../../docs/TRUST-MODEL.md).

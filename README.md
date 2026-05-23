@@ -93,6 +93,29 @@ compliance workflows can build on — not certification itself. The
 schema reserves room for signature fields; v0 always emits
 `signature: null`.
 
+## Trust Model
+
+[`docs/TRUST-MODEL.md`](docs/TRUST-MODEL.md) names the Trusted
+Computing Base explicitly: which premises are structurally enforced
+by the target-language compiler, which are validated at construction
+time, which are sampled by `shen-derive`, and which are assumed
+(`Check*` wrappers, predicate lowerings, the JWT parser, the SQL
+queries). It also enumerates what the project does **not** claim —
+no SOC-2 certification, no signing, no third-party verification, no
+substitute for tests. Each example ships its own one-page `AUDIT.md`
+that walks a reviewer through verifying the spec hash, reading the
+committed audit report, re-running gates at the recorded commit,
+and reading the named TCB.
+
+- [`docs/TRUST-MODEL.md`](docs/TRUST-MODEL.md) — project-level
+  trust model
+- [`examples/payment/AUDIT.md`](examples/payment/AUDIT.md) —
+  payment demo reviewer workflow
+- [`examples/multi-tenant-api/AUDIT.md`](examples/multi-tenant-api/AUDIT.md)
+  — JWT chain reviewer workflow
+- [`examples/shen-web-tools/AUDIT.md`](examples/shen-web-tools/AUDIT.md)
+  — Shen/SBCL + TS resolver reviewer workflow
+
 ## Quick Start
 
 ```bash
