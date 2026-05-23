@@ -380,12 +380,64 @@ def translate_verified(vp: VerifiedPremise, var_map: dict, st: dict) -> tuple[st
         return (code, msg)
     if op == "not":
         inner_expr = expr.children[1]
+        # (not (= LHS RHS)) — prefer human-readable messages:
+        #   (not (= X ""))  → "X must not be empty"
+        #   (not (= X Y))   → "X must not equal Y"
+        if inner_expr.is_call() and inner_expr.op() == "=" and len(inner_expr.children) == 3:
+            lhs = resolve(inner_expr.children[1], var_map, st)
+            rhs = resolve(inner_expr.children[2], var_map, st)
+            code = f"!({unwrap_num(lhs, st)} == {unwrap_num(rhs, st)})"
+            if _is_empty_string_literal(rhs.code):
+                return (code, f"{lhs.code} must not be empty")
+            if _is_empty_string_literal(lhs.code):
+                return (code, f"{rhs.code} must not be empty")
+            return (code, f"{lhs.code} must not equal {rhs.code}")
         inner = resolve(inner_expr, var_map, st)
         return (f"!({inner.code})", f"not {vp.raw}")
     if op == "element?":
         r = resolve(expr, var_map, st)
         return (r.code, f"must be a valid member")
     return ("true /* TODO: " + vp.raw + " */", vp.raw)
+
+
+def _is_empty_string_literal(code: str) -> bool:
+    # Rust string literal form. The resolver emits `""` for the empty literal
+    # in both source positions; matching exactly avoids partial-string false
+    # positives like `b""`.
+    return code == '""'
+
+
+def negate_rust_expr(rust_expr: str) -> str:
+    """Boolean negation of a Rust expression with a peephole.
+
+    The gate site wraps the verified predicate in `!(...)` for the violation
+    branch. When the inner predicate already starts with `!(`, that produces
+    `!(!(...))` — mathematically correct but ugly in the generated source.
+    Strip the redundant outer `!` instead.
+    """
+    inner = _strip_outer_not_paren(rust_expr)
+    if inner is not None:
+        return f"({inner})"
+    return f"!({rust_expr})"
+
+
+def _strip_outer_not_paren(rust_expr: str) -> Optional[str]:
+    if not rust_expr.startswith("!(") or not rust_expr.endswith(")"):
+        return None
+    depth = 1
+    body = rust_expr[2:-1]
+    for ch in body:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                # The opening `(` after `!` closed before the end — outer `!`
+                # does not bracket the whole expression.
+                return None
+    if depth != 1:
+        return None
+    return body
 
 
 # ---------------------------------------------------------------------------
@@ -514,7 +566,7 @@ def emit_type(info: TypeInfo, rule: Rule, st: dict, mode: str) -> list[str]:
         var_map = {rule.premises[0].var_name: rule.premises[0].type_name}
         for vp in rule.verified:
             code, msg = translate_verified(vp, var_map, st)
-            lines.append(f"            if !({code}) {{")
+            lines.append(f"            if {negate_rust_expr(code)} {{")
             lines.append(f'                return Err(GuardError {{ message: format!("{msg}: {{}}", x) }});')
             lines.append("            }")
         lines.append(f"            Ok({info.rust_name} {{ v: x }})")
@@ -532,7 +584,7 @@ def emit_type(info: TypeInfo, rule: Rule, st: dict, mode: str) -> list[str]:
             lines.append(f"        pub fn new({param_str}) -> Result<Self, GuardError> {{")
             for vp in rule.verified:
                 code, msg = translate_verified(vp, var_map, st)
-                lines.append(f"            if !({code}) {{")
+                lines.append(f"            if {negate_rust_expr(code)} {{")
                 lines.append(f'                return Err(GuardError {{ message: "{msg}".to_string() }});')
                 lines.append("            }")
             field_inits = ", ".join(to_snake(fi.shen_name) for fi in info.fields)

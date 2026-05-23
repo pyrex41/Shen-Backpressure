@@ -55,8 +55,8 @@ func (t ResourceId) String() string { return t.v }
 type JwtToken struct{ v string }
 
 func NewJwtToken(x string) (JwtToken, error) {
-	if !(!(x == "")) {
-		return JwtToken{}, fmt.Errorf("not: x must equal \"\": %v", x)
+	if (x == "") {
+		return JwtToken{}, fmt.Errorf("x must not be empty: %v", x)
 	}
 	return JwtToken{v: x}, nil
 }
@@ -128,8 +128,8 @@ type ServiceCredential struct {
 }
 
 func NewServiceCredential(service ServiceId, secret string) (ServiceCredential, error) {
-	if !(!(secret == "")) {
-		return ServiceCredential{}, fmt.Errorf("not: secret must equal \"\"")
+	if (secret == "") {
+		return ServiceCredential{}, fmt.Errorf("secret must not be empty")
 	}
 	return ServiceCredential{
 		service: service,

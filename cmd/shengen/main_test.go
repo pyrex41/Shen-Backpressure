@@ -554,6 +554,107 @@ func TestGenerateGoWrapperOnlyNoFmt(t *testing.T) {
 	}
 }
 
+// TestGenerateGoNotEmptyStringHygiene checks the peephole + error-message
+// fixes for the common `(not (= X ""))` premise. The lowered predicate is
+// `!(x == "")`; the gate site must collapse the outer negation so the
+// generated source reads `if (x == "")` instead of `if !(!(x == ""))`.
+// The accompanying error message must also drop the "not: X must equal \"\""
+// mechanical shape for "X must not be empty".
+func TestGenerateGoNotEmptyStringHygiene(t *testing.T) {
+	spec := `(datatype secret
+  X : string;
+  (not (= X "")) : verified;
+  ==========================
+  X : secret;)`
+	types, _ := parseFile_string(spec)
+	st := newSymbolTable()
+	st.Build(types)
+	output := generateGo(types, st, "test", "test.shen")
+
+	if strings.Contains(output, "if !(!(x == \"\"))") {
+		t.Errorf("double-negation peephole did not fire; expected the outer ! to be stripped.\nFull output:\n%s", output)
+	}
+	if !strings.Contains(output, "if (x == \"\") {") {
+		t.Errorf("expected the violation branch to read `if (x == \"\")`.\nFull output:\n%s", output)
+	}
+	if strings.Contains(output, `"not: x must equal`) {
+		t.Errorf("mechanical 'not: ... must equal \"\"' message leaked through.\nFull output:\n%s", output)
+	}
+	if !strings.Contains(output, `"x must not be empty: %v"`) {
+		t.Errorf("expected friendlier 'must not be empty' error message.\nFull output:\n%s", output)
+	}
+}
+
+// TestGenerateGoNotEqualsHygiene covers the (not (= X Y)) → "X must not
+// equal Y" path where neither side is the empty-string literal.
+func TestGenerateGoNotEqualsHygiene(t *testing.T) {
+	spec := `(datatype distinct-pair
+  A : string;
+  B : string;
+  (not (= A B)) : verified;
+  =========================
+  [A B] : distinct-pair;)`
+	types, _ := parseFile_string(spec)
+	st := newSymbolTable()
+	st.Build(types)
+	output := generateGo(types, st, "test", "test.shen")
+
+	if strings.Contains(output, "if !(!(a == b))") {
+		t.Errorf("double-negation peephole did not fire on (not (= A B)).\nFull output:\n%s", output)
+	}
+	if !strings.Contains(output, "if (a == b) {") {
+		t.Errorf("expected the violation branch to read `if (a == b)`.\nFull output:\n%s", output)
+	}
+	if strings.Contains(output, `"not: a must equal b"`) {
+		t.Errorf("mechanical 'not: a must equal b' message leaked through.\nFull output:\n%s", output)
+	}
+	if !strings.Contains(output, `"a must not equal b"`) {
+		t.Errorf("expected friendlier 'a must not equal b' error message.\nFull output:\n%s", output)
+	}
+}
+
+// TestGenerateGoPositiveEqUnchanged guards against the peephole over-firing.
+// For `(= X "")` (no outer `not`), the lowered predicate is `x == ""` with
+// no leading bang; the violation branch must still read `if !(x == "")`.
+func TestGenerateGoPositiveEqUnchanged(t *testing.T) {
+	spec := `(datatype empty-string
+  X : string;
+  (= X "") : verified;
+  ====================
+  X : empty-string;)`
+	types, _ := parseFile_string(spec)
+	st := newSymbolTable()
+	st.Build(types)
+	output := generateGo(types, st, "test", "test.shen")
+
+	if !strings.Contains(output, "if !(x == \"\") {") {
+		t.Errorf("positive (= X \"\") should still generate `if !(x == \"\")`.\nFull output:\n%s", output)
+	}
+}
+
+// TestNegateGoExprPeephole covers stripOuterNotParen / negateGoExpr at the
+// helper level, including the case where a leading `!(...)` closes before
+// the end of the expression and the outer negation is NOT redundant.
+func TestNegateGoExprPeephole(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"!(x == \"\")", "(x == \"\")"},
+		{"!(a == b)", "(a == b)"},
+		{"x >= 0", "!(x >= 0)"},
+		{"foo(x)", "!(foo(x))"},
+		{"!(a) && b", "!(!(a) && b)"}, // leading `!(...)` closes before end; do not strip
+		{"!((a))", "((a))"},
+	}
+	for _, c := range cases {
+		got := negateGoExpr(c.in)
+		if got != c.want {
+			t.Errorf("negateGoExpr(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // ============================================================================
 // Helpers
 // ============================================================================

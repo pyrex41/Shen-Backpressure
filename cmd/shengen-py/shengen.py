@@ -323,12 +323,62 @@ def translate_verified(vp: VerifiedPremise, var_map: dict, st: dict) -> tuple[st
         rhs = resolve(expr.children[2], var_map, st)
         return (f"{unwrap(lhs, st)} == {unwrap(rhs, st)}", f"{lhs.code} must equal {rhs.code}")
     if op == "not":
-        inner = resolve(expr.children[1], var_map, st)
+        inner_expr = expr.children[1]
+        # (not (= LHS RHS)) — prefer human-readable messages:
+        #   (not (= X ""))  → "X must not be empty"
+        #   (not (= X Y))   → "X must not equal Y"
+        if inner_expr.is_call() and inner_expr.op() == "=" and len(inner_expr.children) == 3:
+            lhs = resolve(inner_expr.children[1], var_map, st)
+            rhs = resolve(inner_expr.children[2], var_map, st)
+            code = f"not ({unwrap(lhs, st)} == {unwrap(rhs, st)})"
+            if _is_empty_string_literal(rhs.code):
+                return (code, f"{lhs.code} must not be empty")
+            if _is_empty_string_literal(lhs.code):
+                return (code, f"{rhs.code} must not be empty")
+            return (code, f"{lhs.code} must not equal {rhs.code}")
+        inner = resolve(inner_expr, var_map, st)
         return (f"not ({inner.code})", f"not {vp.raw}")
     if op == "element?":
         r = resolve(expr, var_map, st)
         return (r.code, "must be a valid member")
     return (f"True  # TODO: {vp.raw}", vp.raw)
+
+
+def _is_empty_string_literal(code: str) -> bool:
+    return code == '""'
+
+
+def negate_py_expr(py_expr: str) -> str:
+    """Boolean negation of a Python expression with a peephole.
+
+    Generated checks wrap the verified predicate in `not (...)` for the
+    violation branch. When the inner predicate already starts with `not (`,
+    that produces `not (not (...))` — mathematically correct but ugly in the
+    generated source. Strip the redundant outer `not` instead.
+    """
+    inner = _strip_outer_not_paren(py_expr)
+    if inner is not None:
+        return f"({inner})"
+    return f"not ({py_expr})"
+
+
+def _strip_outer_not_paren(py_expr: str) -> Optional[str]:
+    if not py_expr.startswith("not (") or not py_expr.endswith(")"):
+        return None
+    depth = 1
+    body = py_expr[5:-1]
+    for ch in body:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                # The opening paren after `not ` closed early — outer `not`
+                # does not bracket the whole expression.
+                return None
+    if depth != 1:
+        return None
+    return body
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +453,7 @@ def emit_type_standard(info: TypeInfo, rule: Rule, st: dict) -> list[str]:
                 code, msg = translate_verified(vp, var_map, st)
                 # In __post_init__, the variable is self._v
                 code = code.replace(to_snake(rule.premises[0].var_name), "self._v")
-                lines.append(f"        if not ({code}):")
+                lines.append(f"        if {negate_py_expr(code)}:")
                 lines.append(f'            raise ValueError(f"{msg}: {{self._v}}")')
             lines.append("")
         lines.append(f"    def val(self) -> {py_type}:")
@@ -422,7 +472,7 @@ def emit_type_standard(info: TypeInfo, rule: Rule, st: dict) -> list[str]:
                 for p in rule.premises:
                     code = code.replace(to_snake(p.var_name) + ".", f"self._{to_snake(p.var_name)}.")
                     code = re.sub(rf'\b{to_snake(p.var_name)}\b(?!\.)', f"self._{to_snake(p.var_name)}", code)
-                lines.append(f"        if not ({code}):")
+                lines.append(f"        if {negate_py_expr(code)}:")
                 lines.append(f'            raise ValueError("{msg}")')
             lines.append("")
         for fi in info.fields:
@@ -614,7 +664,7 @@ def emit_type_hardened(info: TypeInfo, rule: Rule, st: dict) -> list[str]:
             var_map = {rule.premises[0].var_name: rule.premises[0].type_name}
             for vp in rule.verified:
                 code, msg = translate_verified(vp, var_map, st)
-                lines.append(f"    if not ({code}):")
+                lines.append(f"    if {negate_py_expr(code)}:")
                 lines.append(f'        raise ValueError(f"{msg}: {{x}}")')
         lines.append(f"    obj = object.__new__({info.py_name})")
         lines.append(f'    object.__setattr__(obj, "_v", x)')
@@ -649,7 +699,7 @@ def emit_type_hardened(info: TypeInfo, rule: Rule, st: dict) -> list[str]:
             var_map = {p.var_name: p.type_name for p in rule.premises}
             for vp in rule.verified:
                 code, msg = translate_verified(vp, var_map, st)
-                lines.append(f"    if not ({code}):")
+                lines.append(f"    if {negate_py_expr(code)}:")
                 lines.append(f'        raise ValueError("{msg}")')
 
         lines.append(f"    obj = object.__new__({info.py_name})")

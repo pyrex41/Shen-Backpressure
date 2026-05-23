@@ -631,14 +631,86 @@ func (st *SymbolTable) translateNotPremise(expr *SExpr, varMap map[string]string
 	}
 	inner := expr.Children[1]
 	if inner.IsCall() && inner.Op() == "=" {
-		goExpr, errMsg := st.translateEq(inner, varMap)
-		return "!(" + goExpr + ")", "not: " + errMsg
+		goExpr, _ := st.translateEq(inner, varMap)
+		// Prefer human-readable messages over the mechanical "not: X must equal Y"
+		// fallback. Pattern-match the inner (= LHS RHS):
+		//   (not (= X ""))  → "X must not be empty"
+		//   (not (= X Y))   → "X must not equal Y"
+		errMsg := st.notEqualsErrMsg(inner, varMap)
+		return "!(" + goExpr + ")", errMsg
 	}
 	resolved, ok := st.resolveExpr(inner, varMap)
 	if !ok {
 		return fmt.Sprintf("/* TODO: %s */ true", expr.String()), "could not resolve not"
 	}
 	return "!(" + resolved.GoCode + ")", "negation of " + resolved.GoCode
+}
+
+// notEqualsErrMsg builds a friendlier error message for `(not (= LHS RHS))`
+// premises. Falls back to "not: <eq message>" for anything that doesn't fit
+// the recognized shapes (empty-string and same-side inequality).
+func (st *SymbolTable) notEqualsErrMsg(eqExpr *SExpr, varMap map[string]string) string {
+	_, fallback := st.translateEq(eqExpr, varMap)
+	if len(eqExpr.Children) != 3 {
+		return "not: " + fallback
+	}
+	lhs, lok := st.resolveExpr(eqExpr.Children[1], varMap)
+	rhs, rok := st.resolveExpr(eqExpr.Children[2], varMap)
+	if !lok || !rok {
+		return "not: " + fallback
+	}
+	if isEmptyStringLiteral(rhs.GoCode) {
+		return lhs.GoCode + " must not be empty"
+	}
+	if isEmptyStringLiteral(lhs.GoCode) {
+		return rhs.GoCode + " must not be empty"
+	}
+	return lhs.GoCode + " must not equal " + rhs.GoCode
+}
+
+// isEmptyStringLiteral returns true if a generated expression is the literal "".
+func isEmptyStringLiteral(goCode string) bool {
+	return goCode == `""`
+}
+
+// negateGoExpr returns the boolean negation of a Go expression, applying a
+// peephole that strips a redundant outer `!(...)`. This keeps the generated
+// gate-site readable: a predicate like `!(x == "")` becomes `(x == "")`
+// directly in the violation branch, instead of the visually awful
+// `!(!(x == ""))`.
+func negateGoExpr(goExpr string) string {
+	if inner, ok := stripOuterNotParen(goExpr); ok {
+		return "(" + inner + ")"
+	}
+	return "!(" + goExpr + ")"
+}
+
+// stripOuterNotParen returns (inner, true) when goExpr has the exact shape
+// `!(<inner>)` with balanced parens — i.e. the leading `!(` matches the
+// trailing `)`. Otherwise returns ("", false).
+func stripOuterNotParen(goExpr string) (string, bool) {
+	if !strings.HasPrefix(goExpr, "!(") || !strings.HasSuffix(goExpr, ")") {
+		return "", false
+	}
+	// Walk the parens after the leading `!(` to ensure the matching `)` is the
+	// trailing one. If a depth-zero `)` appears earlier the leading `!(` does
+	// not bracket the whole expression (e.g. `!(a) && b`).
+	depth := 1
+	for i := 2; i < len(goExpr)-1; i++ {
+		switch goExpr[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return "", false
+			}
+		}
+	}
+	if depth != 1 {
+		return "", false
+	}
+	return goExpr[2 : len(goExpr)-1], true
 }
 
 func (st *SymbolTable) translateElementPremise(expr *SExpr, varMap map[string]string) (string, string) {
@@ -1633,7 +1705,7 @@ func generateConstrained(b *strings.Builder, gt GeneratedType, st *SymbolTable) 
 		goExpr, errMsg := st.verifiedToGo(v, varMap)
 		safeMsg := strings.ReplaceAll(errMsg, "%", "%%")
 		safeMsg = strings.ReplaceAll(safeMsg, `"`, `\"`)
-		b.WriteString(fmt.Sprintf("\tif !(%s) {\n\t\treturn %s{}, fmt.Errorf(\"%s: %%v\", x)\n\t}\n", goExpr, gt.GoName, safeMsg))
+		b.WriteString(fmt.Sprintf("\tif %s {\n\t\treturn %s{}, fmt.Errorf(\"%s: %%v\", x)\n\t}\n", negateGoExpr(goExpr), gt.GoName, safeMsg))
 	}
 	b.WriteString(fmt.Sprintf("\treturn %s{v: x}, nil\n}\n\n", gt.GoName))
 	b.WriteString(fmt.Sprintf("func (t %s) Val() %s { return t.v }\n\n", gt.GoName, goType))
@@ -1676,7 +1748,7 @@ func generateGuarded(b *strings.Builder, gt GeneratedType, st *SymbolTable) {
 		goExpr, errMsg := st.verifiedToGo(v, varMap)
 		safeMsg := strings.ReplaceAll(errMsg, "%", "%%")
 		safeMsg = strings.ReplaceAll(safeMsg, `"`, `\"`)
-		b.WriteString(fmt.Sprintf("\tif !(%s) {\n\t\treturn %s{}, fmt.Errorf(\"%s\")\n\t}\n", goExpr, gt.GoName, safeMsg))
+		b.WriteString(fmt.Sprintf("\tif %s {\n\t\treturn %s{}, fmt.Errorf(\"%s\")\n\t}\n", negateGoExpr(goExpr), gt.GoName, safeMsg))
 	}
 	b.WriteString(fmt.Sprintf("\treturn %s{\n", gt.GoName))
 	for _, p := range gt.Rule.Premises {
