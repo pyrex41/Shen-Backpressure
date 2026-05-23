@@ -180,7 +180,15 @@
 \* --- Product tag/ref resolution finish-line types --- *\
 \* Tag blocks can reference child blocks by id. A ref-table is the
    semantic boundary that decides whether a tag block is fully renderable,
-   fully renderable but unsigned, or only partially renderable. *\
+   fully renderable but unsigned, or only partially renderable.
+
+   --- Phase note (W1.4 strengthening) ----------------------------------
+   In this phase the `signed-complete` outcome carries a typed
+   `tag-provenance` composite (signer-id + stamp + signature) instead
+   of a raw signature string. Signature validity in the resolver is
+   checked by a deterministic stub HMAC predicate (NOT cryptography —
+   see specs/tag-block-resolver.shen). The `tag-block` input schema is
+   unchanged so existing fixture/sample generation works. *\
 
 (datatype tag-id
   X : string;
@@ -192,6 +200,20 @@
   X : string;
   ==============
   X : tag-signature;)
+
+(datatype signer-id
+  X : string;
+  (> (length X) 0) : verified;
+  ==============
+  X : signer-id;)
+
+(datatype tag-provenance
+  Signer : signer-id;
+  Stamp : number;
+  Signature : tag-signature;
+  (> Stamp 0) : verified;
+  ==================================
+  [Signer Stamp Signature] : tag-provenance;)
 
 (datatype tag-block
   Id : tag-id;
@@ -217,10 +239,10 @@
   Kind : string;
   Root : tag-block;
   Children : (list tag-block);
-  Signature : tag-signature;
+  Provenance : tag-provenance;
   (= Kind "signed-complete") : verified;
   =====================================
-  [Kind Root Children Signature] : tag-resolve-outcome;)
+  [Kind Root Children Provenance] : tag-resolve-outcome;)
 
 (datatype unsigned-complete
   Kind : string;

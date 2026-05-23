@@ -524,6 +524,52 @@ export function mustTagSignature(x: string): TagSignature {
   return TagSignature.createOrThrow(x);
 }
 
+// --- SignerId ---
+// Shen: (datatype signer-id)
+export class SignerId {
+  private readonly _v: string;
+  private constructor(v: string) { this._v = v; }
+  static createOrThrow(x: string): SignerId {
+    if (!(x.length > 0)) throw new Error(`x.length must be > 0: ${x}`);
+    return new SignerId(x);
+  }
+  static tryCreate(x: string): SignerId | Error {
+    try { return SignerId.createOrThrow(x); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
+  val(): string { return this._v; }
+}
+export function mustSignerId(x: string): SignerId {
+  return SignerId.createOrThrow(x);
+}
+
+// --- TagProvenance ---
+// Shen: (datatype tag-provenance)
+export class TagProvenance {
+  private readonly _signer: SignerId;
+  private readonly _stamp: number;
+  private readonly _signature: TagSignature;
+  private constructor(signer: SignerId, stamp: number, signature: TagSignature) {
+    this._signer = signer;
+    this._stamp = stamp;
+    this._signature = signature;
+  }
+  static createOrThrow(signer: SignerId, stamp: number, signature: TagSignature): TagProvenance {
+    if (!(stamp > 0)) throw new Error(`stamp must be > 0`);
+    return new TagProvenance(signer, stamp, signature);
+  }
+  static tryCreate(signer: SignerId, stamp: number, signature: TagSignature): TagProvenance | Error {
+    try { return TagProvenance.createOrThrow(signer, stamp, signature); }
+    catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+  }
+  signer(): SignerId { return this._signer; }
+  stamp(): number { return this._stamp; }
+  signature(): TagSignature { return this._signature; }
+}
+export function mustTagProvenance(signer: SignerId, stamp: number, signature: TagSignature): TagProvenance {
+  return TagProvenance.createOrThrow(signer, stamp, signature);
+}
+
 // --- TagBlock ---
 // Shen: (datatype tag-block)
 export class TagBlock {
@@ -602,28 +648,28 @@ export class SignedComplete {
   private readonly _kind: string;
   private readonly _root: TagBlock;
   private readonly _children: TagBlock[];
-  private readonly _signature: TagSignature;
-  private constructor(kind: string, root: TagBlock, children: TagBlock[], signature: TagSignature) {
+  private readonly _provenance: TagProvenance;
+  private constructor(kind: string, root: TagBlock, children: TagBlock[], provenance: TagProvenance) {
     this._kind = kind;
     this._root = root;
     this._children = children;
-    this._signature = signature;
+    this._provenance = provenance;
   }
-  static createOrThrow(kind: string, root: TagBlock, children: TagBlock[], signature: TagSignature): SignedComplete {
+  static createOrThrow(kind: string, root: TagBlock, children: TagBlock[], provenance: TagProvenance): SignedComplete {
     if (!(kind === "signed-complete")) throw new Error(`kind must equal "signed-complete"`);
-    return new SignedComplete(kind, root, children, signature);
+    return new SignedComplete(kind, root, children, provenance);
   }
-  static tryCreate(kind: string, root: TagBlock, children: TagBlock[], signature: TagSignature): SignedComplete | Error {
-    try { return SignedComplete.createOrThrow(kind, root, children, signature); }
+  static tryCreate(kind: string, root: TagBlock, children: TagBlock[], provenance: TagProvenance): SignedComplete | Error {
+    try { return SignedComplete.createOrThrow(kind, root, children, provenance); }
     catch (e) { return e instanceof Error ? e : new Error(String(e)); }
   }
   kind(): string { return this._kind; }
   root(): TagBlock { return this._root; }
   children(): TagBlock[] { return this._children; }
-  signature(): TagSignature { return this._signature; }
+  provenance(): TagProvenance { return this._provenance; }
 }
-export function mustSignedComplete(kind: string, root: TagBlock, children: TagBlock[], signature: TagSignature): SignedComplete {
-  return SignedComplete.createOrThrow(kind, root, children, signature);
+export function mustSignedComplete(kind: string, root: TagBlock, children: TagBlock[], provenance: TagProvenance): SignedComplete {
+  return SignedComplete.createOrThrow(kind, root, children, provenance);
 }
 
 // --- UnsignedComplete ---
