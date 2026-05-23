@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // ProjectContext is the top-level structured view of a Shen-Backpressure
@@ -90,11 +91,20 @@ type DeriveSpecInfo struct {
 
 // GateInfo mirrors a single gate from the manifest (or the synthesised legacy
 // five-gate list) for context output.
+//
+// LastResult / LastDurationMs / LastExitCode are sourced from
+// .sb/gates_last_run.json (written by `sb gates`). They are absent
+// when no run has been recorded — the JSON omitempty keeps the
+// context payload small in the cold-start case. Renderers treat an
+// empty LastResult as "no last run" (`[—]`).
 type GateInfo struct {
-	Name          string `json:"name"`
-	Kind          string `json:"kind"`
-	Run           string `json:"run,omitempty"`
-	ParallelGroup string `json:"parallel_group,omitempty"`
+	Name           string `json:"name"`
+	Kind           string `json:"kind"`
+	Run            string `json:"run,omitempty"`
+	ParallelGroup  string `json:"parallel_group,omitempty"`
+	LastResult     string `json:"last_result,omitempty"`      // "pass" | "fail" | ""
+	LastDurationMs int64  `json:"last_duration_ms,omitempty"` // 0 when LastResult==""
+	LastExitCode   int    `json:"last_exit_code,omitempty"`   // omitempty hides zero on pass
 }
 
 // BackpressureInfo summarises the latest entry in plans/backpressure.log if
@@ -208,6 +218,12 @@ func readDischargeContext(path string) *DischargeContextInfo {
 // buildGateInfos produces the public GateInfo list for the context. When the
 // manifest uses [[gates]], each entry is copied directly; otherwise we
 // synthesise the legacy five-gate pipeline from the command fields.
+//
+// Each GateInfo is decorated with the latest known PASS/FAIL outcome
+// from .sb/gates_last_run.json (written by `sb gates`). When the
+// sidecar is missing — first checkout, fresh worktree, or pipeline
+// has never run — the LastResult field stays empty so renderers can
+// show `[—]`. Schema-locked discharge_report.json is untouched.
 func buildGateInfos(cfg *Config) []GateInfo {
 	var out []GateInfo
 	if cfg.HasManifestGates() {
@@ -234,6 +250,25 @@ func buildGateInfos(cfg *Config) []GateInfo {
 	}
 	if len(cfg.DeriveSpecs) > 0 {
 		out = append(out, GateInfo{Name: "shen-derive", Kind: "derive"})
+	}
+	// Defensive overlay of last-run results. readGatesLastRun returns
+	// nil on any I/O or parse error; gateLastResultByName returns nil
+	// for gates that didn't appear in the last run (e.g. a newly
+	// added manifest gate).
+	if lr := readGatesLastRun(GatesLastRunPath); lr != nil {
+		for i := range out {
+			res := gateLastResultByName(lr, out[i].Name)
+			if res == nil {
+				continue
+			}
+			if res.Passed {
+				out[i].LastResult = "pass"
+			} else {
+				out[i].LastResult = "fail"
+			}
+			out[i].LastDurationMs = res.DurationMs
+			out[i].LastExitCode = res.ExitCode
+		}
 	}
 	return out
 }
@@ -301,6 +336,7 @@ func (ctx *ProjectContext) RenderMarkdown() string {
 		b.WriteString("\n### Gates\n\n")
 		for i, g := range ctx.Gates {
 			line := fmt.Sprintf("%d. %s (%s)", i+1, g.Name, g.Kind)
+			line += " " + formatGateLastResult(g)
 			if g.ParallelGroup != "" {
 				line += fmt.Sprintf(" [parallel: %s]", g.ParallelGroup)
 			}
@@ -326,6 +362,47 @@ func (ctx *ProjectContext) RenderMarkdown() string {
 	}
 
 	return b.String()
+}
+
+// formatGateLastResult renders a gate's last-run outcome as a short,
+// agent-skim-friendly tag — `[PASS 0.12s]`, `[FAIL exit=2 0.34s]`, or
+// `[—]` when no run is recorded. The duration is rounded to a single
+// fractional digit (no millisecond noise) and the FAIL form surfaces
+// the exit code so an agent reading context cold can tell whether the
+// previous run actually executed or fell off a cliff. The em-dash
+// fallback intentionally distinguishes "not yet run" from "passed
+// silently with zero duration".
+func formatGateLastResult(g GateInfo) string {
+	if g.LastResult == "" {
+		return "[—]"
+	}
+	dur := time.Duration(g.LastDurationMs) * time.Millisecond
+	if g.LastResult == "pass" {
+		return fmt.Sprintf("[PASS %s]", roundDuration(dur))
+	}
+	if g.LastExitCode != 0 {
+		return fmt.Sprintf("[FAIL exit=%d %s]", g.LastExitCode, roundDuration(dur))
+	}
+	return fmt.Sprintf("[FAIL %s]", roundDuration(dur))
+}
+
+// roundDuration produces a short human-readable duration string. We
+// intentionally round to centiseconds for short runs and seconds for
+// longer ones so a 12-gate pipeline summary stays under a screen
+// width. time.Duration.String() prints noisy fractions for short
+// values (e.g. "1.234567ms"); this trims that.
+func roundDuration(d time.Duration) string {
+	if d < time.Millisecond {
+		// Below 1ms: just say "<1ms" — agents don't need finer.
+		return "<1ms"
+	}
+	if d < time.Second {
+		return d.Round(10 * time.Millisecond).String()
+	}
+	if d < 10*time.Second {
+		return d.Round(100 * time.Millisecond).String()
+	}
+	return d.Round(time.Second).String()
 }
 
 // renderDischargeSection writes the terse Wave 4 discharge-report
@@ -418,6 +495,7 @@ func proofChain(types []TypeInfo) []string {
 func cmdContext(args []string) {
 	fs := flag.NewFlagSet("context", flag.ExitOnError)
 	format := fs.String("format", "markdown", "output format: json or markdown")
+	evidence := fs.Bool("evidence", false, "emit the mixed-evidence summary (static/runtime-sampled/unproven per rule) instead of the standard context")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `sb context — Emit project context from the manifest
 
@@ -427,6 +505,10 @@ Parses sb.toml and the Shen spec to produce a structured view of the
 project: guard types, gate pipeline, derive coverage, and any recent
 backpressure failures. Output is consumed by humans (markdown) or by
 the Ralph loop for LLM prompt hydration (json).
+
+When --evidence is set, emits the mixed-evidence summary instead: a
+table showing how many premises per rule are discharged statically
+vs runtime-sampled vs unproven, sourced from .sb/discharge_report.json.
 
 Flags:
 `)
@@ -444,6 +526,25 @@ Flags:
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sb context: %v\n", err)
 		os.Exit(1)
+	}
+
+	if *evidence {
+		switch *format {
+		case "json":
+			ev := BuildEvidenceSummary(DischargeReportPath)
+			data, err := json.MarshalIndent(ev, "", "  ")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "sb context: rendering evidence json: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println(string(data))
+		case "markdown", "md":
+			fmt.Print(RenderEvidenceMarkdown(DischargeReportPath))
+		default:
+			fmt.Fprintf(os.Stderr, "sb context: unknown format %q (want json or markdown)\n", *format)
+			os.Exit(1)
+		}
+		return
 	}
 
 	switch *format {

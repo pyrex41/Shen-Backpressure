@@ -80,6 +80,13 @@ Flags:
 
 	results := runGateList(gates)
 
+	// Persist per-gate outcomes for `sb context` to surface as
+	// LastResult. Best-effort: failure to write is logged but never
+	// fails the gate run itself.
+	if err := writeGatesLastRun(results); err != nil {
+		fmt.Fprintf(os.Stderr, "sb gates: warning: persisting gate results: %v\n", err)
+	}
+
 	// Summary
 	fmt.Fprintln(os.Stderr)
 	passed := 0
