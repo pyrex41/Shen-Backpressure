@@ -50,61 +50,104 @@ func (t ResourceId) Val() string { return t.v }
 func (t ResourceId) String() string { return t.v }
 
 
-// --- JwtToken ---
-// Shen: (datatype jwt-token)
-type JwtToken struct{ v string }
+// --- JwtIssuer ---
+// Shen: (datatype jwt-issuer)
+type JwtIssuer struct{ v string }
 
-func NewJwtToken(x string) (JwtToken, error) {
+func NewJwtIssuer(x string) (JwtIssuer, error) {
 	if (x == "") {
-		return JwtToken{}, fmt.Errorf("x must not be empty: %v", x)
+		return JwtIssuer{}, fmt.Errorf("x must not be empty: %v", x)
 	}
-	return JwtToken{v: x}, nil
+	return JwtIssuer{v: x}, nil
 }
 
-func (t JwtToken) Val() string { return t.v }
+func (t JwtIssuer) Val() string { return t.v }
 
 
-// --- TokenExpiry ---
-// Shen: (datatype token-expiry)
-type TokenExpiry struct {
+// --- JwtAudience ---
+// Shen: (datatype jwt-audience)
+type JwtAudience struct{ v string }
+
+func NewJwtAudience(x string) (JwtAudience, error) {
+	if (x == "") {
+		return JwtAudience{}, fmt.Errorf("x must not be empty: %v", x)
+	}
+	return JwtAudience{v: x}, nil
+}
+
+func (t JwtAudience) Val() string { return t.v }
+
+
+// --- ParsedClaims ---
+// Shen: (datatype parsed-claims)
+type ParsedClaims struct {
+	sub UserId
 	exp float64
-	now float64
+	iss JwtIssuer
+	aud JwtAudience
 }
 
-func NewTokenExpiry(exp float64, now float64) (TokenExpiry, error) {
-	if !(exp > now) {
-		return TokenExpiry{}, fmt.Errorf("exp must be > now")
+func NewParsedClaims(sub UserId, exp float64, iss JwtIssuer, aud JwtAudience) (ParsedClaims, error) {
+	if !(exp > 0) {
+		return ParsedClaims{}, fmt.Errorf("exp must be > 0")
 	}
-	return TokenExpiry{
+	return ParsedClaims{
+		sub: sub,
 		exp: exp,
-		now: now,
+		iss: iss,
+		aud: aud,
 	}, nil
 }
 
-func (t TokenExpiry) Exp() float64 { return t.exp }
+func (t ParsedClaims) Sub() UserId { return t.sub }
 
-func (t TokenExpiry) Now() float64 { return t.now }
+func (t ParsedClaims) Exp() float64 { return t.exp }
+
+func (t ParsedClaims) Iss() JwtIssuer { return t.iss }
+
+func (t ParsedClaims) Aud() JwtAudience { return t.aud }
+
+
+// --- VerifiedJwt ---
+// Shen: (datatype verified-jwt)
+type VerifiedJwt struct {
+	claims ParsedClaims
+	sig string
+}
+
+func NewVerifiedJwt(claims ParsedClaims, sig string) (VerifiedJwt, error) {
+	if (sig == "") {
+		return VerifiedJwt{}, fmt.Errorf("sig must not be empty")
+	}
+	return VerifiedJwt{
+		claims: claims,
+		sig: sig,
+	}, nil
+}
+
+func (t VerifiedJwt) Claims() ParsedClaims { return t.claims }
+
+func (t VerifiedJwt) Sig() string { return t.sig }
 
 
 // --- AuthenticatedUser ---
 // Shen: (datatype authenticated-user)
 type AuthenticatedUser struct {
-	token JwtToken
-	expiry TokenExpiry
+	jwt VerifiedJwt
 	user UserId
 }
 
-func NewAuthenticatedUser(token JwtToken, expiry TokenExpiry, user UserId) AuthenticatedUser {
-	return AuthenticatedUser{
-		token: token,
-		expiry: expiry,
-		user: user,
+func NewAuthenticatedUser(jwt VerifiedJwt, user UserId) (AuthenticatedUser, error) {
+	if !(user == jwt.claims.sub) {
+		return AuthenticatedUser{}, fmt.Errorf("user must equal jwt.claims.sub")
 	}
+	return AuthenticatedUser{
+		jwt: jwt,
+		user: user,
+	}, nil
 }
 
-func (t AuthenticatedUser) Token() JwtToken { return t.token }
-
-func (t AuthenticatedUser) Expiry() TokenExpiry { return t.expiry }
+func (t AuthenticatedUser) Jwt() VerifiedJwt { return t.jwt }
 
 func (t AuthenticatedUser) User() UserId { return t.user }
 

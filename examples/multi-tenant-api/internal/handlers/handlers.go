@@ -11,6 +11,7 @@ import (
 
 	"multi-tenant-api/internal/auth"
 	"multi-tenant-api/internal/shenguard"
+	"multi-tenant-api/internal/verified"
 )
 
 type Server struct {
@@ -74,17 +75,29 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// userIDFromHuman returns the JWT sub claim carried inside the
+// authenticated human principal. By the W2.1 cross-field premise
+// `(= User (head (head Jwt)))` inside `authenticated-user`, this
+// value is byte-equal to the JWT `sub` claim — bypassing that binding
+// requires forging an `AuthenticatedUser`, which the shengen
+// constructor refuses.
+func userIDFromHuman(r *http.Request) string {
+	human, _ := auth.HumanFromContext(r.Context())
+	return human.Auth().User().Val()
+}
+
 func (s *Server) handleListResources(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	human, _ := auth.HumanFromContext(r.Context())
-	userID := human.Auth().User().Val()
+	userID := userIDFromHuman(r)
 
 	tenantID := shenguard.NewTenantId(r.PathValue("tid"))
-	access, err := auth.CheckTenantAccess(s.DB, principal, userID, tenantID)
+	// W2.1: CheckTenantAccess no longer takes a separate `userID string`
+	// parameter. The user-id comes from `principal` inside the wrapper.
+	access, err := verified.CheckTenantAccess(s.DB, principal, tenantID)
 	if err != nil {
 		_ = auth.LogAccess(s.DB, userID, tenantID.Val(), "", "list_resources", false)
 		http.Error(w, err.Error(), http.StatusForbidden)
@@ -132,11 +145,10 @@ func (s *Server) handleGetResource(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	human, _ := auth.HumanFromContext(r.Context())
-	userID := human.Auth().User().Val()
+	userID := userIDFromHuman(r)
 
 	tenantID := shenguard.NewTenantId(r.PathValue("tid"))
-	access, err := auth.CheckTenantAccess(s.DB, principal, userID, tenantID)
+	access, err := verified.CheckTenantAccess(s.DB, principal, tenantID)
 	if err != nil {
 		_ = auth.LogAccess(s.DB, userID, tenantID.Val(), r.PathValue("rid"), "get_resource", false)
 		http.Error(w, err.Error(), http.StatusForbidden)
@@ -144,7 +156,7 @@ func (s *Server) handleGetResource(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resourceID := shenguard.NewResourceId(r.PathValue("rid"))
-	ra, err := auth.CheckResourceAccess(s.DB, access, resourceID)
+	ra, err := verified.CheckResourceAccess(s.DB, access, resourceID)
 	if err != nil {
 		_ = auth.LogAccess(s.DB, userID, access.Tenant().Val(), resourceID.Val(), "get_resource", false)
 		http.Error(w, err.Error(), http.StatusForbidden)
@@ -179,11 +191,10 @@ func (s *Server) handleCreateResource(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	human, _ := auth.HumanFromContext(r.Context())
-	userID := human.Auth().User().Val()
+	userID := userIDFromHuman(r)
 
 	tenantID := shenguard.NewTenantId(r.PathValue("tid"))
-	access, err := auth.CheckTenantAccess(s.DB, principal, userID, tenantID)
+	access, err := verified.CheckTenantAccess(s.DB, principal, tenantID)
 	if err != nil {
 		_ = auth.LogAccess(s.DB, userID, tenantID.Val(), "", "create_resource", false)
 		http.Error(w, err.Error(), http.StatusForbidden)

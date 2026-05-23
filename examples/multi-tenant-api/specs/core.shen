@@ -1,11 +1,17 @@
 \* ====================================================================
    Multi-Tenant SaaS API — Authorization Proof Chain
 
-   JWT validation -> AuthenticatedUser -> TenantAccess -> ResourceAccess
+   Raw JWT → ParsedClaims + Signature → VerifiedJwt
+         → AuthenticatedUser → TenantAccess → ResourceAccess
 
    Cross-tenant data access is impossible by construction:
    you cannot build a ResourceAccess without first proving
    TenantAccess, which requires proving tenant membership.
+
+   The user-id carried in AuthenticatedUser is structurally bound
+   to the JWT's `sub` claim by the verified premise
+   `(= User (head Claims))`. This makes "pair token-A with user-B"
+   a compile-time error, not a convention.
    ==================================================================== *\
 
 \* --- Wrapper types for domain identifiers --- *\
@@ -25,31 +31,84 @@
   ==============
   X : resource-id;)
 
-\* --- JWT token — must be non-empty --- *\
+\* --- Issuer / audience claim wrappers --- *\
+\* These are wrapper types so the parser-extracted strings flow through
+   the type system without coercion. *\
 
-(datatype jwt-token
+(datatype jwt-issuer
   X : string;
   (not (= X "")) : verified;
-  ============================
-  X : jwt-token;)
+  ==============
+  X : jwt-issuer;)
 
-\* --- Expiry check — token must not be expired --- *\
+(datatype jwt-audience
+  X : string;
+  (not (= X "")) : verified;
+  ==============
+  X : jwt-audience;)
 
-(datatype token-expiry
+\* --- ParsedClaims — JSON-decoded payload section of a JWT --- *\
+\* Field order matters: `(head Claims)` resolves to `Sub` (the user-id),
+   which is what the cross-field binding below relies on. *\
+
+(datatype parsed-claims
+  Sub : user-id;
   Exp : number;
-  Now : number;
-  (> Exp Now) : verified;
-  =======================
-  [Exp Now] : token-expiry;)
+  Iss : jwt-issuer;
+  Aud : jwt-audience;
+  (> Exp 0) : verified;
+  ==================================
+  [Sub Exp Iss Aud] : parsed-claims;)
 
-\* --- AuthenticatedUser — requires valid JWT + non-expired token --- *\
+\* --- VerifiedJwt — claims + signature with a non-empty signature --- *\
+\*
+   STRUCTURAL CLAIM: a `VerifiedJwt` cannot exist with an empty signature
+   field. This is a deliberately weak predicate: real HMAC-SHA256
+   verification lives in `internal/auth/jwt.go` (`crypto/hmac.Equal`,
+   constant-time) and is part of the TCB enumerated in
+   `../../docs/TRUST-MODEL.md`. The Go middleware constructs a
+   `VerifiedJwt` only AFTER it has confirmed the signature against the
+   shared secret — so every value of this type observed in the program
+   has been verified by the parser. The constructor's own non-empty
+   check is the type-system anchor that prevents accidental
+   construction with a missing signature.
+
+   What this premise gives us at the type level:
+
+   - `NewVerifiedJwt(claims, sig)` is the ONLY exit; no other path
+     produces a `VerifiedJwt`.
+   - Downstream `AuthenticatedUser` requires a `VerifiedJwt` parameter,
+     so the proof chain demands "go through the parser" by signature.
+
+   What this premise does NOT give us:
+
+   - It does not assert cryptographic validity. The parser's HMAC check
+     is TCB and must be audited separately. *\
+
+(datatype verified-jwt
+  Claims : parsed-claims;
+  Sig : string;
+  (not (= Sig "")) : verified;
+  ==========================================
+  [Claims Sig] : verified-jwt;)
+
+\* --- AuthenticatedUser — binds the user-id structurally to the JWT's sub claim --- *\
+\*
+   The crucial premise is `(= User (head Claims))`: it asserts that the
+   `UserId` carried in the proof is *byte-equal* to the `sub` field
+   inside the `VerifiedJwt`'s claims. This is the W2.1 hardening:
+   before this premise existed, `NewAuthenticatedUser` was infallible
+   and a caller in possession of any `JwtToken` and any `UserId` could
+   pair them. With this premise the constructor returns an error on
+   mismatch and the only safe way to construct an `AuthenticatedUser`
+   is to thread the parsed `sub` through as the `UserId`. *\
 
 (datatype authenticated-user
-  Token : jwt-token;
-  Expiry : token-expiry;
+  Jwt : verified-jwt;
   User : user-id;
-  ===================================
-  [Token Expiry User] : authenticated-user;)
+  (= User (head (head Jwt))) : verified;
+  ===========================================
+  [Jwt User] : authenticated-user;)
 
 \* --- Service credentials for background jobs / cron --- *\
 
@@ -97,3 +156,46 @@
   (= IsOwned true) : verified;
   ================================
   [Access Resource IsOwned] : resource-access;)
+
+\* --- Derivation targets (consumed by shen-derive, not shengen) ----- *\
+\*
+   `same-user?` is the spec/impl oracle that anchors shen-derive on
+   this example. It asserts that two `user-id` wrappers are equal
+   exactly when their inner strings are equal — i.e., it pins the Go
+   `==` on `shenguard.UserId` against the Shen `=` on `user-id`.
+   This is the same equality the W2.1 cross-field premise
+   `(= User (head (head Jwt)))` inside `authenticated-user` asserts
+   *structurally* at construction time. The Go impl
+   `derived.SameUser` is a one-liner; the spec-equivalence test
+   `internal/derived/same_user_spec_test.go` catches drift if anyone
+   refactors `UserId` equality to something case-insensitive or
+   normalising-on-comparison.
+
+   WHY A SHEN-DERIVE ANCHOR IS HERE: classifying the datatype rules in
+   the discharge report (the `static` rows for `verified-jwt`,
+   `authenticated-user`, `tenant-access`, etc.) requires `sb derive`
+   to run, which requires at least one `[[derive.specs]]` entry.
+   This define provides that anchor. The classified rules — especially
+   the W2.1 cross-field premise `(= User (head (head Jwt)))` inside
+   `authenticated-user` — are then visible to an auditor reading
+   `transcript/audit_report.md`.
+
+   WHY A WRAPPER AND NOT A GUARDED COMPOSITE: shen-derive's sampler
+   does not currently filter guarded composites (e.g. `parsed-claims`'s
+   `(> Exp 0)` predicate — see `shen-derive/verify/samples.go:91`),
+   and Shen's `tc+` rejects calls like `(val X)` on wrappers without
+   a domain-specific destructor declared. Anchoring on `user-id`
+   alone — a wrapper, no `verified` premise — keeps both gates
+   green and pins the most semantically important equality in the
+   chain. A richer oracle that walks the cross-field invariant
+   directly is a follow-up.
+
+   The "real" hardening of W2.1 is the structural premise
+   `(= User (head (head Jwt)))` inside `authenticated-user` — that
+   premise alone makes "pair token-A with user-B" a compile-time
+   error. The discharge report's role is to make that
+   statically-discharged premise visible to an auditor. *\
+
+(define same-user?
+  {user-id --> user-id --> boolean}
+  A B -> (= A B))

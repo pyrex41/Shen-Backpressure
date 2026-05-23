@@ -17,13 +17,29 @@ var (
 	ErrInvalidSignature = errors.New("invalid signature")
 )
 
-// Claims holds the JWT payload fields.
+// Claims holds the JWT payload fields. The fields are populated from
+// the JSON-decoded JWT payload and are also threaded into the
+// shenguard.ParsedClaims composite by the middleware. The spec
+// requires `iss` and `aud` to be non-empty (see
+// specs/core.shen jwt-issuer / jwt-audience); the constants below
+// match the demo defaults baked into `NewToken`.
 type Claims struct {
-	Sub      string `json:"sub"`       // user ID
-	Email    string `json:"email"`
-	Exp      int64  `json:"exp"`       // unix timestamp
-	Iat      int64  `json:"iat"`       // issued at
+	Sub   string `json:"sub"`   // user ID
+	Email string `json:"email"`
+	Exp   int64  `json:"exp"`   // unix timestamp
+	Iat   int64  `json:"iat"`   // issued at
+	Iss   string `json:"iss"`   // issuer — required non-empty by spec
+	Aud   string `json:"aud"`   // audience — required non-empty by spec
 }
+
+// Default issuer/audience baked into demo tokens. These are part of
+// the spec's structural requirement that `parsed-claims` carry a
+// non-empty `jwt-issuer` and `jwt-audience` (see specs/core.shen).
+// Production deployments set these via configuration.
+const (
+	DefaultIssuer   = "multi-tenant-api"
+	DefaultAudience = "users"
+)
 
 var jwtHeader = base64URLEncode([]byte(`{"alg":"HS256","typ":"JWT"}`))
 
@@ -39,11 +55,16 @@ func Sign(claims Claims, secret []byte) (string, error) {
 	return signingInput + "." + base64URLEncode(sig), nil
 }
 
-// ParseResult contains the validated claims and expiry timestamp.
+// ParseResult contains the validated claims and metadata derived from
+// the JWT. `Signature` is the raw third segment of the token (already
+// HMAC-verified by `Parse`) — the middleware threads it into
+// `shenguard.NewVerifiedJwt` so the structural type `VerifiedJwt`
+// carries the verified signature alongside the parsed claims.
 type ParseResult struct {
-	Claims Claims
-	Exp    float64 // unix seconds, for NewTokenExpiry
-	Now    float64
+	Claims    Claims
+	Signature string  // raw signature segment, post-verification
+	Exp       float64 // unix seconds, for NewTokenExpiry
+	Now       float64
 }
 
 // Parse validates a JWT string and returns the claims.
@@ -82,9 +103,10 @@ func Parse(tokenStr string, secret []byte) (ParseResult, error) {
 	}
 
 	return ParseResult{
-		Claims: claims,
-		Exp:    float64(claims.Exp),
-		Now:    now,
+		Claims:    claims,
+		Signature: parts[2],
+		Exp:       float64(claims.Exp),
+		Now:       now,
 	}, nil
 }
 
@@ -96,6 +118,8 @@ func NewToken(userID, email string, ttl time.Duration, secret []byte) (string, e
 		Email: email,
 		Exp:   now.Add(ttl).Unix(),
 		Iat:   now.Unix(),
+		Iss:   DefaultIssuer,
+		Aud:   DefaultAudience,
 	}
 	return Sign(claims, secret)
 }
