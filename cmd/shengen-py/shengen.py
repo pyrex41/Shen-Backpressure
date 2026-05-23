@@ -45,6 +45,24 @@ class Datatype:
     name: str
     rules: list[Rule]
 
+
+@dataclass
+class DefineClause:
+    patterns: list[str]   # raw pattern tokens, e.g. ["_", "[]"] or ["Ref", "[[EntryRef _] | Rest]"]
+    result: str           # raw s-expression or literal
+    guard: str = ""       # raw where-clause s-expression (may be empty)
+
+
+@dataclass
+class Define:
+    name: str
+    clauses: list[DefineClause] = field(default_factory=list)
+    # Type signature parsed from `{T1 --> T2 --> ... --> Tret}`. If empty the
+    # define has no published signature in the source — params fall back to
+    # untyped `Any`.
+    param_types: list[str] = field(default_factory=list)
+    return_type: str = ""
+
 @dataclass
 class FieldInfo:
     index: int
@@ -78,33 +96,198 @@ class SExpr:
 PRIMITIVES = {"string": "str", "number": "float", "symbol": "str", "boolean": "bool"}
 
 def parse_file(path: str) -> list[Datatype]:
+    """Backwards-compatible entry point — returns only datatypes."""
+    datatypes, _ = parse_file_full(path)
+    return datatypes
+
+
+def parse_file_full(path: str) -> tuple[list[Datatype], list[Define]]:
+    """Parse a Shen spec, returning both datatype and define blocks."""
     with open(path) as f:
         text = f.read()
     text = re.sub(r'\\\*.*?\*\\', '', text, flags=re.DOTALL)
     datatypes = []
-    i = 0
-    while i < len(text):
-        m = re.search(r'\(datatype\s+([\w-]+)', text[i:])
-        if not m:
+    defines = []
+    for block in _extract_blocks(text, '(datatype '):
+        dt = _parse_datatype_block(block)
+        if dt is not None:
+            datatypes.append(dt)
+    for block in _extract_blocks(text, '(define '):
+        df = parse_define(block)
+        if df is not None:
+            defines.append(df)
+    return datatypes, defines
+
+
+def _extract_blocks(text: str, prefix: str) -> list[str]:
+    """Find all balanced-paren blocks starting with `prefix`. Mirrors Go's
+    `extractBlocks` in cmd/shengen/main.go."""
+    blocks = []
+    remaining = text
+    while True:
+        idx = remaining.find(prefix)
+        if idx == -1:
             break
-        start = i + m.start()
-        name = m.group(1)
+        remaining = remaining[idx:]
         depth = 0
-        j = start
-        while j < len(text):
-            if text[j] == '(':
+        end = -1
+        for i, ch in enumerate(remaining):
+            if ch == '(':
                 depth += 1
-            elif text[j] == ')':
+            elif ch == ')':
                 depth -= 1
                 if depth == 0:
+                    end = i + 1
                     break
-            j += 1
-        body = text[start + m.end() - m.start():j]
-        rules = parse_rules(body)
-        if rules:
-            datatypes.append(Datatype(name=name, rules=rules))
-        i = j + 1
-    return datatypes
+        if end == -1:
+            break
+        blocks.append(remaining[:end])
+        remaining = remaining[end:]
+    return blocks
+
+
+def _parse_datatype_block(block: str) -> Optional[Datatype]:
+    m = re.match(r'\(datatype\s+([\w-]+)', block)
+    if not m:
+        return None
+    name = m.group(1)
+    body = block[m.end():-1]  # strip trailing ')'
+    rules = parse_rules(body)
+    if not rules:
+        return None
+    return Datatype(name=name, rules=rules)
+
+
+def parse_define(block: str) -> Optional[Define]:
+    """Parse a (define name {sig?} body) block into a Define record.
+
+    Mirrors `parseDefine` in cmd/shengen/main.go. The body is reduced to a
+    single line and split on ` -> ` to yield alternating patterns/results.
+
+    Also extracts an optional type signature `{T1 --> T2 --> ... --> Tret}`.
+    """
+    block = block.strip()
+    if not block.startswith('(define '):
+        return None
+    block = block[len('(define '):]
+    # The first whitespace token after `(define ` is the name.
+    nl_idx = block.find('\n')
+    if nl_idx == -1:
+        return None
+    name = block[:nl_idx].strip()
+    body = block[nl_idx:].rstrip(' \t\n)')
+
+    # Extract optional type signature on the first non-blank body line. Shen
+    # signatures look like `{string --> (list tag-id) --> number --> boolean}`.
+    param_types: list[str] = []
+    return_type: str = ""
+    body_one = ' '.join(body.split())
+    sig_match = re.match(r'\s*\{(.+?)\}\s*(.*)', body_one)
+    if sig_match:
+        sig_inner = sig_match.group(1).strip()
+        body_one = sig_match.group(2)
+        sig_parts = [p.strip() for p in sig_inner.split(' --> ')]
+        if len(sig_parts) >= 2:
+            param_types = sig_parts[:-1]
+            return_type = sig_parts[-1]
+
+    segments = body_one.split(' -> ')
+    if len(segments) < 2:
+        return None
+
+    define = Define(name=name, param_types=param_types, return_type=return_type)
+    current_patterns = segments[0]
+
+    for i in range(1, len(segments)):
+        seg = segments[i]
+        result = ""
+        guard = ""
+        next_patterns = ""
+
+        where_idx = seg.find(' where ')
+        if where_idx != -1:
+            result = seg[:where_idx].strip()
+            after_where = seg[where_idx + 7:].strip()
+            if after_where.startswith('('):
+                guard_expr, end_idx = _extract_balanced_paren(after_where)
+                guard = guard_expr
+                next_patterns = after_where[end_idx:].strip()
+            else:
+                guard = after_where
+        else:
+            seg = seg.strip()
+            if seg.startswith('('):
+                expr, end_idx = _extract_balanced_paren(seg)
+                result = expr
+                next_patterns = seg[end_idx:].strip()
+            else:
+                tokens = seg.split()
+                result = tokens[0]
+                if len(tokens) > 1:
+                    next_patterns = ' '.join(tokens[1:])
+
+        # Clean up trailing parens / re-extract balanced expressions.
+        result = result.rstrip(')')
+        result = result.strip()
+        if result.startswith('('):
+            r, _ = _extract_balanced_paren(result + ')')
+            if r:
+                result = r
+
+        patterns = _split_patterns(current_patterns)
+        if patterns:
+            define.clauses.append(DefineClause(patterns=patterns, result=result, guard=guard))
+
+        current_patterns = next_patterns
+
+    if not define.clauses:
+        return None
+    return define
+
+
+def _split_patterns(s: str) -> list[str]:
+    """Tokenize a pattern string respecting bracket nesting.
+    `[Med | Meds]` stays as one token; `[[X Y] | Rest]` stays as one token.
+    Mirrors `splitPatterns` in cmd/shengen/main.go."""
+    patterns: list[str] = []
+    current: list[str] = []
+    depth = 0
+    for ch in s:
+        if ch == '[':
+            depth += 1
+            current.append(ch)
+        elif ch == ']':
+            depth -= 1
+            current.append(ch)
+            if depth == 0 and current:
+                patterns.append(''.join(current))
+                current = []
+        elif ch in (' ', '\t'):
+            if depth > 0:
+                current.append(ch)
+            elif current:
+                patterns.append(''.join(current))
+                current = []
+        else:
+            current.append(ch)
+    if current:
+        patterns.append(''.join(current))
+    return patterns
+
+
+def _extract_balanced_paren(s: str) -> tuple[str, int]:
+    """Return (balanced-expr, index-past-end). Mirrors Go's `extractBalancedParen`."""
+    if not s or s[0] != '(':
+        return "", 0
+    depth = 0
+    for i, ch in enumerate(s):
+        if ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+            if depth == 0:
+                return s[:i + 1], i + 1
+    return s, len(s)
 
 def parse_rules(body: str) -> list[Rule]:
     parts = re.split(r'\n\s*[=_]{3,}\s*\n', body)
@@ -134,7 +317,10 @@ def parse_premises(text: str) -> tuple[list[Premise], list[VerifiedPremise]]:
         if line.startswith('if '):
             verified.append(VerifiedPremise(raw=line[3:].strip()))
             continue
-        tm = re.match(r'(\w+)\s*:\s*([\w-]+(?:\s*\(.*?\))?)\s*$', line)
+        # Match either a simple type (e.g. `X : amount`) or a parametric
+        # type like `Refs : (list tag-id)`. The (list X) form is the only
+        # parametric construct supported today.
+        tm = re.match(r'(\w+)\s*:\s*(\(list\s+[\w-]+\)|[\w-]+)\s*$', line)
         if tm:
             premises.append(Premise(var_name=tm.group(1), type_name=tm.group(2).strip()))
     return premises, verified
@@ -321,7 +507,12 @@ def translate_verified(vp: VerifiedPremise, var_map: dict, st: dict) -> tuple[st
     if op == "=":
         lhs = resolve(expr.children[1], var_map, st)
         rhs = resolve(expr.children[2], var_map, st)
-        return (f"{unwrap(lhs, st)} == {unwrap(rhs, st)}", f"{lhs.code} must equal {rhs.code}")
+        # Escape any embedded quotes so the message can be safely interpolated
+        # into a Python string literal at emission time.
+        return (
+            f"{unwrap(lhs, st)} == {unwrap(rhs, st)}",
+            f"{_msg_escape(lhs.code)} must equal {_msg_escape(rhs.code)}",
+        )
     if op == "not":
         inner_expr = expr.children[1]
         # (not (= LHS RHS)) — prefer human-readable messages:
@@ -346,6 +537,15 @@ def translate_verified(vp: VerifiedPremise, var_map: dict, st: dict) -> tuple[st
 
 def _is_empty_string_literal(code: str) -> bool:
     return code == '""'
+
+
+def _msg_escape(s: str) -> str:
+    """Escape characters that would break a Python string literal.
+
+    Specifically: replace `"` with `\\\"` so a Shen-literal RHS like `"signed-complete"`
+    survives interpolation into an emitted `raise ValueError("...")` line.
+    """
+    return s.replace('"', '\\"')
 
 
 def negate_py_expr(py_expr: str) -> str:
@@ -385,7 +585,12 @@ def _strip_outer_not_paren(py_expr: str) -> Optional[str]:
 # Emitter — Standard Mode
 # ---------------------------------------------------------------------------
 
-def emit_standard(datatypes: list[Datatype], st: dict[str, TypeInfo], spec_path: str) -> str:
+def emit_standard(
+    datatypes: list[Datatype],
+    st: dict[str, TypeInfo],
+    spec_path: str,
+    defines: Optional[list[Define]] = None,
+) -> str:
     lines = [
         f"# Code generated by shengen-py from {spec_path}. DO NOT EDIT.",
         "#",
@@ -424,6 +629,10 @@ def emit_standard(datatypes: list[Datatype], st: dict[str, TypeInfo], spec_path:
             lines.append(f"{info.py_name} = Union[{', '.join(to_pascal(v) for v in info.variants)}]")
             lines.append("")
 
+    # Pure-function helpers translated from (define …) blocks.
+    if defines:
+        lines.extend(emit_defines(defines, st))
+
     return "\n".join(lines)
 
 def emit_type_standard(info: TypeInfo, rule: Rule, st: dict) -> list[str]:
@@ -434,7 +643,10 @@ def emit_type_standard(info: TypeInfo, rule: Rule, st: dict) -> list[str]:
     lines.append(f"# Shen: (datatype {info.shen_name})")
 
     if cat == "alias":
-        target = to_pascal(info.wrapped_type or "")
+        # Render the alias target through `field_py_type` so parametric
+        # constructs like `(list ref-table-entry)` produce `list[RefTableEntry]`
+        # rather than the malformed `(list refTableEntry)`.
+        target = field_py_type(info.wrapped_type or "", st)
         lines.append(f"{info.py_name} = {target}")
         lines.append("")
         return lines
@@ -508,15 +720,19 @@ def emit_type_standard(info: TypeInfo, rule: Rule, st: dict) -> list[str]:
                 pname = pname + "_"
             args.append(f"_{to_snake(fi.shen_name)}={pname}")
         lines.append(f"def {fn_name}({', '.join(params)}) -> {info.py_name}:")
-        # Type checks for composite args
+        # Type checks for composite args. Primitive types and list types are
+        # not isinstance-checked at construction time — primitives are caught
+        # by the type annotation; lists are trusted (matching the Go emitter's
+        # treatment of `[]T` parameters).
         for fi in info.fields:
-            if fi.shen_type not in PRIMITIVES:
-                pname = to_snake(fi.shen_name)
-                if pname in ("from",):
-                    pname = pname + "_"
-                expected = to_pascal(fi.shen_type)
-                lines.append(f"    if not isinstance({pname}, {expected}):")
-                lines.append(f'        raise TypeError(f"{pname} must be {expected}, got {{type({pname}).__name__}}")')
+            if fi.shen_type in PRIMITIVES or list_elem_type(fi.shen_type) is not None:
+                continue
+            pname = to_snake(fi.shen_name)
+            if pname in ("from",):
+                pname = pname + "_"
+            expected = to_pascal(fi.shen_type)
+            lines.append(f"    if not isinstance({pname}, {expected}):")
+            lines.append(f'        raise TypeError(f"{pname} must be {expected}, got {{type({pname}).__name__}}")')
         lines.append(f"    return {info.py_name}({', '.join(args)})")
 
     lines.append("")
@@ -527,7 +743,12 @@ def emit_type_standard(info: TypeInfo, rule: Rule, st: dict) -> list[str]:
 # Emitter — Hardened Mode
 # ---------------------------------------------------------------------------
 
-def emit_hardened(datatypes: list[Datatype], st: dict[str, TypeInfo], spec_path: str) -> str:
+def emit_hardened(
+    datatypes: list[Datatype],
+    st: dict[str, TypeInfo],
+    spec_path: str,
+    defines: Optional[list[Define]] = None,
+) -> str:
     lines = [
         f"# Code generated by shengen-py from {spec_path}. DO NOT EDIT.",
         "#",
@@ -585,6 +806,10 @@ def emit_hardened(datatypes: list[Datatype], st: dict[str, TypeInfo], spec_path:
                 continue
             lines.extend(emit_type_hardened(info, rule, st))
 
+    # Pure-function helpers translated from (define …) blocks.
+    if defines:
+        lines.extend(emit_defines(defines, st))
+
     return "\n".join(lines)
 
 def emit_type_hardened(info: TypeInfo, rule: Rule, st: dict) -> list[str]:
@@ -595,7 +820,10 @@ def emit_type_hardened(info: TypeInfo, rule: Rule, st: dict) -> list[str]:
     lines.append(f"# Shen: (datatype {info.shen_name})")
 
     if cat == "alias":
-        target = to_pascal(info.wrapped_type or "")
+        # Render the alias target through `field_py_type` so parametric
+        # constructs like `(list ref-table-entry)` produce `list[RefTableEntry]`
+        # rather than the malformed `(list refTableEntry)`.
+        target = field_py_type(info.wrapped_type or "", st)
         lines.append(f"{info.py_name} = {target}")
         lines.append("")
         return lines
@@ -647,6 +875,10 @@ def emit_type_hardened(info: TypeInfo, rule: Rule, st: dict) -> list[str]:
         for fi in info.fields:
             if fi.shen_type in PRIMITIVES:
                 tag_parts.append(f"_bytes_of(obj._{to_snake(fi.shen_name)})")
+            elif list_elem_type(fi.shen_type) is not None:
+                # Lists are tagged by their length only — element-level
+                # provenance hashing is deferred (see factory TODO).
+                tag_parts.append(f'_bytes_of(len(obj._{to_snake(fi.shen_name)}))')
             else:
                 tag_parts.append(f'obj._{to_snake(fi.shen_name)}._tag.encode("utf-8")')
         lines.append(f'    expected = _hmac_tag("{info.py_name}", {", ".join(tag_parts)})')
@@ -682,17 +914,26 @@ def emit_type_hardened(info: TypeInfo, rule: Rule, st: dict) -> list[str]:
 
         lines.append(f"def {fn_name}({', '.join(params)}) -> {info.py_name}:")
 
-        # Type checks
+        # Type checks. Lists are trusted (no per-element provenance check
+        # because list element provenance would change the recursive HMAC
+        # shape — emit a TODO and skip).
         for fi in info.fields:
-            if fi.shen_type not in PRIMITIVES:
+            if fi.shen_type in PRIMITIVES:
+                continue
+            if list_elem_type(fi.shen_type) is not None:
                 pname = to_snake(fi.shen_name)
                 if pname in ("from",):
                     pname += "_"
-                expected = to_pascal(fi.shen_type)
-                lines.append(f"    if not isinstance({pname}, {expected}):")
-                lines.append(f'        raise TypeError(f"{pname} must be {expected}, got {{type({pname}).__name__}}")')
-                lines.append(f"    if not verify_{to_snake(fi.shen_type)}({pname}):")
-                lines.append(f'        raise ValueError("{pname} has invalid provenance (possible tampering)")')
+                lines.append(f"    # TODO: list element provenance not yet verified for {pname}")
+                continue
+            pname = to_snake(fi.shen_name)
+            if pname in ("from",):
+                pname += "_"
+            expected = to_pascal(fi.shen_type)
+            lines.append(f"    if not isinstance({pname}, {expected}):")
+            lines.append(f'        raise TypeError(f"{pname} must be {expected}, got {{type({pname}).__name__}}")')
+            lines.append(f"    if not verify_{to_snake(fi.shen_type)}({pname}):")
+            lines.append(f'        raise ValueError("{pname} has invalid provenance (possible tampering)")')
 
         # Guarded checks
         if cat == "guarded":
@@ -717,6 +958,8 @@ def emit_type_hardened(info: TypeInfo, rule: Rule, st: dict) -> list[str]:
                 pname += "_"
             if fi.shen_type in PRIMITIVES:
                 tag_parts.append(f"_bytes_of({pname})")
+            elif list_elem_type(fi.shen_type) is not None:
+                tag_parts.append(f"_bytes_of(len({pname}))")
             else:
                 tag_parts.append(f'{pname}._tag.encode("utf-8")')
         lines.append(f'    object.__setattr__(obj, "_tag", _hmac_tag("{info.py_name}", {", ".join(tag_parts)}))')
@@ -728,13 +971,401 @@ def emit_type_hardened(info: TypeInfo, rule: Rule, st: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Define Emission
+# ---------------------------------------------------------------------------
+
+class DefineEmitError(Exception):
+    """Raised when a define block uses constructs the Python emitter cannot
+    handle. Callers should emit a clear comment in the output and continue
+    with the rest of the spec rather than corrupt the file silently."""
+
+
+def define_py_name(shen_name: str) -> str:
+    """Convert a Shen define name like `ref-present?` to Python `ref_present`.
+
+    The trailing `?` (predicate convention) is stripped; hyphens map to
+    underscores so the name slots into Python's snake_case style.
+    """
+    name = shen_name.rstrip('?')
+    return to_snake(name)
+
+
+def _extract_destructure_bindings(pattern: str) -> list[str]:
+    """Parse a destructuring pattern and return the element's binding names.
+
+    `[Med | Meds]`        → ["Med"]            (simple head binding)
+    `[[X Y] | Rest]`      → ["X", "Y"]         (record-shape destructure)
+    `[_ | Rest]`          → ["_"]              (ignore element)
+    Anything else         → []
+    """
+    # Strip exactly one leading `[` (not all of them — `[[X Y] | Rest]`
+    # contains a nested bracket pair that must survive).
+    if not pattern.startswith('['):
+        return []
+    inner = pattern[1:]
+    pipe_idx = inner.find('|')
+    if pipe_idx == -1:
+        return []
+    inner = inner[:pipe_idx].strip()
+    if inner.startswith('['):
+        # Nested destructure [[X Y]] → strip exactly one bracket pair.
+        if not inner.endswith(']'):
+            return []
+        inner = inner[1:-1].strip()
+        return inner.split()
+    parts = inner.split()
+    if len(parts) == 1:
+        return parts
+    return []
+
+
+def _analyze_define(define: Define) -> tuple[int, Optional[str]]:
+    """Find (loop_param_idx, base_result).
+
+    `loop_param_idx` is the index of the parameter that is destructured via
+    `[X | Rest]` in at least one clause. Mirrors `analyzeDefine` in the Go
+    emitter. Returns -1 if no list iteration pattern is found.
+    `base_result` is the Python translation of the first clause whose
+    loop-param pattern is exactly `[]` — the recursion base case. Returns
+    None when no explicit base case is present, so callers can decide
+    whether to default it (`False` for predicates) or refuse to emit.
+    """
+    loop_idx = -1
+    for clause in define.clauses:
+        for j, pat in enumerate(clause.patterns):
+            if '|' in pat:
+                loop_idx = j
+                break
+        if loop_idx >= 0:
+            break
+    base_result: Optional[str] = None
+    if loop_idx >= 0:
+        for clause in define.clauses:
+            if loop_idx < len(clause.patterns) and clause.patterns[loop_idx] == '[]':
+                base_result = _result_to_py(clause.result)
+                break
+    return loop_idx, base_result
+
+
+def _result_to_py(result: str) -> str:
+    """Translate a clause result token to Python syntax."""
+    r = result.strip()
+    if r == 'true':
+        return 'True'
+    if r == 'false':
+        return 'False'
+    # S-expression results — best-effort: only handle a few atomic forms.
+    return r
+
+
+def emit_defines(defines: list[Define], st: dict[str, TypeInfo]) -> list[str]:
+    """Emit Python functions for the given define blocks.
+
+    Conservative scope: handle defines that iterate over exactly one list
+    parameter (the loop-param), with a base case `[]` and where-guarded
+    clauses whose guard and result expressions translate cleanly to Python.
+
+    Anything outside this shape is emitted as a top-level comment naming the
+    define and the reason it was skipped. Never emits invalid Python.
+    """
+    if not defines:
+        return []
+    lines: list[str] = [
+        "",
+        "",
+        "# --- Pure functions translated from (define …) blocks ---",
+        "#",
+        "# Only defines that recurse over a single list parameter are emitted.",
+        "# Anything richer (multi-list recursion, non-list pattern matching,",
+        "# arithmetic-heavy bodies) is flagged below and left for a future",
+        "# emitter pass — the Python emitter prefers a clear gap to a quietly",
+        "# corrupted helper.",
+        "",
+    ]
+    for define in defines:
+        try:
+            block = _emit_one_define(define, st)
+        except DefineEmitError as exc:
+            block = [
+                f"# unsupported: define {define.name!r} — {exc}",
+                "",
+            ]
+        lines.extend(block)
+    return lines
+
+
+def _emit_one_define(define: Define, st: dict[str, TypeInfo]) -> list[str]:
+    py_name = define_py_name(define.name)
+    loop_idx, base_result = _analyze_define(define)
+    if loop_idx < 0:
+        raise DefineEmitError(
+            "no list-iteration clause (Python emitter only handles defines "
+            "that destructure a single list parameter)"
+        )
+    if base_result is None:
+        # No explicit `[]` clause. For boolean predicates we can default to
+        # `False`; for any other return type we refuse rather than fabricate.
+        if define.return_type == "boolean":
+            base_result = "False"
+        else:
+            raise DefineEmitError(
+                "no `[]` base case clause and return type is not boolean — "
+                "emitter cannot synthesise a fallback value"
+            )
+
+    # Resolve param types from the signature if present.
+    param_py_types: list[str] = []
+    for i in range(len(define.param_types)):
+        shen_t = define.param_types[i]
+        elem = list_elem_type(shen_t)
+        if elem is not None:
+            param_py_types.append(f"list[{field_py_type(elem, st)}]")
+        elif shen_t in PRIMITIVES:
+            param_py_types.append(PRIMITIVES[shen_t])
+        else:
+            param_py_types.append(to_pascal(shen_t))
+
+    # Build parameter names: prefer a non-wildcard pattern name from the
+    # first clause where each position has a usable variable, falling back
+    # to a snake-cased version of the type signature (e.g. `ref-table` →
+    # `ref_table`) so generated code doesn't carry through `arg1`.
+    arity = max(len(c.patterns) for c in define.clauses) if define.clauses else 0
+    if arity == 0:
+        raise DefineEmitError("no clauses")
+    param_names: list[str] = []
+    for i in range(arity):
+        name: Optional[str] = None
+        for clause in define.clauses:
+            if i >= len(clause.patterns):
+                continue
+            pat = clause.patterns[i]
+            if pat in ('_', '[]') or pat.startswith('['):
+                continue
+            name = to_snake(pat)
+            break
+        if name is None and i < len(define.param_types):
+            # Fall back to the type-name (without (list ...) wrapper).
+            shen_t = define.param_types[i]
+            elem = list_elem_type(shen_t)
+            label = elem if elem is not None else shen_t
+            name = to_snake(label) + "s" if elem is not None else to_snake(label)
+        if name is None:
+            name = f"arg{i}"
+        # Avoid Python keyword collisions.
+        if name in ("from",):
+            name += "_"
+        param_names.append(name)
+
+    # Typed signature.
+    sig_parts = []
+    for i, pn in enumerate(param_names):
+        if i < len(param_py_types):
+            sig_parts.append(f"{pn}: {param_py_types[i]}")
+        else:
+            sig_parts.append(pn)
+    return_py = "bool"
+    if define.return_type:
+        if define.return_type in PRIMITIVES:
+            return_py = PRIMITIVES[define.return_type]
+        else:
+            elem = list_elem_type(define.return_type)
+            if elem is not None:
+                return_py = f"list[{field_py_type(elem, st)}]"
+            else:
+                return_py = to_pascal(define.return_type)
+
+    # The non-base, non-guarded "fall-through" clause is the recursive call
+    # in tail position. We emit a `for` loop that handles the guarded clauses
+    # eagerly, then returns `base_result` after the loop — semantically
+    # equivalent for predicate-style defines (the recursive call sees the
+    # tail of the list, which is what the next loop iteration handles).
+    # Verify each clause that we emit translates cleanly *before* emitting
+    # anything. This way a failure mid-define still keeps the output clean.
+    emitted_clauses: list[tuple[str, str]] = []  # (guard_py, result_py)
+    loop_shen_type = define.param_types[loop_idx] if loop_idx < len(define.param_types) else ""
+    list_elem_shen = list_elem_type(loop_shen_type) or ""
+    # If the loop parameter is an alias for `(list X)`, resolve through.
+    if not list_elem_shen and loop_shen_type:
+        ti = st.get(loop_shen_type)
+        if ti is not None and ti.category == "alias" and ti.wrapped_type:
+            list_elem_shen = list_elem_type(ti.wrapped_type) or ""
+    elem_var = "elem"
+
+    for clause in define.clauses:
+        if loop_idx >= len(clause.patterns):
+            continue
+        loop_pat = clause.patterns[loop_idx]
+        if loop_pat == '[]':
+            continue
+        if clause.guard == "":
+            # Unguarded recursive tail — implicit by the for-loop. Skip.
+            continue
+        bindings = _extract_destructure_bindings(loop_pat)
+        local_var_map: dict[str, str] = {}
+        # Replacement map: source identifier (in either Shen or snake-case
+        # form) → target Python expression. We then do a single regex pass
+        # to avoid the chained-replacement bug where a target string contains
+        # a token that's itself a key.
+        repl_map: dict[str, str] = {}
+
+        def _add_replacement(src: str, dst: str) -> None:
+            repl_map[src] = dst
+            snake = to_snake(src)
+            if snake != src:
+                repl_map[snake] = dst
+
+        if len(bindings) == 1 and bindings[0] != '_':
+            local_var_map[bindings[0]] = list_elem_shen
+            _add_replacement(bindings[0], elem_var)
+        elif len(bindings) > 1 and list_elem_shen:
+            elem_info = st.get(list_elem_shen)
+            if elem_info is None or len(elem_info.fields) < len(bindings):
+                raise DefineEmitError(
+                    f"destructure {loop_pat!r} does not match element type {list_elem_shen!r}"
+                )
+            for j, varname in enumerate(bindings):
+                if varname == '_':
+                    continue
+                f = elem_info.fields[j]
+                local_var_map[varname] = f.shen_type
+                accessor = f"{elem_var}.{to_snake(f.shen_name)}()"
+                _add_replacement(varname, accessor)
+        else:
+            raise DefineEmitError(
+                f"could not bind destructure {loop_pat!r} (no type signature?)"
+            )
+
+        # Bind non-loop pattern variables to their parameter names.
+        for i, pat in enumerate(clause.patterns):
+            if i == loop_idx or pat in ('_', '[]') or pat.startswith('['):
+                continue
+            if i < len(define.param_types):
+                local_var_map[pat] = define.param_types[i]
+            _add_replacement(pat, param_names[i])
+
+        # Drop replacements where the target *is* the source (self-mapping)
+        # to keep the regex small.
+        repl_map = {k: v for k, v in repl_map.items() if k != v}
+
+        guard_py = _guard_to_py(clause.guard, local_var_map, st)
+        if "TODO" in guard_py:
+            raise DefineEmitError(
+                f"guard {clause.guard!r} contains constructs the emitter cannot translate"
+            )
+
+        result_py = _result_to_py(clause.result)
+        # If the result is itself an s-expression call (`(cons ...)`, recursion),
+        # we can't translate it cleanly. Reject the whole define.
+        if result_py.startswith('('):
+            raise DefineEmitError(
+                f"result {clause.result!r} is an s-expression — only literal results supported"
+            )
+        guard_py = _apply_replacements_once(guard_py, repl_map)
+        result_py = _apply_replacements_once(result_py, repl_map)
+        emitted_clauses.append((guard_py, result_py))
+
+    if not emitted_clauses:
+        raise DefineEmitError(
+            "no translatable guarded clauses (only the base case + unguarded "
+            "recursion were present)"
+        )
+
+    lines: list[str] = []
+    lines.append(f"def {py_name}({', '.join(sig_parts)}) -> {return_py}:")
+    lines.append(f'    """Generated from Shen define {define.name}."""')
+    loop_param_name = param_names[loop_idx]
+    lines.append(f"    for {elem_var} in {loop_param_name}:")
+    for guard_py, result_py in emitted_clauses:
+        lines.append(f"        if {guard_py}:")
+        lines.append(f"            return {result_py}")
+    lines.append(f"    return {base_result}")
+    lines.append("")
+    return lines
+
+
+def _apply_replacements_once(text: str, repl_map: dict[str, str]) -> str:
+    """Substitute identifiers in `text` using `repl_map` in a single pass.
+
+    A `re.sub` callback is used so that each match position is consumed
+    exactly once — preventing the cascade bug where the substituted token
+    (e.g. `elem.block()`) contains another key (`block`) that would re-match.
+    """
+    if not repl_map:
+        return text
+    # Sort keys by length (longest first) so a key like `EntryRef` wins over
+    # `Entry` if both are registered.
+    keys = sorted(repl_map.keys(), key=len, reverse=True)
+    pattern = re.compile(r'\b(' + '|'.join(re.escape(k) for k in keys) + r')\b')
+    return pattern.sub(lambda m: repl_map[m.group(1)], text)
+
+
+def _guard_to_py(guard: str, var_map: dict[str, str], st: dict) -> str:
+    """Translate a where-clause s-expression to Python. Supports `=`, `>=`,
+    `<=`, `>`, `<`, `not`, `and`, `or`, and `length`. Unsupported forms
+    return `True  # TODO`."""
+    if not guard.strip():
+        return "True"
+    expr = parse_sexpr(guard)
+    if not expr.is_call():
+        return "True"
+    return _guard_expr_to_py(expr, var_map, st)
+
+
+def _guard_expr_to_py(expr: SExpr, var_map: dict, st: dict) -> str:
+    if expr.is_atom():
+        a = expr.atom
+        if a and (a[0].isdigit() or (a[0] == '-' and len(a) > 1)):
+            return a
+        if a and a[0] == '"':
+            return a
+        if a in var_map:
+            r = Resolved(code=to_snake(a), typ=var_map[a])
+            return unwrap(r, st)
+        if a == 'true':
+            return 'True'
+        if a == 'false':
+            return 'False'
+        return to_snake(a) if a else ""
+
+    op = expr.op()
+    if op in ('and', 'or') and len(expr.children) == 3:
+        l = _guard_expr_to_py(expr.children[1], var_map, st)
+        r = _guard_expr_to_py(expr.children[2], var_map, st)
+        py_op = 'and' if op == 'and' else 'or'
+        return f"({l}) {py_op} ({r})"
+    if op == 'not' and len(expr.children) == 2:
+        inner = _guard_expr_to_py(expr.children[1], var_map, st)
+        return f"not ({inner})"
+    if op in ('=', '>=', '<=', '>', '<') and len(expr.children) == 3:
+        l = _guard_expr_to_py(expr.children[1], var_map, st)
+        r = _guard_expr_to_py(expr.children[2], var_map, st)
+        py_op = '==' if op == '=' else op
+        return f"{l} {py_op} {r}"
+    if op == 'length' and len(expr.children) == 2:
+        inner = _guard_expr_to_py(expr.children[1], var_map, st)
+        return f"len({inner})"
+    return "True  # TODO: unsupported guard form"
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def field_py_type(shen_type: str, st: dict) -> str:
+    # Handle parametric list types: (list X) → list[X-py-type]
+    elem = list_elem_type(shen_type)
+    if elem is not None:
+        return f"list[{field_py_type(elem, st)}]"
     if shen_type in PRIMITIVES:
         return PRIMITIVES[shen_type]
     return to_pascal(shen_type)
+
+
+def list_elem_type(shen_type: str) -> Optional[str]:
+    """Extract the element type from `(list X)`, or None if not a list type."""
+    if shen_type.startswith("(list ") and shen_type.endswith(")"):
+        return shen_type[len("(list "):-1].strip()
+    return None
 
 def to_pascal(name: str) -> str:
     return "".join(w.capitalize() for w in name.split("-"))
@@ -774,14 +1405,14 @@ def main():
     parser.add_argument("--mode", choices=["standard", "hardened"], default="standard")
     args = parser.parse_args()
 
-    datatypes = parse_file(args.spec)
+    datatypes, defines = parse_file_full(args.spec)
     st = build_symbol_table(datatypes)
     print_symbol_table(st, args.spec)
 
     if args.mode == "hardened":
-        code = emit_hardened(datatypes, st, args.spec)
+        code = emit_hardened(datatypes, st, args.spec, defines)
     else:
-        code = emit_standard(datatypes, st, args.spec)
+        code = emit_standard(datatypes, st, args.spec, defines)
 
     if args.out:
         with open(args.out, 'w') as f:
