@@ -221,35 +221,84 @@ func renderRuleSection(b *strings.Builder, rule DischargeRule) {
 	if len(rule.CounterExamples) > 0 {
 		b.WriteString("**Counter-examples**\n\n")
 		for _, ce := range rule.CounterExamples {
-			fmt.Fprintf(b, "- **%s**\n", ce.CaseID)
-			if len(ce.Input) > 0 {
-				b.WriteString("  - Input: `")
-				keys := make([]string, 0, len(ce.Input))
-				for k := range ce.Input {
-					keys = append(keys, k)
-				}
-				sort.Strings(keys)
-				parts := make([]string, len(keys))
-				for i, k := range keys {
-					parts[i] = k + "=" + ce.Input[k]
-				}
-				b.WriteString(strings.Join(parts, ", "))
-				b.WriteString("`\n")
-			}
-			fmt.Fprintf(b, "  - Spec output: `%s`\n", ce.SpecOutput)
-			fmt.Fprintf(b, "  - Impl output: `%s`\n", ce.ImplOutput)
-			if ce.ImplFile != "" {
-				fmt.Fprintf(b, "  - Impl file: `%s`\n", ce.ImplFile)
-			}
-			if ce.ImplFunction != "" {
-				fmt.Fprintf(b, "  - Reproduce: `go test -run TestSpec_%s/%s`\n",
-					ce.ImplFunction, ce.CaseID)
-			}
-			if ce.Rationale != "" {
-				fmt.Fprintf(b, "  - %s\n", ce.Rationale)
-			}
+			renderCounterExample(b, ce)
 		}
-		b.WriteString("\n")
+	}
+}
+
+// renderCounterExample emits one counter-example in the richer
+// Markdown form designed for human auditors and AI agents alike.
+// Compared with the previous inline-bullet rendering, this puts:
+//   - the input as a multi-line key=value code block, so a reader can
+//     copy the exact case into a debugger without backtick scraping;
+//   - the spec-vs-impl outputs as side-by-side fenced blocks, so the
+//     diff is visible to a five-second skim;
+//   - the reproducer command in its own fenced block, so it can be
+//     copy-pasted intact (no surrounding markdown noise to strip).
+//
+// Format intentionally stays single-language (no rendered HTML, no
+// admonition extensions) so the same Markdown renders correctly on
+// GitHub, in a PR comment, in `glow`, and in an agent harness's plain
+// text view. See thoughts/shared/research/2026-05-05-feature-counterexample-traces.md
+// for the design motivation.
+func renderCounterExample(b *strings.Builder, ce DischargeCounter) {
+	fmt.Fprintf(b, "#### Case `%s`\n\n", ce.CaseID)
+
+	// Input as a multi-line code block — one key=value per line.
+	// Sorted keys so identical input renders byte-identical across
+	// runs (snapshot diff stability).
+	if len(ce.Input) > 0 {
+		keys := make([]string, 0, len(ce.Input))
+		for k := range ce.Input {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		b.WriteString("Input:\n\n```\n")
+		for _, k := range keys {
+			fmt.Fprintf(b, "%s = %s\n", k, ce.Input[k])
+		}
+		b.WriteString("```\n\n")
+	}
+
+	// Side-by-side spec-vs-impl. We render two fenced blocks back to
+	// back; the reader's Markdown renderer is responsible for
+	// horizontal placement when possible (GitHub doesn't have native
+	// side-by-side, so stacked blocks are the lowest-common-denom).
+	// The block language tags (`shen` / `<lang>`) give syntax
+	// highlighters a hint without committing to a specific tool.
+	b.WriteString("Spec output (Shen oracle):\n\n```shen\n")
+	b.WriteString(strings.TrimRight(ce.SpecOutput, "\n"))
+	b.WriteString("\n```\n\n")
+	b.WriteString("Impl output (")
+	if ce.ImplFunction != "" {
+		fmt.Fprintf(b, "`%s`", ce.ImplFunction)
+	} else {
+		b.WriteString("target implementation")
+	}
+	b.WriteString("):\n\n```\n")
+	b.WriteString(strings.TrimRight(ce.ImplOutput, "\n"))
+	b.WriteString("\n```\n\n")
+
+	if ce.ImplFile != "" {
+		fmt.Fprintf(b, "Impl file: `%s`", ce.ImplFile)
+		if ce.ImplLineHint != nil && *ce.ImplLineHint > 0 {
+			fmt.Fprintf(b, ":%d", *ce.ImplLineHint)
+		}
+		b.WriteString("\n\n")
+	}
+
+	// Reproducer in its own fenced block so it's one shell-friendly
+	// copy. We default to the Go test form because shen-derive's
+	// generated tests are the dominant source of counter-examples
+	// today; a future TS path would emit a node:test reproducer.
+	if ce.ImplFunction != "" {
+		b.WriteString("Reproduce:\n\n```sh\n")
+		fmt.Fprintf(b, "go test -run 'TestSpec_%s/%s' -v\n", ce.ImplFunction, ce.CaseID)
+		b.WriteString("```\n\n")
+	}
+
+	if ce.Rationale != "" {
+		fmt.Fprintf(b, "> %s\n\n", ce.Rationale)
 	}
 }
 
