@@ -241,6 +241,10 @@ func LoadConfig() (*Config, error) {
 			cfg.Output = fmt.Sprintf("internal/%s/guards_gen.go", cfg.Pkg)
 		case "ts":
 			cfg.Output = fmt.Sprintf("src/%s/guards.ts", cfg.Pkg)
+		case "py":
+			cfg.Output = fmt.Sprintf("%s/guards_gen.py", cfg.Pkg)
+		case "rs":
+			cfg.Output = fmt.Sprintf("src/%s/guards_gen.rs", cfg.Pkg)
 		}
 	}
 
@@ -413,6 +417,53 @@ func FindShengenTS() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("shengen-ts not found")
+}
+
+// FindShengenPy locates the experimental Python shengen emitter.
+// The emitter is a single Python script invoked via `python3`.
+func FindShengenPy() (string, error) {
+	return findScriptByWalking("cmd/shengen-py/shengen.py", "shengen-py")
+}
+
+// FindShengenRs locates the experimental Rust shengen emitter.
+// Note: the emitter is a Python script (it generates Rust output);
+// invoke it with `python3`, not `cargo`.
+func FindShengenRs() (string, error) {
+	return findScriptByWalking("cmd/shengen-rs/shengen.py", "shengen-rs")
+}
+
+// findScriptByWalking searches the conventional relative paths and falls
+// back to walking up from CWD until it finds the script (handles invocation
+// from inside examples/<ex>/ as well as from the repo root).
+func findScriptByWalking(rel, label string) (string, error) {
+	candidates := []string{
+		rel,
+		filepath.Join("..", "..", rel),
+		filepath.Join("..", "..", "..", rel),
+	}
+	for _, p := range candidates {
+		if abs, err := filepath.Abs(p); err == nil {
+			if _, err := os.Stat(abs); err == nil {
+				return abs, nil
+			}
+		}
+	}
+	// Walk up from CWD until we find a directory containing the script.
+	dir, err := os.Getwd()
+	if err == nil {
+		for {
+			candidate := filepath.Join(dir, rel)
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate, nil
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	return "", fmt.Errorf("%s not found (looked in %s and walked up from cwd)", label, rel)
 }
 
 // SplitCommand splits a shell command string into the binary and its arguments.
