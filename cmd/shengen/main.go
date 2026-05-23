@@ -1462,6 +1462,39 @@ func extractBalancedParen(s string) (string, int) {
 	return s, len(s)
 }
 
+// extractRuntimeViaComment looks for a trailing `\* :runtime-via <name> *\`
+// Shen block-comment on the given line. If present, returns (name,
+// line-without-comment, true). Otherwise returns ("", line, false).
+//
+// The annotation MUST be at the end of the line (after the `;`); embedding
+// it anywhere else is unsupported. Shen treats `\* ... *\` as a comment so
+// its tc+ ignores the annotation; shengen sees the marker and uses it.
+func extractRuntimeViaComment(line string) (name string, stripped string, ok bool) {
+	const open = `\*`
+	const close = `*\`
+	openIdx := strings.LastIndex(line, open)
+	if openIdx < 0 {
+		return "", line, false
+	}
+	rest := line[openIdx+len(open):]
+	closeIdx := strings.Index(rest, close)
+	if closeIdx < 0 {
+		return "", line, false
+	}
+	body := strings.TrimSpace(rest[:closeIdx])
+	// Accept either `:runtime-via <name>` or `runtime-via <name>`.
+	for _, prefix := range []string{":runtime-via ", "runtime-via "} {
+		if strings.HasPrefix(body, prefix) {
+			n := strings.TrimSpace(strings.TrimPrefix(body, prefix))
+			if n == "" {
+				return "", line, false
+			}
+			return n, strings.TrimSpace(line[:openIdx]), true
+		}
+	}
+	return "", line, false
+}
+
 func buildRule(premLines, concLines []string) *Rule {
 	r := &Rule{}
 	for _, line := range premLines {
@@ -1470,24 +1503,25 @@ func buildRule(premLines, concLines []string) *Rule {
 		if line == "" {
 			continue
 		}
-		if strings.HasSuffix(line, ": verified") {
-			r.Verified = append(r.Verified, VerifiedPremise{Raw: strings.TrimSpace(strings.TrimSuffix(line, ": verified"))})
-			continue
+		// Extract any trailing `\* :runtime-via <name> *\` Shen-comment
+		// annotation. Shen treats `\* ... *\` as a block comment so its
+		// tc+ ignores this; shengen sees the marker and uses it to
+		// discharge the matching verified premise at runtime instead of
+		// inlining the predicate. See docs/RUNTIME-VIA.md.
+		runtimeVia := ""
+		if via, stripped, ok := extractRuntimeViaComment(line); ok {
+			runtimeVia = via
+			line = strings.TrimSuffix(strings.TrimSpace(stripped), ";")
+			line = strings.TrimSpace(line)
 		}
-		// `(predicate) : verified via <fname>` — discharge this premise
-		// at runtime by calling <fname> from the constructor. The
-		// inline lowering is bypassed; see docs/RUNTIME-VIA.md.
-		if idx := strings.Index(line, ": verified via "); idx >= 0 {
-			raw := strings.TrimSpace(line[:idx])
-			via := strings.TrimSpace(line[idx+len(": verified via "):])
-			// strip any trailing semicolons/whitespace artifacts the
-			// outer trim missed.
-			via = strings.TrimRight(via, "; \t")
-			r.Verified = append(r.Verified, VerifiedPremise{Raw: raw, RuntimeVia: via})
+		if strings.HasSuffix(line, ": verified") {
+			raw := strings.TrimSpace(strings.TrimSuffix(line, ": verified"))
+			r.Verified = append(r.Verified, VerifiedPremise{Raw: raw, RuntimeVia: runtimeVia})
 			continue
 		}
 		if strings.HasPrefix(line, "if ") {
-			r.Verified = append(r.Verified, VerifiedPremise{Raw: strings.TrimSpace(strings.TrimPrefix(line, "if "))})
+			raw := strings.TrimSpace(strings.TrimPrefix(line, "if "))
+			r.Verified = append(r.Verified, VerifiedPremise{Raw: raw, RuntimeVia: runtimeVia})
 			continue
 		}
 		if parts := strings.SplitN(line, " : ", 2); len(parts) == 2 {

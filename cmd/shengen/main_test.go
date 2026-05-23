@@ -670,7 +670,7 @@ func TestNegateGoExprPeephole(t *testing.T) {
 func TestParseRuntimeViaAnnotation(t *testing.T) {
 	spec := `(datatype query-text
   X : string;
-  (> (length X) 0) : verified via shenEval;
+  (> (length X) 0) : verified; \* :runtime-via shenEval *\
   ==============
   X : query-text;)`
 	types, err := parseFile_string(spec)
@@ -721,7 +721,7 @@ func TestParseExistingVerifiedUnchanged(t *testing.T) {
 func TestGenerateGoRuntimeViaConstructor(t *testing.T) {
 	spec := `(datatype query-text
   X : string;
-  (> (length X) 0) : verified via shenEval;
+  (> (length X) 0) : verified; \* :runtime-via shenEval *\
   ==============
   X : query-text;)`
 	types, _ := parseFile_string(spec)
@@ -764,7 +764,7 @@ func TestGenerateGoRuntimeViaGuarded(t *testing.T) {
 	spec := `(datatype tag-rule
   Token : string;
   UserId : string;
-  (= Token UserId) : verified via policyCheck;
+  (= Token UserId) : verified; \* :runtime-via policyCheck *\
   ===========================================
   [Token UserId] : tag-rule;)`
 	types, _ := parseFile_string(spec)
@@ -788,7 +788,7 @@ func TestGenerateGoRuntimeViaGuarded(t *testing.T) {
 func TestGenerateGoRuntimeViaCompilePass(t *testing.T) {
 	spec := `(datatype query-text
   X : string;
-  (> (length X) 0) : verified via shenEval;
+  (> (length X) 0) : verified; \* :runtime-via shenEval *\
   ==============
   X : query-text;)`
 	types, _ := parseFile_string(spec)

@@ -360,7 +360,7 @@ test("generateTs: positive (= X \"\") still emits if (!(x === \"\"))", () => {
 test("parser: `: verified via <fname>` captures the checker name", () => {
   const spec = `(datatype query-text
   X : string;
-  (> (length X) 0) : verified via shenEval;
+  (> (length X) 0) : verified; \\* :runtime-via shenEval *\\
   ==============
   X : query-text;)`;
   const types = parseFileString(spec);
@@ -383,7 +383,7 @@ test("parser: plain `: verified` leaves runtimeVia undefined", () => {
 test("generateTs: :runtime-via emits async constructor + ctx param + checker call", () => {
   const spec = `(datatype query-text
   X : string;
-  (> (length X) 0) : verified via shenEval;
+  (> (length X) 0) : verified; \\* :runtime-via shenEval *\\
   ==============
   X : query-text;)`;
   const types = parseFileString(spec);
@@ -412,12 +412,12 @@ test("generateTs: :runtime-via emits async constructor + ctx param + checker cal
     `expected RuntimeChecker type alias:\n${out}`
   );
   assert.ok(
-    out.includes("const _runtimeChecker_shenEval: RuntimeChecker"),
+    out.includes("const _runtimeChecker_shenEval: RuntimeChecker = shenEval"),
     `expected witness declaration:\n${out}`
   );
   assert.ok(
-    out.includes(`import { shenEval as _runtimeCheckerWitness_shenEval } from "./runtime_checkers.js"`),
-    `expected import-by-name from sibling runtime_checkers module:\n${out}`
+    out.includes(`import { shenEval } from "./runtime_checkers.js"`),
+    `expected import from sibling runtime_checkers module:\n${out}`
   );
 });
 
@@ -425,7 +425,7 @@ test("generateTs: :runtime-via on guarded composite passes all field args", () =
   const spec = `(datatype tag-rule
   Token : string;
   UserId : string;
-  (= Token UserId) : verified via policyCheck;
+  (= Token UserId) : verified; \\* :runtime-via policyCheck *\\
   ===========================================
   [Token UserId] : tag-rule;)`;
   const types = parseFileString(spec);
