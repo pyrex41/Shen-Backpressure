@@ -91,6 +91,65 @@ opaqueness respectively.
 all six patterns; `examples/payment/reference/guards_gen.{go,ts,rs,py}`
 shows the same five datatypes in four target languages.
 
+## One Spec, Four Languages — Runnable
+
+`examples/multilang-paired/` is the end-to-end demo of the
+multi-emitter story. Same `specs/core.shen`, four independent CLIs,
+one shared `fixture-inputs.jsonl`, one parity check.
+
+The spec models a shopping-cart discount decision:
+
+```shen
+(datatype discount-eligible
+  Cart : cart;
+  ItemCount : number;
+  MinSubtotal : number;
+  MinItems : number;
+  (>= (head Cart) MinSubtotal) : verified;
+  (>= ItemCount MinItems) : verified;
+  ============================================
+  [Cart ItemCount MinSubtotal MinItems] : discount-eligible;)
+```
+
+The four emitter invocations are wired into `sb.toml` as separate
+`[[gates]]` entries (since `[project] lang` is single-valued):
+
+```bash
+cd examples/multilang-paired
+
+# Regenerate guards in all four languages.
+./bin/codegen-go.sh     # → go/multilang_paired/guards_gen.go
+./bin/codegen-ts.sh     # → ts/guards_gen.ts
+./bin/codegen-py.sh     # → py/guards_gen.py
+./bin/codegen-rs.sh     # → rs/guards_gen.rs
+
+# Drift-check each language's committed output.
+../../bin/shenguard-audit.sh --lang go --no-isolation-check \
+  specs/core.shen multilang_paired go/multilang_paired/guards_gen.go
+# (same shape for --lang ts / py / rs)
+
+# Behavioural parity: each CLI reads the shared fixture, emits JSONL.
+./bin/parity-check.sh
+#   PASS  Go == TS
+#   PASS  Go == Py
+#   PASS  Go == Rs
+#   ...
+#   OK: all 4 languages produced byte-identical JSONL on 20 fixture rows.
+```
+
+A Go integration test at `cmd/shengen/parity_test.go` (run via
+`go test ./cmd/shengen/... -run TestParity`) runs all four emitters
+as subprocesses and asserts each produces a parseable file with the
+expected datatype identifiers — the structural parity contract
+complementing the behavioural one above.
+
+The full `sb gates` topology for this example is 13 gates
+(four `shengen-*`, three `build-*`, four `tcb-audit-*`, one
+`shen-check-datatypes`, one `parity`). See
+`examples/multilang-paired/README.md` for the per-gate purpose table
+and the known emitter-coverage gaps (Go skips free-standing defines;
+TS has a `where`-on-last-clause parser bug).
+
 ## Design Decisions
 
 - **Why shengen?** Shen proves invariants deductively but doesn't

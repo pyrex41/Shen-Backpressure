@@ -1,0 +1,10 @@
+{
+  "name": "multilang-paired-ts",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "main": "tsx main.ts",
+    "build": "tsc --noEmit"
+  }
+}
