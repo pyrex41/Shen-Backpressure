@@ -197,6 +197,75 @@
           (cl-research-pipeline query)))
       (cl-research-pipeline query)))
 
+;; -------------------------------------------------------------------------
+;; :runtime-via predicate dispatch (W3.2)
+;; -------------------------------------------------------------------------
+;; The frontend's generated TS guards POST to /api/eval-predicate with
+;; { predicate: <name>, args: [...] }. That endpoint dispatches into
+;; this table. The table is an explicit allowlist: arbitrary code
+;; execution is NOT on the menu. Adding a new predicate requires
+;; both (a) annotating a spec with `: verified via shenEval` and (b)
+;; registering the dispatch entry here.
+
+(defvar *runtime-predicates* (make-hash-table :test 'equal)
+  "Map predicate name (string) -> (lambda (args) ...) returning a boolean.")
+
+(defun register-runtime-predicate (name fn)
+  "Register a predicate name dispatched by /api/eval-predicate.
+   FN takes a single argument: a list of positional args from JSON,
+   and returns T / NIL."
+  (setf (gethash name *runtime-predicates*) fn))
+
+(defun eval-runtime-predicate (name args)
+  "Look up NAME in *runtime-predicates*, call it with ARGS, return T/NIL.
+   Returns (values nil error-string) when the predicate is unknown or
+   raises."
+  (let ((fn (gethash name *runtime-predicates*)))
+    (cond
+      ((null fn)
+       (values nil (format nil "unknown predicate: ~A" name)))
+      (t
+       (handler-case
+           (values (funcall fn args) nil)
+         (error (e)
+           (values nil (format nil "predicate ~A raised: ~A" name e))))))))
+
+;; Default predicate registrations. Each predicate is a CL closure
+;; that, when possible, defers to a Shen predicate at runtime so the
+;; demo really does evaluate the spec's lowered predicate inside the
+;; live Shen runtime. When Shen isn't loaded (CL-only mode) we fall
+;; back to the CL transliteration so tests / smoke runs still work.
+
+(defun shen-eval-query-text (args)
+  "Discharge `query-text`'s (> (length X) 0) at runtime.
+   Prefers the Shen evaluator when available; falls back to CL."
+  (let ((x (first args)))
+    (cond
+      ((not (stringp x))
+       nil)
+      (*shen-loaded*
+       (handler-case
+           ;; Ask the live Shen runtime to evaluate the same predicate
+           ;; that's in the spec. The string-eval surface keeps this
+           ;; portable across Shen-SBCL / shen-cl differences.
+           (let ((result (shen-eval-string
+                          (format nil "(> (length ~S) 0)" x))))
+             ;; Shen returns the symbol `true` or `false` (or `T`/`NIL`
+             ;; depending on the port). Normalise to a CL boolean.
+             (or (eq result t)
+                 (and (symbolp result)
+                      (string-equal (symbol-name result) "TRUE"))))
+         (error (e)
+           (warn "Shen eval-predicate fell back to CL: ~A" e)
+           (> (length x) 0))))
+      (t
+       (> (length x) 0)))))
+
+(defun register-default-runtime-predicates ()
+  "Wire the built-in :runtime-via predicates into the dispatch table.
+   Called once at server startup."
+  (register-runtime-predicate "query-text" #'shen-eval-query-text))
+
 (defun cl-research-pipeline (query)
   "Pure CL fallback of the research pipeline (same logic as app.shen)."
   (let* (;; Search

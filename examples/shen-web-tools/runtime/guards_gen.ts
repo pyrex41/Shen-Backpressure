@@ -4,6 +4,34 @@
 // Constructors are the ONLY way to create these types — bypassing them
 // is a violation of the formal spec.
 
+// --- :runtime-via runtime check plumbing ---
+// Each annotated datatype's constructor calls a named runtime checker
+// instead of inlining its predicate. The build fails (via the
+// `const _: RuntimeChecker = …` witnesses below) when a named
+// checker is missing or has the wrong signature — this is what makes
+// the runtime call non-skippable.
+// See docs/RUNTIME-VIA.md for the trust model.
+export interface RuntimeCheckCtx {
+  /** Optional AbortSignal forwarded to the checker. */
+  signal?: AbortSignal;
+  /** Free-form per-call metadata (request id, tenant id, …). */
+  meta?: Record<string, unknown>;
+}
+export type RuntimeChecker = (
+  ctx: RuntimeCheckCtx,
+  predicate: string,
+  args: unknown[]
+) => Promise<{ ok: boolean; error?: string }>;
+
+// Witness declarations: the consumer must export these names from
+// a sibling `runtime_checkers.ts` module. The import binds the
+// function under its own name (so the generated constructor can
+// call it) AND assigns it to a `const _: RuntimeChecker = …`
+// witness so the build fails on signature mismatch.
+import { shenEval } from "./runtime_checkers.js";
+const _runtimeChecker_shenEval: RuntimeChecker = shenEval;
+void _runtimeChecker_shenEval;
+
 // --- TagResolveOutcome (sum type) ---
 // Multiple Shen datatype blocks produce this type.
 // Variants: signed-complete, unsigned-complete, partial
@@ -14,18 +42,21 @@ export type TagResolveOutcome = SignedComplete | UnsignedComplete | Partial;
 export class QueryText {
   private readonly _v: string;
   private constructor(v: string) { this._v = v; }
-  static createOrThrow(x: string): QueryText {
-    if (!(x.length > 0)) throw new Error(`x.length must be > 0: ${x}`);
+  static async createOrThrow(ctx: RuntimeCheckCtx, x: string): Promise<QueryText> {
+    const _check_shenEval = await shenEval(ctx, "query-text", [x]);
+    if (!_check_shenEval.ok) {
+      throw new Error(`shenEval rejected query-text: ${_check_shenEval.error ?? "runtime check failed"}`);
+    }
     return new QueryText(x);
   }
-  static tryCreate(x: string): QueryText | Error {
-    try { return QueryText.createOrThrow(x); }
+  static async tryCreate(ctx: RuntimeCheckCtx, x: string): Promise<QueryText | Error> {
+    try { return await QueryText.createOrThrow(ctx, x); }
     catch (e) { return e instanceof Error ? e : new Error(String(e)); }
   }
   val(): string { return this._v; }
 }
-export function mustQueryText(x: string): QueryText {
-  return QueryText.createOrThrow(x);
+export async function mustQueryText(ctx: RuntimeCheckCtx, x: string): Promise<QueryText> {
+  return await QueryText.createOrThrow(ctx, x);
 }
 
 // --- Url ---
