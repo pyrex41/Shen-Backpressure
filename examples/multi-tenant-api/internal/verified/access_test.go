@@ -1,4 +1,4 @@
-package auth
+package verified
 
 import (
 	"database/sql"
@@ -8,17 +8,43 @@ import (
 	"multi-tenant-api/internal/shenguard"
 )
 
+// makePrincipal constructs a fully-typed HumanPrincipal for the given
+// user id, walking the full W2.1 proof chain:
+//
+//	UserId / JwtIssuer / JwtAudience
+//	  → ParsedClaims (Exp > 0)
+//	  → VerifiedJwt   (non-empty signature)
+//	  → AuthenticatedUser (User == sub(Claims) — STRUCTURAL)
+//	  → HumanPrincipal
+//
+// The cross-field binding is *enforced* here: if we ever passed
+// `NewAuthenticatedUser(jwt, NewUserId("someone-else"))` instead of
+// `NewAuthenticatedUser(jwt, NewUserId(userID))`, the constructor
+// would return an error. That's the spec premise
+// `(= User (head (head Jwt))) : verified` in action.
 func makePrincipal(t *testing.T, userID string) (shenguard.HumanPrincipal, string) {
 	t.Helper()
-	tok, err := shenguard.NewJwtToken("test-token")
+	iss, err := shenguard.NewJwtIssuer("multi-tenant-api")
 	if err != nil {
-		t.Fatalf("NewJwtToken: %v", err)
+		t.Fatalf("NewJwtIssuer: %v", err)
 	}
-	exp, err := shenguard.NewTokenExpiry(9999999999, 1000000000)
+	aud, err := shenguard.NewJwtAudience("users")
 	if err != nil {
-		t.Fatalf("NewTokenExpiry: %v", err)
+		t.Fatalf("NewJwtAudience: %v", err)
 	}
-	authUser := shenguard.NewAuthenticatedUser(tok, exp, shenguard.NewUserId(userID))
+	uid := shenguard.NewUserId(userID)
+	claims, err := shenguard.NewParsedClaims(uid, 9999999999, iss, aud)
+	if err != nil {
+		t.Fatalf("NewParsedClaims: %v", err)
+	}
+	verifiedJwt, err := shenguard.NewVerifiedJwt(claims, "test-signature")
+	if err != nil {
+		t.Fatalf("NewVerifiedJwt: %v", err)
+	}
+	authUser, err := shenguard.NewAuthenticatedUser(verifiedJwt, uid)
+	if err != nil {
+		t.Fatalf("NewAuthenticatedUser: %v", err)
+	}
 	return shenguard.NewHumanPrincipal(authUser), userID
 }
 
@@ -32,10 +58,10 @@ func TestCheckTenantAccessGranted(t *testing.T) {
 		t.Fatalf("Seed: %v", err)
 	}
 
-	principal, userID := makePrincipal(t, "u-alice")
+	principal, _ := makePrincipal(t, "u-alice")
 	tenantID := shenguard.NewTenantId("t-acme")
 
-	access, err := CheckTenantAccess(d, principal, userID, tenantID)
+	access, err := CheckTenantAccess(d, principal, tenantID)
 	if err != nil {
 		t.Fatalf("CheckTenantAccess: %v", err)
 	}
@@ -56,10 +82,10 @@ func TestCheckTenantAccessDenied(t *testing.T) {
 	}
 
 	// Bob is a member of t-globex, NOT t-acme
-	principal, userID := makePrincipal(t, "u-bob")
+	principal, _ := makePrincipal(t, "u-bob")
 	tenantID := shenguard.NewTenantId("t-acme")
 
-	_, err = CheckTenantAccess(d, principal, userID, tenantID)
+	_, err = CheckTenantAccess(d, principal, tenantID)
 	if err == nil {
 		t.Fatal("expected error for non-member access, got nil")
 	}
@@ -75,20 +101,60 @@ func TestCheckTenantAccessNonexistentUser(t *testing.T) {
 		t.Fatalf("Seed: %v", err)
 	}
 
-	principal, userID := makePrincipal(t, "u-nobody")
+	principal, _ := makePrincipal(t, "u-nobody")
 	tenantID := shenguard.NewTenantId("t-acme")
 
-	_, err = CheckTenantAccess(d, principal, userID, tenantID)
+	_, err = CheckTenantAccess(d, principal, tenantID)
 	if err == nil {
 		t.Fatal("expected error for nonexistent user, got nil")
 	}
 }
 
+// W2.1 hardening: the constructor refuses to build an AuthenticatedUser
+// whose `User` disagrees with `(head (head Jwt))` (i.e., the sub claim
+// inside the JWT). Pre-W2.1, the binding was convention-only and a
+// caller could pair a JWT for Alice with a UserId for Bob. This test
+// is the structural counterpart to the spec premise
+// `(= User (head (head Jwt))) : verified`.
+func TestCrossFieldBindingRejectsMismatch(t *testing.T) {
+	iss, err := shenguard.NewJwtIssuer("multi-tenant-api")
+	if err != nil {
+		t.Fatalf("NewJwtIssuer: %v", err)
+	}
+	aud, err := shenguard.NewJwtAudience("users")
+	if err != nil {
+		t.Fatalf("NewJwtAudience: %v", err)
+	}
+	aliceID := shenguard.NewUserId("u-alice")
+	bobID := shenguard.NewUserId("u-bob")
+
+	claims, err := shenguard.NewParsedClaims(aliceID, 9999999999, iss, aud)
+	if err != nil {
+		t.Fatalf("NewParsedClaims: %v", err)
+	}
+	verifiedJwt, err := shenguard.NewVerifiedJwt(claims, "test-signature")
+	if err != nil {
+		t.Fatalf("NewVerifiedJwt: %v", err)
+	}
+
+	// Try to pair Alice's JWT with Bob's user id. The constructor
+	// must reject this.
+	_, err = shenguard.NewAuthenticatedUser(verifiedJwt, bobID)
+	if err == nil {
+		t.Fatal("NewAuthenticatedUser(alice-jwt, bob-id) succeeded — cross-field premise is not being enforced")
+	}
+
+	// Sanity: matching ids succeed.
+	if _, err := shenguard.NewAuthenticatedUser(verifiedJwt, aliceID); err != nil {
+		t.Fatalf("NewAuthenticatedUser(alice-jwt, alice-id) returned unexpected error: %v", err)
+	}
+}
+
 func makeTenantAccess(t *testing.T, d *sql.DB, userID, tenantID string) shenguard.TenantAccess {
 	t.Helper()
-	principal, uid := makePrincipal(t, userID)
+	principal, _ := makePrincipal(t, userID)
 	tid := shenguard.NewTenantId(tenantID)
-	access, err := CheckTenantAccess(d, principal, uid, tid)
+	access, err := CheckTenantAccess(d, principal, tid)
 	if err != nil {
 		t.Fatalf("CheckTenantAccess: %v", err)
 	}
@@ -158,35 +224,5 @@ func TestCheckResourceAccessDeniedNonexistent(t *testing.T) {
 	_, err = CheckResourceAccess(d, access, resourceID)
 	if err == nil {
 		t.Fatal("expected error for nonexistent resource, got nil")
-	}
-}
-
-func TestLogAccess(t *testing.T) {
-	d, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer d.Close()
-	if err := db.Seed(d); err != nil {
-		t.Fatalf("Seed: %v", err)
-	}
-
-	if err := LogAccess(d, "u-alice", "t-acme", "r-1", "read", true); err != nil {
-		t.Fatalf("LogAccess: %v", err)
-	}
-	if err := LogAccess(d, "u-bob", "t-acme", "", "list", false); err != nil {
-		t.Fatalf("LogAccess denied: %v", err)
-	}
-
-	var count int
-	d.QueryRow("SELECT count(*) FROM access_logs").Scan(&count)
-	if count != 2 {
-		t.Errorf("access_logs: got %d, want 2", count)
-	}
-
-	var allowed int
-	d.QueryRow("SELECT allowed FROM access_logs WHERE user_id='u-bob'").Scan(&allowed)
-	if allowed != 0 {
-		t.Errorf("denied log: got allowed=%d, want 0", allowed)
 	}
 }
