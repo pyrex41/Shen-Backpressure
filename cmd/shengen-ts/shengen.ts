@@ -1168,20 +1168,26 @@ function buildRule(premLines: string[], concLines: string[]): Rule | null {
   for (let line of premLines) {
     line = line.replace(/;$/, "").trim();
     if (!line) continue;
-    if (line.endsWith(": verified")) {
-      r.verified.push({ raw: line.replace(/\s*:\s*verified$/, "").trim() });
-      continue;
+    // Trailing `\* :runtime-via <fname> *\` Shen-block-comment marker.
+    // Shen's tc+ ignores block comments so this stays invisible to the
+    // type checker; shengen reads the marker and rewires the generated
+    // constructor to call <fname>. See docs/RUNTIME-VIA.md.
+    let runtimeVia: string | undefined;
+    {
+      const viaMatch = line.match(/\\\*\s*:?runtime-via\s+(\S+)\s*\*\\\s*$/);
+      if (viaMatch) {
+        runtimeVia = viaMatch[1].trim();
+        line = line.slice(0, viaMatch.index).replace(/;\s*$/, "").trim();
+      }
     }
-    // `(predicate) : verified via <fname>` — discharge this premise
-    // at runtime by calling <fname> from the constructor. See
-    // docs/RUNTIME-VIA.md.
-    const viaMatch = line.match(/^(.*?)\s*:\s*verified\s+via\s+(\S+)\s*$/);
-    if (viaMatch) {
-      r.verified.push({ raw: viaMatch[1].trim(), runtimeVia: viaMatch[2].trim() });
+    if (line.endsWith(": verified")) {
+      const raw = line.replace(/\s*:\s*verified$/, "").trim();
+      r.verified.push({ raw, ...(runtimeVia ? { runtimeVia } : {}) });
       continue;
     }
     if (line.startsWith("if ")) {
-      r.verified.push({ raw: line.slice(3).trim() });
+      const raw = line.slice(3).trim();
+      r.verified.push({ raw, ...(runtimeVia ? { runtimeVia } : {}) });
       continue;
     }
     const parts = line.split(" : ");
@@ -1356,12 +1362,13 @@ export function generateTs(
     // the generated constructor with it.
     lines.push("");
     lines.push("// Witness declarations: the consumer must export these names from");
-    lines.push("// the same module that imports the generated guards. The");
-    lines.push("// `runtime_checkers.ts` convention in the shen-web-tools demo is the");
-    lines.push("// reference pattern. The type system enforces the signature.");
+    lines.push("// a sibling `runtime_checkers.ts` module. The import binds the");
+    lines.push("// function under its own name (so the generated constructor can");
+    lines.push("// call it) AND assigns it to a `const _: RuntimeChecker = …`");
+    lines.push("// witness so the build fails on signature mismatch.");
     for (const name of runtimeCheckerNames) {
-      lines.push(`import { ${name} as _runtimeCheckerWitness_${name} } from "./runtime_checkers.js";`);
-      lines.push(`const _runtimeChecker_${name}: RuntimeChecker = _runtimeCheckerWitness_${name};`);
+      lines.push(`import { ${name} } from "./runtime_checkers.js";`);
+      lines.push(`const _runtimeChecker_${name}: RuntimeChecker = ${name};`);
       lines.push(`void _runtimeChecker_${name};`);
     }
     lines.push("");
