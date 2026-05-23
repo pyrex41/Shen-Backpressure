@@ -1,0 +1,310 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-05-23T03:47:33Z",
+  "spec": {
+    "files": [
+      {
+        "path": "specs/core.shen",
+        "sha256": "cb5d6c98c409307aa6345870d3a4f70e564085ee1222542a522e75a1bed2d9a7"
+      }
+    ],
+    "rule_count": 7
+  },
+  "impl": {
+    "git_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+    "git_dirty": true,
+    "target_languages": [
+      "go"
+    ]
+  },
+  "tools": {
+    "sb_version": "0.3.0",
+    "shen_derive_version": "0.3.0",
+    "shengen_version": "",
+    "shen_runtime": null,
+    "shen_runtime_available": false
+  },
+  "rules": [
+    {
+      "name": "account-id",
+      "kind": "wrapper",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype account-id\n  X : string;\n  ====================\n  X : account-id;)\n",
+      "human_description": "A account-id value is a string with no further runtime constraints; the type exists to keep raw strings from being mistaken for one.",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "account-id.field-x",
+          "expression": "X : string",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "X is typed string; the target language's type system rejects non-string values at construction.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:15"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "counter_examples": []
+    },
+    {
+      "name": "account-state",
+      "kind": "composite",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype account-state\n  Id : account-id;\n  Balance : amount;\n  ====================\n  [Id Balance] : account-state;)\n",
+      "human_description": "A account-state bundles 2 fields (Id, Balance) into a single typed value.",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "account-state.field-id",
+          "expression": "Id : account-id",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Id is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:85"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "account-state.field-balance",
+          "expression": "Balance : amount",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Balance is typed amount; values of that type can only be constructed via shengen's guarded constructor, which enforces all of amount's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:85"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "counter_examples": []
+    },
+    {
+      "name": "amount",
+      "kind": "constrained",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype amount\n  X : number;\n  (\u003e= X 0) : verified;\n  ====================\n  X : amount;)\n",
+      "human_description": "A amount value is a number that satisfies 1 additional constraint(s) checked at construction.",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "amount.field-x",
+          "expression": "X : number",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "X is typed number; the target language's type system rejects non-number values at construction.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:26"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "amount.verified-x-0",
+          "expression": "(\u003e= X 0) : verified",
+          "discharge": "static",
+          "discharge_basis": "guard-constructor-validates",
+          "rationale": "shengen's generated constructor for amount rejects inputs that do not satisfy (\u003e= X 0), so this premise holds for any value of type amount reachable in the impl.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:26"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "counter_examples": []
+    },
+    {
+      "name": "balance-invariant",
+      "kind": "guarded",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype balance-invariant\n  Bal : number;\n  Tx : transaction;\n  (\u003e= Bal (head Tx)) : verified;\n  ====================\n  [Bal Tx] : balance-checked;)\n",
+      "human_description": "A balance-invariant is a multi-field structure whose constructor enforces 1 cross-field invariant(s).",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "balance-invariant.field-bal",
+          "expression": "Bal : number",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Bal is typed number; the target language's type system rejects non-number values at construction.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:63"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "balance-invariant.field-tx",
+          "expression": "Tx : transaction",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Tx is typed transaction; values of that type can only be constructed via shengen's guarded constructor, which enforces all of transaction's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:63"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "balance-invariant.verified-bal-head-tx",
+          "expression": "(\u003e= Bal (head Tx)) : verified",
+          "discharge": "static",
+          "discharge_basis": "guard-constructor-validates",
+          "rationale": "shengen's generated constructor for balance-invariant rejects inputs that do not satisfy (\u003e= Bal (head Tx)), so this premise holds for any value of type balance-invariant reachable in the impl.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:63"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "counter_examples": []
+    },
+    {
+      "name": "processable",
+      "kind": "define",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(define processable\n  {amount --\u003e (list transaction) --\u003e boolean}\n  B0 Txs -\u003e ...)",
+      "human_description": "A pure function processable : amount --\u003e (list transaction) --\u003e boolean. The Shen spec is the oracle; the impl is asserted to match it on every sampled input.",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "processable.oracle-spec-equiv",
+          "expression": "spec(processable) ≡ impl(Processable) on sampled inputs",
+          "discharge": "runtime-sample",
+          "discharge_basis": "shen-derive-sampled",
+          "rationale": "shen-derive evaluated the spec on 35 sampled cases (deterministic-default) and emitted a Go test asserting impl returns the same value on each.",
+          "samples_passed": 35,
+          "samples_failed": 0,
+          "sample_seed": "deterministic-default"
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "counter_examples": []
+    },
+    {
+      "name": "safe-transfer",
+      "kind": "composite",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype safe-transfer\n  Tx : transaction;\n  Check : balance-checked;\n  ====================\n  [Tx Check] : safe-transfer;)\n",
+      "human_description": "A safe-transfer bundles 2 fields (Tx, Check) into a single typed value.",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "safe-transfer.field-tx",
+          "expression": "Tx : transaction",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Tx is typed transaction; values of that type can only be constructed via shengen's guarded constructor, which enforces all of transaction's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:104"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "safe-transfer.field-check",
+          "expression": "Check : balance-checked",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Check is typed balance-checked; values of that type can only be constructed via shengen's guarded constructor, which enforces all of balance-checked's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:104"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "counter_examples": []
+    },
+    {
+      "name": "transaction",
+      "kind": "composite",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype transaction\n  Amount : amount;\n  From : account-id;\n  To : account-id;\n  ====================\n  [Amount From To] : transaction;)\n",
+      "human_description": "A transaction bundles 3 fields (Amount, From, To) into a single typed value.",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "transaction.field-amount",
+          "expression": "Amount : amount",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Amount is typed amount; values of that type can only be constructed via shengen's guarded constructor, which enforces all of amount's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:40"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "transaction.field-from",
+          "expression": "From : account-id",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "From is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:40"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "transaction.field-to",
+          "expression": "To : account-id",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "To is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:40"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "counter_examples": []
+    }
+  ],
+  "summary": {
+    "rule_count": 7,
+    "rules_discharged": 7,
+    "rules_violated": 0,
+    "rules_unproven": 0,
+    "premises_total": 14,
+    "premises_static": 13,
+    "premises_runtime_sampled": 1,
+    "premises_unproven": 0
+  },
+  "signature": null
+}
