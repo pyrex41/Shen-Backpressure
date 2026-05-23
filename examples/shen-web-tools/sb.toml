@@ -37,7 +37,12 @@ run  = "./bin/shen-check.sh"
 [[gates]]
 name = "tcb-audit"
 kind = "command"
-run  = "./bin/shenguard-audit.sh"
+# tcb-audit drift-checks the committed runtime/guards_gen.ts against a fresh
+# regen from specs/core.shen. The --no-isolation-check flag is necessary
+# because the TS guards live in the shared runtime/ directory alongside
+# hand-written code (bridge.ts, ui.ts, etc.); the directory is not a
+# dedicated package the way internal/shenguard/ is in the Go examples.
+run  = "../../bin/shenguard-audit.sh --lang ts --no-isolation-check specs/core.shen shenguard runtime/guards_gen.ts"
 
 # Gate 6 — spec-equivalence verification via shen-derive-ts.
 #
