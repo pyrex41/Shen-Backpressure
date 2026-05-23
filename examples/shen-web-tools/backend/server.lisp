@@ -163,6 +163,38 @@
   (json-response (get-pipeline-state)))
 
 ;; -------------------------------------------------------------------------
+;; /api/eval-predicate — W3.2 :runtime-via discharge endpoint
+;; -------------------------------------------------------------------------
+;; Generated TS guard constructors annotated with `: verified via shenEval`
+;; POST { predicate: <name>, args: [...] } here. Dispatch goes through
+;; *runtime-predicates* (see shen-interop.lisp), which prefers the live
+;; Shen runtime when available and falls back to CL.
+;;
+;; Wire format MUST stay aligned with runtime/runtime_checkers.ts; both
+;; sides are TCB.
+
+(hunchentoot:define-easy-handler (api-eval-predicate :uri "/api/eval-predicate") ()
+  "Evaluate a registered :runtime-via predicate and return {ok, error?}."
+  (let* ((params (read-json-body))
+         (predicate (cdr (assoc :predicate params)))
+         (args (cdr (assoc :args params))))
+    (cond
+      ((null predicate)
+       (json-response '((:ok . nil) (:error . "missing 'predicate' field"))
+                      :status 400))
+      ((not (stringp predicate))
+       (json-response '((:ok . nil) (:error . "'predicate' must be a string"))
+                      :status 400))
+      (t
+       (multiple-value-bind (ok err) (eval-runtime-predicate predicate args)
+         (demo-log "runtime-via"
+                   (format nil "~A → ~A" predicate (if ok "ok" "rejected"))
+                   args)
+         (if err
+             (json-response `((:ok . nil) (:error . ,err)) :status 200)
+             (json-response `((:ok . ,(if ok t nil))) :status 200)))))))
+
+;; -------------------------------------------------------------------------
 ;; SSE streaming endpoint — replaces polling
 ;; -------------------------------------------------------------------------
 ;; Client opens EventSource("/api/stream"). We hold the connection open,
@@ -387,6 +419,7 @@
   (format t "  POST /api/generate         — AI generation only~%")
   (format t "  GET  /api/state            — pipeline state (polling fallback)~%")
   (format t "  GET  /api/stream           — SSE pipeline stream~%")
+  (format t "  POST /api/eval-predicate   — :runtime-via predicate dispatch~%")
   *server*)
 
 (defun stop-server ()
