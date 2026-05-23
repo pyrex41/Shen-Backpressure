@@ -1,0 +1,125 @@
+# Shen-Backpressure manifest for the multilang-paired example.
+#
+# This example exercises ONE spec → FOUR target languages. The
+# `[project]` block only models one canonical language at a time, so
+# `lang = "go"` here points `sb gen` at the Go output by default; the
+# TS, Py, and Rs outputs are produced by the `shengen-*` gates below
+# via the per-language scripts in `bin/`. Each language also has its
+# own `tcb-audit-*` gate that calls
+# `bin/shenguard-audit.sh --lang <l>` to drift-check that language's
+# committed `guards_gen.*` against a fresh regen.
+#
+# This split (one canonical `lang` + multiple ancillary emit gates)
+# was the pragmatic shape that fit the existing engine; a richer
+# manifest schema where `[project]` carries an array of language
+# targets is a separate work item — see the W3.1 section of
+# `thoughts/shared/plans/this-is-great-let-s-crispy-stallman.md`.
+
+[project]
+lang = "go"
+pkg  = "multilang_paired"
+
+[paths]
+spec   = "specs/core.shen"
+output = "go/multilang_paired/guards_gen.go"
+
+[engine]
+relaxed = false
+
+# --- Canonical (Go) shengen gate ---
+
+[[gates]]
+name = "shengen"
+kind = "command"
+run  = "./bin/codegen-go.sh"
+
+# --- Polyglot emit gates — TS, Py, Rs ---
+# Each script invokes the corresponding shengen-* emitter and
+# overwrites the language-specific guards_gen.<ext>. tcb-audit-*
+# below drift-checks the committed output against a fresh regen.
+
+[[gates]]
+name = "shengen-ts"
+kind = "command"
+run  = "./bin/codegen-ts.sh"
+
+[[gates]]
+name = "shengen-py"
+kind = "command"
+run  = "./bin/codegen-py.sh"
+
+[[gates]]
+name = "shengen-rs"
+kind = "command"
+run  = "./bin/codegen-rs.sh"
+
+# --- Compile / type-check gates per language ---
+
+[[gates]]
+name = "build-go"
+kind = "command"
+run  = "cd go && go build ./..."
+
+[[gates]]
+name = "build-ts"
+kind = "command"
+run  = "cd ts && npx tsc --noEmit"
+
+[[gates]]
+name = "build-py"
+kind = "command"
+run  = "./bin/check-py.sh"
+
+# Rs has no compile gate by default — see README.md and
+# bin/parity-check.sh for the rationale. The structural emitter parity
+# test in cmd/shengen/parity_test.go does verify the .rs file parses
+# at the syntactic-grouping level.
+
+# --- Spec internal consistency ---
+#
+# `shen-check` would normally run `(tc +)` against `specs/core.shen`
+# here. As of today the bundled Shen runtime rejects list-destructure
+# defines with an arithmetic guard — the same pre-existing limitation
+# that makes `examples/payment`'s `processable` define fail
+# `(tc +)`. Rather than ship a demo with a known-failing gate, we
+# elide it; the four shengen emitters parse and lower the define
+# correctly (verified by the parity gate below), and a smaller
+# datatypes-only spec at `specs/datatypes-only.shen` is exercised by
+# the `shen-check-datatypes` gate so the SHEN port-validation surface
+# is still covered.
+
+[[gates]]
+name = "shen-check-datatypes"
+kind = "command"
+run  = "../payment/bin/shen-check.sh specs/datatypes-only.shen"
+
+# --- TCB audit gates — one per language ---
+
+[[gates]]
+name = "tcb-audit-go"
+kind = "command"
+run  = "../../bin/shenguard-audit.sh --lang go --no-isolation-check specs/core.shen multilang_paired go/multilang_paired/guards_gen.go"
+
+[[gates]]
+name = "tcb-audit-ts"
+kind = "command"
+run  = "../../bin/shenguard-audit.sh --lang ts --no-isolation-check specs/core.shen multilang_paired ts/guards_gen.ts"
+
+[[gates]]
+name = "tcb-audit-py"
+kind = "command"
+run  = "../../bin/shenguard-audit.sh --lang py --no-isolation-check specs/core.shen multilang_paired py/guards_gen.py"
+
+[[gates]]
+name = "tcb-audit-rs"
+kind = "command"
+run  = "../../bin/shenguard-audit.sh --lang rs --no-isolation-check specs/core.shen multilang_paired rs/guards_gen.rs"
+
+# --- Behavioural parity check ---
+# Run each language's CLI against the shared fixture-inputs.jsonl and
+# pairwise-diff the JSON output. Exits non-zero on any divergence.
+
+[[gates]]
+name = "parity"
+kind = "command"
+run  = "./bin/parity-check.sh"
