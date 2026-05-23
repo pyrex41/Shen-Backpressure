@@ -20,6 +20,7 @@ import {
   resolveExpr,
   verifiedToTs,
   generateTs,
+  negateTsExpr,
   isNumericLiteral,
   inferTargetFields,
   structuralMatchFallback,
@@ -276,6 +277,90 @@ test("generateTs: wrapped-non-primitive constrained emits class with runtime che
     !out.includes("export type BoundedBase64url"),
     "must not emit a type alias for bounded-base64url"
   );
+});
+
+// Hygiene: peephole + friendlier error message for the `(not (= X ""))` and
+// `(not (= X Y))` predicates. Mirrors the Go fixtures in
+// cmd/shengen/main_test.go::TestGenerateGoNot{EmptyString,Equals}Hygiene.
+test("generateTs: (not (= X \"\")) collapses double-negation and uses 'must not be empty'", () => {
+  const spec = `(datatype secret
+  X : string;
+  (not (= X "")) : verified;
+  ==========================
+  X : secret;)`;
+  const types = parseFileString(spec);
+  const st = new SymbolTable();
+  st.build(types);
+  const out = generateTs(types, st, "test.shen");
+  assert.ok(
+    !out.includes('if (!(!(x === "")))'),
+    `double-negation peephole did not fire:\n${out}`
+  );
+  assert.ok(
+    out.includes('if ((x === ""))'),
+    `expected violation branch 'if ((x === ""))':\n${out}`
+  );
+  assert.ok(
+    !out.includes("not: x must equal"),
+    `mechanical 'not: ...must equal' message leaked through:\n${out}`
+  );
+  assert.ok(
+    out.includes("x must not be empty"),
+    `expected friendlier 'must not be empty' message:\n${out}`
+  );
+});
+
+test("generateTs: (not (= A B)) emits 'A must not equal B' and collapses negation", () => {
+  const spec = `(datatype distinct-pair
+  A : string;
+  B : string;
+  (not (= A B)) : verified;
+  =========================
+  [A B] : distinct-pair;)`;
+  const types = parseFileString(spec);
+  const st = new SymbolTable();
+  st.build(types);
+  const out = generateTs(types, st, "test.shen");
+  assert.ok(
+    !out.includes("if (!(!(a === b)))"),
+    `double-negation peephole did not fire:\n${out}`
+  );
+  assert.ok(
+    out.includes("if ((a === b))"),
+    `expected violation branch 'if ((a === b))':\n${out}`
+  );
+  assert.ok(
+    out.includes("a must not equal b"),
+    `expected 'a must not equal b' message:\n${out}`
+  );
+});
+
+test("generateTs: positive (= X \"\") still emits if (!(x === \"\"))", () => {
+  // Guard against the peephole over-firing: when the lowered predicate has no
+  // leading `!`, the gate-site negation must remain.
+  const spec = `(datatype empty-string
+  X : string;
+  (= X "") : verified;
+  ====================
+  X : empty-string;)`;
+  const types = parseFileString(spec);
+  const st = new SymbolTable();
+  st.build(types);
+  const out = generateTs(types, st, "test.shen");
+  assert.ok(
+    out.includes('if (!(x === ""))'),
+    `positive (= X "") should still produce 'if (!(x === ""))':\n${out}`
+  );
+});
+
+test("negateTsExpr: strips redundant outer negation, preserves non-redundant", () => {
+  assert.equal(negateTsExpr('!(x === "")'), '(x === "")');
+  assert.equal(negateTsExpr("!(a === b)"), "(a === b)");
+  assert.equal(negateTsExpr("x >= 0"), "!(x >= 0)");
+  assert.equal(negateTsExpr("foo(x)"), "!(foo(x))");
+  // Leading `!(...)` closes before the end → outer negation is real.
+  assert.equal(negateTsExpr("!(a) && b"), "!(!(a) && b)");
+  assert.equal(negateTsExpr("!((a))"), "((a))");
 });
 
 test("verifiedToTs: element? with quoted string atoms emits singly-quoted set literal", () => {

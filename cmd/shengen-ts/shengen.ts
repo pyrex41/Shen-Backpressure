@@ -619,13 +619,66 @@ function translateNot(
     return ["/* bad not */ true", "not needs 1 arg"];
   const inner = expr.children[1];
   if (isCall(inner) && op(inner) === "=") {
-    const [code, msg] = translateEq(st, inner, varMap);
-    return [`!(${code})`, `not: ${msg}`];
+    const [code, _eqMsg] = translateEq(st, inner, varMap);
+    // Prefer human-readable messages over the mechanical "not: X must equal Y"
+    // fallback. Pattern-match the inner (= LHS RHS):
+    //   (not (= X ""))  → "X must not be empty"
+    //   (not (= X Y))   → "X must not equal Y"
+    const msg = notEqualsErrMsg(st, inner, varMap);
+    return [`!(${code})`, msg];
   }
   const resolved = resolveExpr(st, inner, varMap);
   if (!resolved)
     return [`/* TODO: ${sexprToString(expr)} */ true`, "could not resolve not"];
   return [`!(${resolved.code})`, `negation of ${resolved.code}`];
+}
+
+// notEqualsErrMsg builds a friendlier error message for `(not (= LHS RHS))`
+// premises. Falls back to "not: <eq message>" for anything that doesn't fit
+// the recognized shapes.
+function notEqualsErrMsg(
+  st: SymbolTable,
+  eqExpr: SExpr,
+  varMap: Map<string, string>
+): string {
+  const [, fallback] = translateEq(st, eqExpr, varMap);
+  if (!eqExpr.children || eqExpr.children.length !== 3)
+    return `not: ${fallback}`;
+  const lhs = resolveExpr(st, eqExpr.children[1], varMap);
+  const rhs = resolveExpr(st, eqExpr.children[2], varMap);
+  if (!lhs || !rhs) return `not: ${fallback}`;
+  if (isEmptyStringLiteral(rhs.code)) return `${lhs.code} must not be empty`;
+  if (isEmptyStringLiteral(lhs.code)) return `${rhs.code} must not be empty`;
+  return `${lhs.code} must not equal ${rhs.code}`;
+}
+
+function isEmptyStringLiteral(code: string): boolean {
+  return code === '""';
+}
+
+// negateTsExpr returns the boolean negation of a TS expression, applying a
+// peephole that strips a redundant outer `!(...)`. This keeps generated
+// gate-sites readable: a predicate like `!(x === "")` becomes `(x === "")`
+// directly in the violation branch instead of `!(!(x === ""))`.
+export function negateTsExpr(tsExpr: string): string {
+  const inner = stripOuterNotParen(tsExpr);
+  if (inner !== null) return `(${inner})`;
+  return `!(${tsExpr})`;
+}
+
+function stripOuterNotParen(tsExpr: string): string | null {
+  if (!tsExpr.startsWith("!(") || !tsExpr.endsWith(")")) return null;
+  let depth = 1;
+  for (let i = 2; i < tsExpr.length - 1; i++) {
+    const ch = tsExpr[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") {
+      depth--;
+      if (depth === 0) return null;
+    }
+  }
+  if (depth !== 1) return null;
+  return tsExpr.slice(2, -1);
 }
 
 function translateElement(
@@ -1393,7 +1446,7 @@ function genConstrained(gt: GeneratedType, st: SymbolTable): string[] {
   }
   for (const v of gt.rule.verified) {
     const [code, msg] = verifiedToTs(st, v, varMap);
-    checks.push(`    if (!(${code})) throw new Error(\`${msg.replace(/`/g, "\\`")}: \${x}\`);`);
+    checks.push(`    if (${negateTsExpr(code)}) throw new Error(\`${msg.replace(/`/g, "\\`")}: \${x}\`);`);
   }
   const paramsStr = `x: ${tsType}`;
   return [
@@ -1454,7 +1507,7 @@ function genGuarded(gt: GeneratedType, st: SymbolTable): string[] {
   const checks: string[] = [];
   for (const v of gt.rule.verified) {
     const [code, msg] = verifiedToTs(st, v, varMap);
-    checks.push(`    if (!(${code})) throw new Error(\`${msg.replace(/`/g, "\\`")}\`);`);
+    checks.push(`    if (${negateTsExpr(code)}) throw new Error(\`${msg.replace(/`/g, "\\`")}\`);`);
   }
   return [
     `export class ${gt.tsName} {`,
