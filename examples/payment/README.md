@@ -220,8 +220,20 @@ Rust, and Python. Every variant is generated from the same
 `specs/core.shen`. This is the polyglot story for this example —
 one spec, four target languages.
 
+## Auditor workflow
+
+If you're reviewing this demo for security or compliance purposes,
+start with [`AUDIT.md`](AUDIT.md) — a one-page reviewer workflow
+that walks through verifying the spec hash, reading the committed
+audit report, re-running gates at the recorded commit, and reading
+the TCB. The project-level trust model lives at
+[`../../docs/TRUST-MODEL.md`](../../docs/TRUST-MODEL.md).
+
 ## Further reading
 
+- [`AUDIT.md`](AUDIT.md) — reviewer workflow for this demo
+- [`../../docs/TRUST-MODEL.md`](../../docs/TRUST-MODEL.md) —
+  project-level trust model (TCB, what's claimed, what isn't)
 - `demo-shen-derive/DEMO.md` — long-form walkthrough of the three
   bugs and why each one slips past `go build`
 - `../../shen-derive/DESIGN.md` — how `shen-derive`'s sample pool
