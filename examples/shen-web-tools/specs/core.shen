@@ -4,9 +4,19 @@
 
 \* --- Basic value types --- *\
 
+\* W3.2 — `query-text`'s well-formedness check is discharged at runtime
+   by a Shen predicate running inside the live SBCL backend, NOT by the
+   inlined predicate. The trailing `\* :runtime-via shenEval *\` marker
+   on the verified line rewires the generated constructor to await
+   `shenEval(ctx, "query-text", [x])` before returning a value. Shen's
+   tc+ treats `\* ... *\` as a block comment so this annotation is
+   invisible to the type checker — the inline predicate
+   `(> (length X) 0)` is what Shen sees and what defines what
+   `query-text` MEANS; the runtime checker is responsible for honoring
+   that meaning. See docs/RUNTIME-VIA.md. *\
 (datatype query-text
   X : string;
-  (> (length X) 0) : verified;
+  (> (length X) 0) : verified; \* :runtime-via shenEval *\
   ==============
   X : query-text;)
 
