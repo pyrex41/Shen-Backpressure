@@ -8,11 +8,11 @@ import assert from "node:assert/strict";
 import * as shenguard from "./guards_gen.js";
 import { ResolveTagBlockChildren } from "./tag_resolver.js";
 
-// helpers referenced: mustPartial, mustRefTable, mustRefTableEntry, mustSignedComplete, mustTagBlock, mustTagId, mustTagSignature, mustUnsignedComplete
+// helpers referenced: mustPartial, mustRefTable, mustRefTableEntry, mustTagBlock, mustTagId, mustTagSignature, mustUnsignedComplete
 
 test("case_00", () => {
   const got = ResolveTagBlockChildren(shenguard.mustTagBlock(shenguard.mustTagId("root-signed"), "Signed root", [shenguard.mustTagId("child-a")], shenguard.mustTagSignature("sig-root")), shenguard.mustRefTable([shenguard.mustRefTableEntry(shenguard.mustTagId("child-a"), shenguard.mustTagBlock(shenguard.mustTagId("child-a"), "Child A", [], shenguard.mustTagSignature("")))]));
-  const want = shenguard.mustSignedComplete("signed-complete", shenguard.mustTagBlock(shenguard.mustTagId("root-signed"), "Signed root", [shenguard.mustTagId("child-a")], shenguard.mustTagSignature("sig-root")), [shenguard.mustTagBlock(shenguard.mustTagId("child-a"), "Child A", [], shenguard.mustTagSignature(""))], shenguard.mustTagSignature("sig-root"));
+  const want = shenguard.mustUnsignedComplete("unsigned-complete", shenguard.mustTagBlock(shenguard.mustTagId("root-signed"), "Signed root", [shenguard.mustTagId("child-a")], shenguard.mustTagSignature("sig-root")), [shenguard.mustTagBlock(shenguard.mustTagId("child-a"), "Child A", [], shenguard.mustTagSignature(""))]);
   assert.deepStrictEqual(got, want, `resolve-tag-block-children: spec says ${JSON.stringify(want)}, impl returned ${JSON.stringify(got)}`);
 });
 test("case_01", () => {
@@ -72,7 +72,7 @@ test("case_11", () => {
 });
 test("case_12", () => {
   const got = ResolveTagBlockChildren(shenguard.mustTagBlock(shenguard.mustTagId("bob"), "alice", [shenguard.mustTagId("alice")], shenguard.mustTagSignature("alice")), shenguard.mustRefTable([shenguard.mustRefTableEntry(shenguard.mustTagId("alice"), shenguard.mustTagBlock(shenguard.mustTagId("alice"), "", [], shenguard.mustTagSignature("")))]));
-  const want = shenguard.mustSignedComplete("signed-complete", shenguard.mustTagBlock(shenguard.mustTagId("bob"), "alice", [shenguard.mustTagId("alice")], shenguard.mustTagSignature("alice")), [shenguard.mustTagBlock(shenguard.mustTagId("alice"), "", [], shenguard.mustTagSignature(""))], shenguard.mustTagSignature("alice"));
+  const want = shenguard.mustUnsignedComplete("unsigned-complete", shenguard.mustTagBlock(shenguard.mustTagId("bob"), "alice", [shenguard.mustTagId("alice")], shenguard.mustTagSignature("alice")), [shenguard.mustTagBlock(shenguard.mustTagId("alice"), "", [], shenguard.mustTagSignature(""))]);
   assert.deepStrictEqual(got, want, `resolve-tag-block-children: spec says ${JSON.stringify(want)}, impl returned ${JSON.stringify(got)}`);
 });
 test("case_13", () => {
@@ -102,7 +102,7 @@ test("case_17", () => {
 });
 test("case_18", () => {
   const got = ResolveTagBlockChildren(shenguard.mustTagBlock(shenguard.mustTagId("bob"), "alice", [shenguard.mustTagId("alice")], shenguard.mustTagSignature("alice")), shenguard.mustRefTable([shenguard.mustRefTableEntry(shenguard.mustTagId("alice"), shenguard.mustTagBlock(shenguard.mustTagId("alice"), "", [], shenguard.mustTagSignature(""))), shenguard.mustRefTableEntry(shenguard.mustTagId("bob"), shenguard.mustTagBlock(shenguard.mustTagId("bob"), "alice", [shenguard.mustTagId("alice")], shenguard.mustTagSignature("alice"))), shenguard.mustRefTableEntry(shenguard.mustTagId(" "), shenguard.mustTagBlock(shenguard.mustTagId(" "), "bob", [shenguard.mustTagId("bob")], shenguard.mustTagSignature("bob")))]));
-  const want = shenguard.mustSignedComplete("signed-complete", shenguard.mustTagBlock(shenguard.mustTagId("bob"), "alice", [shenguard.mustTagId("alice")], shenguard.mustTagSignature("alice")), [shenguard.mustTagBlock(shenguard.mustTagId("alice"), "", [], shenguard.mustTagSignature(""))], shenguard.mustTagSignature("alice"));
+  const want = shenguard.mustUnsignedComplete("unsigned-complete", shenguard.mustTagBlock(shenguard.mustTagId("bob"), "alice", [shenguard.mustTagId("alice")], shenguard.mustTagSignature("alice")), [shenguard.mustTagBlock(shenguard.mustTagId("alice"), "", [], shenguard.mustTagSignature(""))]);
   assert.deepStrictEqual(got, want, `resolve-tag-block-children: spec says ${JSON.stringify(want)}, impl returned ${JSON.stringify(got)}`);
 });
 test("case_19", () => {
@@ -117,7 +117,7 @@ test("case_20", () => {
 });
 test("case_21", () => {
   const got = ResolveTagBlockChildren(shenguard.mustTagBlock(shenguard.mustTagId(" "), "bob", [shenguard.mustTagId("bob")], shenguard.mustTagSignature("bob")), shenguard.mustRefTable([shenguard.mustRefTableEntry(shenguard.mustTagId("bob"), shenguard.mustTagBlock(shenguard.mustTagId("bob"), "alice", [shenguard.mustTagId("alice")], shenguard.mustTagSignature("alice")))]));
-  const want = shenguard.mustSignedComplete("signed-complete", shenguard.mustTagBlock(shenguard.mustTagId(" "), "bob", [shenguard.mustTagId("bob")], shenguard.mustTagSignature("bob")), [shenguard.mustTagBlock(shenguard.mustTagId("bob"), "alice", [shenguard.mustTagId("alice")], shenguard.mustTagSignature("alice"))], shenguard.mustTagSignature("bob"));
+  const want = shenguard.mustUnsignedComplete("unsigned-complete", shenguard.mustTagBlock(shenguard.mustTagId(" "), "bob", [shenguard.mustTagId("bob")], shenguard.mustTagSignature("bob")), [shenguard.mustTagBlock(shenguard.mustTagId("bob"), "alice", [shenguard.mustTagId("alice")], shenguard.mustTagSignature("alice"))]);
   assert.deepStrictEqual(got, want, `resolve-tag-block-children: spec says ${JSON.stringify(want)}, impl returned ${JSON.stringify(got)}`);
 });
 test("case_22", () => {
@@ -142,7 +142,7 @@ test("case_25", () => {
 });
 test("case_26", () => {
   const got = ResolveTagBlockChildren(shenguard.mustTagBlock(shenguard.mustTagId(" "), "bob", [shenguard.mustTagId("bob")], shenguard.mustTagSignature("bob")), shenguard.mustRefTable([shenguard.mustRefTableEntry(shenguard.mustTagId("alice"), shenguard.mustTagBlock(shenguard.mustTagId("alice"), "", [], shenguard.mustTagSignature(""))), shenguard.mustRefTableEntry(shenguard.mustTagId("bob"), shenguard.mustTagBlock(shenguard.mustTagId("bob"), "alice", [shenguard.mustTagId("alice")], shenguard.mustTagSignature("alice"))), shenguard.mustRefTableEntry(shenguard.mustTagId(" "), shenguard.mustTagBlock(shenguard.mustTagId(" "), "bob", [shenguard.mustTagId("bob")], shenguard.mustTagSignature("bob")))]));
-  const want = shenguard.mustSignedComplete("signed-complete", shenguard.mustTagBlock(shenguard.mustTagId(" "), "bob", [shenguard.mustTagId("bob")], shenguard.mustTagSignature("bob")), [shenguard.mustTagBlock(shenguard.mustTagId("bob"), "alice", [shenguard.mustTagId("alice")], shenguard.mustTagSignature("alice"))], shenguard.mustTagSignature("bob"));
+  const want = shenguard.mustUnsignedComplete("unsigned-complete", shenguard.mustTagBlock(shenguard.mustTagId(" "), "bob", [shenguard.mustTagId("bob")], shenguard.mustTagSignature("bob")), [shenguard.mustTagBlock(shenguard.mustTagId("bob"), "alice", [shenguard.mustTagId("alice")], shenguard.mustTagSignature("alice"))]);
   assert.deepStrictEqual(got, want, `resolve-tag-block-children: spec says ${JSON.stringify(want)}, impl returned ${JSON.stringify(got)}`);
 });
 test("case_27", () => {
@@ -207,7 +207,7 @@ test("case_38", () => {
 });
 test("case_39", () => {
   const got = ResolveTagBlockChildren(shenguard.mustTagBlock(shenguard.mustTagId("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "alice", [shenguard.mustTagId("A")], shenguard.mustTagSignature("alice")), shenguard.mustRefTable([shenguard.mustRefTableEntry(shenguard.mustTagId("A"), shenguard.mustTagBlock(shenguard.mustTagId("A"), "", [shenguard.mustTagId(" ")], shenguard.mustTagSignature("")))]));
-  const want = shenguard.mustSignedComplete("signed-complete", shenguard.mustTagBlock(shenguard.mustTagId("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "alice", [shenguard.mustTagId("A")], shenguard.mustTagSignature("alice")), [shenguard.mustTagBlock(shenguard.mustTagId("A"), "", [shenguard.mustTagId(" ")], shenguard.mustTagSignature(""))], shenguard.mustTagSignature("alice"));
+  const want = shenguard.mustUnsignedComplete("unsigned-complete", shenguard.mustTagBlock(shenguard.mustTagId("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "alice", [shenguard.mustTagId("A")], shenguard.mustTagSignature("alice")), [shenguard.mustTagBlock(shenguard.mustTagId("A"), "", [shenguard.mustTagId(" ")], shenguard.mustTagSignature(""))]);
   assert.deepStrictEqual(got, want, `resolve-tag-block-children: spec says ${JSON.stringify(want)}, impl returned ${JSON.stringify(got)}`);
 });
 test("case_40", () => {
@@ -252,7 +252,7 @@ test("case_47", () => {
 });
 test("case_48", () => {
   const got = ResolveTagBlockChildren(shenguard.mustTagBlock(shenguard.mustTagId("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "bob", [shenguard.mustTagId("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")], shenguard.mustTagSignature("bob")), shenguard.mustRefTable([shenguard.mustRefTableEntry(shenguard.mustTagId("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), shenguard.mustTagBlock(shenguard.mustTagId("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "alice", [shenguard.mustTagId("A")], shenguard.mustTagSignature("alice")))]));
-  const want = shenguard.mustSignedComplete("signed-complete", shenguard.mustTagBlock(shenguard.mustTagId("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "bob", [shenguard.mustTagId("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")], shenguard.mustTagSignature("bob")), [shenguard.mustTagBlock(shenguard.mustTagId("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "alice", [shenguard.mustTagId("A")], shenguard.mustTagSignature("alice"))], shenguard.mustTagSignature("bob"));
+  const want = shenguard.mustUnsignedComplete("unsigned-complete", shenguard.mustTagBlock(shenguard.mustTagId("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "bob", [shenguard.mustTagId("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")], shenguard.mustTagSignature("bob")), [shenguard.mustTagBlock(shenguard.mustTagId("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "alice", [shenguard.mustTagId("A")], shenguard.mustTagSignature("alice"))]);
   assert.deepStrictEqual(got, want, `resolve-tag-block-children: spec says ${JSON.stringify(want)}, impl returned ${JSON.stringify(got)}`);
 });
 test("case_49", () => {
