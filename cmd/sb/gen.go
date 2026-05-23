@@ -17,8 +17,19 @@ func cmdGen(args []string) {
 
 Usage: sb gen [flags] [spec-file]
 
-Runs shengen to generate guard types from the Shen spec file.
-If no spec file is given, uses the configured or conventional path.
+Runs the language-appropriate shengen emitter and writes guards to the
+configured output path. The language is taken from sb.toml's
+[project] lang field. Supported values:
+
+    go      — full-featured Go emitter (cmd/shengen)
+    ts      — full-featured TypeScript emitter (cmd/shengen-ts)
+    py      — experimental Python emitter (cmd/shengen-py)
+    rs      — experimental Rust emitter (cmd/shengen-rs)
+
+The Python and Rust emitters cover datatypes, sum types, (list X)
+parametric types, and a conservative subset of (define …) blocks.
+Unsupported constructs produce explicit "unsupported" comments rather
+than silently dropping behaviour.
 
 Flags:
 `)
@@ -60,8 +71,18 @@ Flags:
 			fmt.Fprintf(os.Stderr, "sb gen: %v\n", err)
 			os.Exit(1)
 		}
+	case "py":
+		if err := runShengenPy(spec, cfg.Output, *verbose, *dryRun); err != nil {
+			fmt.Fprintf(os.Stderr, "sb gen: %v\n", err)
+			os.Exit(1)
+		}
+	case "rs":
+		if err := runShengenRs(spec, cfg.Output, *verbose, *dryRun); err != nil {
+			fmt.Fprintf(os.Stderr, "sb gen: %v\n", err)
+			os.Exit(1)
+		}
 	default:
-		fmt.Fprintf(os.Stderr, "sb gen: unsupported language %q\n", cfg.Lang)
+		fmt.Fprintf(os.Stderr, "sb gen: unsupported language %q (expected go|ts|py|rs)\n", cfg.Lang)
 		os.Exit(1)
 	}
 }
@@ -117,6 +138,56 @@ func runShengenTS(spec, output string, verbose, dryRun bool) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Generated %s from %s\n", output, spec)
+	return nil
+}
+
+func runShengenPy(spec, output string, verbose, dryRun bool) error {
+	pyPath, err := FindShengenPy()
+	if err != nil {
+		return err
+	}
+
+	args := []string{pyPath, spec, "--out", output}
+	if verbose || dryRun {
+		printCommand("python3", args)
+	}
+	if dryRun {
+		return nil
+	}
+
+	cmd := exec.Command("python3", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("shengen-py failed: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Generated %s from %s (experimental py emitter)\n", output, spec)
+	return nil
+}
+
+func runShengenRs(spec, output string, verbose, dryRun bool) error {
+	rsPath, err := FindShengenRs()
+	if err != nil {
+		return err
+	}
+
+	args := []string{rsPath, spec, "--out", output}
+	if verbose || dryRun {
+		printCommand("python3", args)
+	}
+	if dryRun {
+		return nil
+	}
+
+	cmd := exec.Command("python3", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("shengen-rs failed: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Generated %s from %s (experimental rs emitter)\n", output, spec)
 	return nil
 }
 
