@@ -1,0 +1,60 @@
+// Attempt #2: pair token-A with user-B's UserId (the singron HN
+// critique).
+//
+// Outcome: NewAuthenticatedUser returns an error. The W2.1
+// cross-field premise `(= User (head (head Jwt)))` inside the
+// authenticated-user datatype lowers to the body:
+//
+//	if !(user == jwt.claims.sub) {
+//	    return AuthenticatedUser{}, fmt.Errorf("user must equal jwt.claims.sub")
+//	}
+//
+// inside the generated constructor. Compilation succeeds — the type
+// signatures match — but the runtime predicate refuses to return an
+// AuthenticatedUser whose user-id disagrees with the JWT's sub claim.
+// This is the central piece of the W2.1 hardening: the convention-only
+// binding from middleware.go is now a structural binding inside the
+// guard type. A handler that pairs Alice's JWT with Bob's UserId
+// literally cannot get past this constructor.
+//
+// To reproduce the failure interactively:
+//
+//	go run bypass_attempts/02_mismatched_user_id.go.bak  # (after rename)
+//
+// bin/show-bypass-attempts.sh captures the compile output and the
+// runtime error from this file.
+package bypass_attempts_demo
+
+import (
+	"fmt"
+
+	"multi-tenant-api/internal/shenguard"
+)
+
+// ForgeMismatchedAuth tries to pair Alice's signed JWT with Bob's
+// UserId. Returns the error the constructor produces.
+func ForgeMismatchedAuth() error {
+	aliceID := shenguard.NewUserId("u-alice")
+	bobID := shenguard.NewUserId("u-bob")
+
+	iss, _ := shenguard.NewJwtIssuer("multi-tenant-api")
+	aud, _ := shenguard.NewJwtAudience("users")
+
+	// Alice's parsed claims (sub = u-alice).
+	claims, err := shenguard.NewParsedClaims(aliceID, 9999999999, iss, aud)
+	if err != nil {
+		return fmt.Errorf("setup: %w", err)
+	}
+	jwt, err := shenguard.NewVerifiedJwt(claims, "alice-signature")
+	if err != nil {
+		return fmt.Errorf("setup: %w", err)
+	}
+
+	// Try to build an AuthenticatedUser carrying Bob's UserId.
+	// The cross-field premise refuses.
+	_, err = shenguard.NewAuthenticatedUser(jwt, bobID)
+	if err == nil {
+		return fmt.Errorf("BUG: NewAuthenticatedUser accepted a mismatched pair")
+	}
+	return err
+}

@@ -150,7 +150,7 @@ cat specs/core.shen
   [Access Resource IsOwned] : resource-access;)
 ```
 
-## Five Verification Gates
+## Six Verification Gates
 
 The gate pipeline is declared in `sb.toml` as a `[[gates]]` array. `sb gates` reads the topology from the manifest and runs each gate in turn:
 
@@ -158,7 +158,8 @@ The gate pipeline is declared in `sb.toml` as a `[[gates]]` array. `sb gates` re
 2. **test** — run the suite against the regenerated types
 3. **build** — compile everything (catches type-signature mismatches)
 4. **shen-check** — Shen's type checker confirms the spec is internally consistent
-5. **tcb-audit** — re-run shengen and reject any drift or hand-edits in the `shenguard/` package
+5. **tcb-audit** — re-run shengen, reject any drift or hand-edits in the `shenguard/` package, AND enforce the "no direct calls to `shenguard.NewTenantAccess`/`NewResourceAccess` outside `internal/verified/access.go`" rule that addresses the singron HN critique
+6. **shen-derive** — spec-equivalence verification (Wave-4 gate; activated in W2.1 with the addition of a `[[derive.specs]]` entry pointing at `(define same-user?)`)
 
 In a Ralph loop a failing gate feeds its error back into the next prompt as backpressure. (Color codes from `sb`'s output are stripped so the capture stays clean.)
 
@@ -167,74 +168,94 @@ In a Ralph loop a failing gate feeds its error back into the next prompt as back
 ```
 
 ```output
-PASS [shengen] 12ms
-PASS [test] 128ms
-PASS [build] 399ms
-PASS [shen-check] 151ms
-PASS [tcb-audit] 18ms
+PASS [shengen] 17ms
+PASS [test] 164ms
+PASS [build] 469ms
+PASS [shen-check] 206ms
+PASS [tcb-audit] 35ms
+PASS [shen-derive] 195ms
 
-  PASS  shengen        12ms
-  PASS  test           128ms
-  PASS  build          399ms
-  PASS  shen-check     151ms
-  PASS  tcb-audit      18ms
+  PASS  shengen        17ms
+  PASS  test           164ms
+  PASS  build          469ms
+  PASS  shen-check     206ms
+  PASS  tcb-audit      35ms
+  PASS  shen-derive    195ms
 
-5/5 gates passed
+6/6 gates passed
 ```
 
 ## Discharge Report
 
-Gate output is the green-bar TL;DR. The audit-grade artifact lives at `.sb/discharge_report.json`, a v1-locked JSON schema that records — for each spec rule and each of its premises — exactly *how* the premise was discharged. `sb audit-report` renders the JSON as a self-contained Markdown document a reviewer can open cold.
+Gate output is the green-bar TL;DR. The audit-grade artifact lives at `.sb/discharge_report.json`, a v1-locked JSON schema that records — for each spec rule and each of its premises — exactly *how* the premise was discharged. `sb audit-report` renders the JSON as a self-contained Markdown document a reviewer can open cold. A committed snapshot lives at `transcript/discharge_report.json` / `transcript/audit_report.md` so a reader on GitHub can inspect the artifact without cloning the repo or installing Shen.
 
-This example's spec uses only structural datatypes and predicates (`(not (= X ""))`, `(> Exp Now)`, `(= IsMember true)`, etc.) — there are no `(define …)` blocks asserting a function ≡ a Go implementation. Every premise is therefore discharged **statically** by the generated guard constructors. To make the *richer* artifact visible (with the runtime-sampled and oracle-equivalence cases too), the sibling [`examples/payment/`](../payment/) example ships a committed transcript alongside its `(define processable …)` spec; the snippet below excerpts that artifact:
+The W2.1 hardening (this PR) turned this example from a structurally-thin spec into one whose `authenticated-user` carries a real cross-field binding: `(= User (head (head Jwt))) : verified`. That premise is discharged **statically** by the constructor `NewAuthenticatedUser` — pairing token-A with user-B literally cannot produce an `AuthenticatedUser` value. We also added a minimal `(define same-user?)` block so `sb derive` has something to verify; the discharge report enumerates ALL 15 datatype rules from `specs/core.shen` once `sb derive` runs.
 
 ```bash
-cat ../payment/transcript/discharge_report.json | jq '.summary'
+cat transcript/discharge_report.json | jq '.summary'
 ```
 
 ```output
 {
-  "rule_count": 7,
-  "rules_discharged": 7,
+  "rule_count": 15,
+  "rules_discharged": 15,
   "rules_violated": 0,
   "rules_unproven": 0,
-  "premises_total": 14,
-  "premises_static": 13,
+  "premises_total": 33,
+  "premises_static": 32,
   "premises_runtime_sampled": 1,
   "premises_unproven": 0
 }
 ```
 
 ```bash
-head -30 ../payment/transcript/audit_report.md
+cat transcript/discharge_report.json \
+  | jq '.rules[] | select(.name == "authenticated-user") | .premises[] | select(.discharge_basis == "guard-constructor-validates") | {expression, rationale}'
 ```
 
 ```output
-# Discharge Report — Audit Rendering
-
-Generated 2026-05-23T03:47:33Z. Source artifact: `.sb/discharge_report.json` (schema_version=1).
-
-**Implementation commit:** `81ddf671a482f8b325db11acd04c72ec4182af03` (working tree dirty)
-
-**Spec files:**
-
-- `specs/core.shen` (sha256 `cb5d6c98c409307aa6345870d3a4f70e564085ee1222542a522e75a1bed2d9a7`)
-
-**Target languages:** go
-
-## Summary
-
-- **Rules:** 7 total — 7 discharged, 0 violated, 0 unproven
-- **Premises:** 14 total — 13 static, 1 runtime-sampled, 0 unproven
+{
+  "expression": "(= User (head (head Jwt))) : verified",
+  "rationale": "shengen's generated constructor for authenticated-user rejects inputs that do not satisfy (= User (head (head Jwt))), so this premise holds for any value of type authenticated-user reachable in the impl."
+}
 ```
 
 The discharge classification is the spec-as-audit-surface story made concrete. Each premise carries one of three labels:
 
-- **static** — the generated guard constructor mechanically rejects any input that violates the premise, so the type system carries the proof. Most premises in this example (`(not (= JwtToken ""))`, `(> Exp Now)`, `(= IsMember true)`) discharge this way; a reviewer reading the rendered report sees `guard-type-at-boundary` as the basis and a line/file reference into `internal/shenguard/guards_gen.go`.
-- **runtime-sample** — for spec rules of the form `(define f …)` that name a pure function, `shen-derive` generates a Go table-driven test that runs the Shen spec as the oracle against the implementation function on a generated input grid. The report records seed, case count, pass/fail, and on failure a ready-to-paste `go test -run …` reproducer. Payment's `processable` rule is sampled at 35 deterministic boundary cases.
-- **unproven** — the rule has neither a structural discharge path nor a sampled oracle. A reviewer treats these as honest gaps, not green-bar passes. Multi-tenant-api currently has zero unproven premises, but also zero `(define …)` rules — the Wave-2 hardening (`thoughts/shared/research/2026-05-22-hn-feedback-next-steps.md`, recommendation R1) adds cross-field predicates like `(= User (sub Claims))` that move the token↔user binding from "convention enforced in middleware" to "static discharge against a spec-level premise."
+- **static** — the generated guard constructor mechanically rejects any input that violates the premise, so the type system carries the proof. 32 of 33 premises in this example (including the new `(= User (head (head Jwt)))` cross-field binding) discharge this way; a reviewer reading the rendered report sees `guard-type-at-boundary` or `guard-constructor-validates` as the basis and a line/file reference into `internal/shenguard/guards_gen.go`.
+- **runtime-sample** — for spec rules of the form `(define f …)` that name a pure function, `shen-derive` generates a Go table-driven test that runs the Shen spec as the oracle against the implementation function on a generated input grid. The report records seed, case count, pass/fail, and on failure a ready-to-paste `go test -run …` reproducer. This example's `(define same-user?)` is sampled at 9 deterministic cases.
+- **unproven** — the rule has neither a structural discharge path nor a sampled oracle. Multi-tenant-api has zero unproven premises.
 
 For the trust-boundary write-up — which surfaces of this project are inside the TCB, what's structurally enforced vs runtime-checked vs assumed — see [`docs/TRUST-MODEL.md`](../../docs/TRUST-MODEL.md). For the per-example reviewer workflow (verify spec hash, re-run at recorded commit, read `discharged_since_commit`), see this directory's `AUDIT.md`.
+
+## Bypass Attempts
+
+A common reaction to a structural-guarantee claim is: "I bet I can forge a `TenantAccess` if I want to." We took that seriously. Five `.go.bak` files under `bypass_attempts/` enumerate the obvious forgery techniques; `bin/show-bypass-attempts.sh` rotates each into a temporary harness package, builds it, and records what stops it.
+
+```bash
+./bin/show-bypass-attempts.sh
+```
+
+```output
+# Bypass Attempts
+
+Each row below tries to forge or skip a step in the proof chain
+`JwtToken → AuthenticatedUser → TenantAccess → ResourceAccess`. The
+last column records what the Go toolchain (or runtime) does when
+the attempt is rotated into the package and built.
+
+| # | File | Technique | Outcome |
+|---|------|-----------|---------|
+| 1 | `01_direct_struct_literal.go.bak` | forge a TenantAccess by constructing the struct literal | **FAILS at compile**: `internal/bypass_harness/01_direct_struct_literal.go:28:3: cannot refer to unexported field principal in struct literal of type shenguard.TenantAccess` |
+| 2 | `02_mismatched_user_id.go.bak` | pair token-A with user-B's UserId (the singron HN | **compiles**, rejected by runtime predicate `(= User (head (head Jwt)))` |
+| 3 | `03_reflection_escape.go.bak` | forge a TenantAccess via unsafe reflection. | **compiles**, rejected by code review (`unsafe.Pointer` red flag) |
+| 4 | `04_handler_skips_check.go.bak` | a handler that "forgets" to call verified.CheckTenantAccess | **compiles**, rejected by the `shenguard.New*` grep gate in `bin/shenguard-audit.sh` |
+| 5 | `05_inject_isowned_true.go.bak` | call shenguard.NewResourceAccess directly with | **compiles**, rejected by the `shenguard.New*` grep gate in `bin/shenguard-audit.sh` |
+```
+
+The centerpiece is attempt #2: pre-W2.1 the constructor `NewAuthenticatedUser(token JwtToken, expiry TokenExpiry, user UserId) AuthenticatedUser` was **infallible** — it returned an `AuthenticatedUser` for any `(token, expiry, user)` triple. The W2.1 spec change `(= User (head (head Jwt))) : verified` flips this: the constructor now rejects mismatched pairs at construction time. The bypass file confirms the runtime rejection; the spec change is what installed it.
+
+Attempts #4 and #5 illustrate a related discipline: the type system can enforce "if you have a `verified.TenantAccess`, you walked the proof chain," but it cannot enforce "every handler asks for one." The local `bin/shenguard-audit.sh` (post-W2.1) now scans for direct calls to `shenguard.NewTenantAccess` / `shenguard.NewResourceAccess` outside `internal/verified/access.go` and fails the gate on any. That's the grep gate the table refers to.
 
 ## Generated Guard Types
 

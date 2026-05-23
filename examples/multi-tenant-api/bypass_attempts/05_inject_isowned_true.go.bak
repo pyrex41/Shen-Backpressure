@@ -1,0 +1,55 @@
+// Attempt #5: call shenguard.NewResourceAccess directly with
+// `isOwned: true`, bypassing the DB ownership check.
+//
+// Outcome: this compiles AND succeeds at runtime — the constructor's
+// only `verified` premise on resource-access is `(= IsOwned true)`,
+// which the caller satisfies trivially by passing `true`. The
+// shenguard layer alone does not enforce that `isOwned` actually
+// reflects a DB row.
+//
+// What catches this:
+//
+//   1. The discipline in `internal/verified/access.go`: only
+//      `verified.CheckResourceAccess` calls `shenguard.NewResourceAccess`,
+//      and it derives `isOwned` from a real SQL row count. Code
+//      outside that function calling `shenguard.NewResourceAccess`
+//      directly is what the local `bin/shenguard-audit.sh` grep
+//      check forbids.
+//
+//   2. This bypass demonstrates the precise reason `verified` exists:
+//      the structural premise `(= IsOwned true)` only checks the
+//      *value*, not the *provenance* of the boolean. The provenance
+//      is the responsibility of `CheckResourceAccess`, and that
+//      function is in the TCB (see docs/TRUST-MODEL.md).
+//
+// Read together with attempt #4, the contract is:
+//
+//   - Type system guarantees: you have a ResourceAccess ⇒ someone
+//     called NewResourceAccess with isOwned=true.
+//   - Wrapper discipline guarantees: someone called
+//     NewResourceAccess with isOwned=true ⇒ the SQL ownership query
+//     returned a row.
+//
+// The second arrow is enforced by the grep gate, not by Go's type
+// system. That's the structural-versus-TCB boundary called out in
+// docs/TRUST-MODEL.md.
+package bypass_attempts_demo
+
+import (
+	"fmt"
+
+	"multi-tenant-api/internal/shenguard"
+)
+
+// ForgeResourceAccess tries to construct a ResourceAccess for a
+// resource the caller does not own, by passing isOwned=true directly.
+// Compiles AND succeeds at runtime — this is the bypass the
+// `verified` package is the only defence against.
+func ForgeResourceAccess(access shenguard.TenantAccess) (shenguard.ResourceAccess, error) {
+	resourceID := shenguard.NewResourceId("r-not-mine")
+	ra, err := shenguard.NewResourceAccess(access, resourceID, true)
+	if err != nil {
+		return shenguard.ResourceAccess{}, fmt.Errorf("unexpected: %w", err)
+	}
+	return ra, nil
+}
