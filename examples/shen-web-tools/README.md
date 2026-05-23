@@ -29,17 +29,40 @@ Common Lisp Backend (SBCL)
 
 This example also carries the current TypeScript proof gate for product
 tag/ref-table rendering. `specs/core.shen` defines `tag-block`,
-`ref-table`, and the `tag-resolve-outcome` sum type. The resolver contract
-in `specs/tag-block-resolver.shen` resolves child refs into:
+`ref-table`, `tag-provenance`, and the `tag-resolve-outcome` sum type.
+The resolver contract in `specs/tag-block-resolver.shen` resolves child
+refs into:
 
-- `signed-complete`: every child ref resolves and the root has a signature.
-- `unsigned-complete`: every child ref resolves, but the root is unsigned.
-- `partial`: at least one child ref is missing, while available children remain renderable.
+- `signed-complete`: every child ref resolves AND the root's signature
+  passes a deterministic stub-HMAC predicate against the body and
+  child-ref count. The outcome carries a structured `tag-provenance`
+  composite (signer-id + stamp + signature), not a raw signature
+  string.
+- `unsigned-complete`: every child ref resolves, but the root's
+  signature is empty OR fails the stub-HMAC predicate.
+- `partial`: at least one child ref is missing, while available
+  children remain renderable.
 
-The hand-written implementation in `runtime/tag_resolver.ts` is checked by
-`runtime/tag_resolver.shen-derive.test.ts`, generated from the Shen spec.
-`runtime/tag_render_contract.ts` is the renderer boundary: UI code consumes
-`TagRenderState`, not raw ref-table data.
+The stub-HMAC predicate is documented in
+`specs/tag-block-resolver.shen`. It is intentionally a structural
+stand-in for a real cryptographic HMAC: a signature is valid iff
+`(length Signature) mod 256` equals
+`((length Body) * 31 + (length ChildRefs) * 17 + 24) mod 256`. This
+demonstrates how a real HMAC slots into the spec — by replacing the
+two helper defines with calls to a future `:runtime-via` cryptographic
+primitive — without claiming the demo is cryptographic.
+
+The hand-written implementation in `runtime/tag_resolver.ts` is checked
+by `runtime/tag_resolver.shen-derive.test.ts`, generated from the Shen
+spec. `runtime/tag_render_contract.ts` is the renderer boundary: UI
+code consumes `TagRenderState`, not raw ref-table data. The renderer
+state now exposes the typed `provenance` composite (signer, stamp,
+signature) so consumers don't have to re-derive structure from the
+raw signature string.
+
+See `thoughts/shared/research/2026-05-22-tag-resolver-closed.md` for
+the decisions on each open question
+(`2026-05-05-tag-resolver-open-questions.md`).
 
 ## Providers
 
