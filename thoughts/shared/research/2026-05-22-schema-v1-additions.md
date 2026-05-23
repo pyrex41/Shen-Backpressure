@@ -136,3 +136,74 @@ consistent with how `readGatesLastRun` behaves today.
 - `thoughts/shared/research/2026-05-22-hn-feedback-next-steps.md`
   §R5 — the HN-derived motivation for surfacing latest gate
   PASS/FAIL in `sb context`
+
+---
+
+## W3.2 addendum (2026-05-23): populating reserved `shen_runtime` fields
+
+The v1 discharge schema reserves two fields under `tools`:
+
+```json
+"tools": {
+  ...
+  "shen_runtime": null,
+  "shen_runtime_available": false
+}
+```
+
+Both fields existed in v1 but were always `null` / `false` because no
+build path produced a live-Shen-runtime composition. W3.2 introduces
+the `:runtime-via` annotation (`docs/RUNTIME-VIA.md`) which composes
+the generated guard with a live Shen runtime at runtime check time.
+
+**This is NOT a schema change.** The fields, their JSON keys, their
+JSON types, and their position in `tools` are all unchanged. What
+changed is the **range of values** they can take:
+
+- `shen_runtime`: was always `null`. Now either `null` (pure-static
+  build) or `"shen-sbcl"` (live-runtime composition active).
+- `shen_runtime_available`: was always `false`. Now `true` whenever
+  `shen_runtime` is non-null.
+
+### Detection contract
+
+`cmd/sb/derive.go::detectShenRuntime` scans every spec referenced by
+`[[derive.specs]]` for the `:runtime-via` Shen-comment marker. If at
+least one occurrence is found, `shen_runtime = "shen-sbcl"`. The
+detection is purely textual to keep this function from depending on
+shengen's parser; the marker grammar is pinned by
+`cmd/shengen{,-ts}` tests.
+
+### Consumer compatibility
+
+Consumers that already tolerated `shen_runtime: null` (which is the
+v1-locked behavior) continue to work without changes. Consumers that
+want to surface the new runtime composition should:
+
+1. Check `shen_runtime_available` first; if false, treat as
+   pure-static and ignore `shen_runtime`.
+2. When true, `shen_runtime` is a non-null string naming the
+   runtime. Forward-compatible: future hosts (shen-cl, shen-scheme)
+   will surface as different strings; consumers should not
+   case-analyse on the string except for display.
+
+### Why this is additive, not a schema bump
+
+The schema didn't change. The values changed (a reserved field
+becoming populated). v1 already allowed `shen_runtime` to be `null
+| string`; w3.2 is the first commit that actually produces a string
+value for it. Anything stricter would have been a schema break
+since 2026-05-05, but the schema was written to anticipate this.
+The `cmd/sb/discharge_test.go` round-trip already covers both
+null and non-null shapes.
+
+### References
+
+- `shen-derive/report/build.go` — `BuildOptions.ShenRuntime` plumbed
+  into `Tools.ShenRuntime`
+- `shen-derive/report/classify_test.go::TestBuildPopulatesShenRuntime`
+  — round-trip
+- `cmd/sb/derive.go::detectShenRuntime` — spec scan
+- `cmd/sb/derive.go::finalizeDischargeReport` — wiring
+- `docs/RUNTIME-VIA.md` — when to use `:runtime-via` + trust-model
+  implications

@@ -342,6 +342,16 @@ func finalizeDischargeReport(parts []*DischargeReport, cfg *Config, failures []p
 	if len(failures) > 0 {
 		applyCounterExamples(r, failures, cfg.DeriveSpecs)
 	}
+	// W3.2 — populate shen_runtime{,_available} when at least one spec
+	// referenced by [[derive.specs]] uses a `:runtime-via` annotation.
+	// The detection is purely textual (scans the spec file for the
+	// Shen-comment marker), keeping this additive: projects with no
+	// runtime-via continue to report `shen_runtime: null` exactly as
+	// before. See thoughts/shared/research/2026-05-22-schema-v1-additions.md.
+	if name := detectShenRuntime(cfg); name != "" {
+		r.Tools.ShenRuntime = &name
+		r.Tools.ShenRuntimeAvailable = true
+	}
 	computeDischargedSinceCommit(r)
 	if err := writeDischarge(DischargeReportPath, r); err != nil {
 		fmt.Fprintf(os.Stderr, "sb derive: write discharge report: %v\n", err)
@@ -352,6 +362,44 @@ func finalizeDischargeReport(parts []*DischargeReport, cfg *Config, failures []p
 	}
 	fmt.Fprintf(os.Stderr, "sb derive: discharge report → %s (%d/%d rules discharged)\n",
 		DischargeReportPath, r.Summary.RulesDischarged, r.Summary.RuleCount)
+}
+
+// detectShenRuntime scans every spec referenced by [[derive.specs]] for
+// the `:runtime-via <name>` Shen-comment marker. If at least one
+// occurrence is found, the returned string is the Shen runtime the
+// project is composed with — currently always "shen-sbcl" because the
+// only live-runtime backend wired up is shen-web-tools' SBCL host.
+// Returns "" when no runtime-via annotation is present (the pure-static
+// case, which is the vast majority of projects).
+//
+// The detection is intentionally textual to keep this function from
+// pulling shengen's parser in. The marker's grammar is documented in
+// docs/RUNTIME-VIA.md and pinned by cmd/shengen{,-ts} tests.
+func detectShenRuntime(cfg *Config) string {
+	if cfg == nil {
+		return ""
+	}
+	seen := map[string]bool{}
+	for _, s := range cfg.DeriveSpecs {
+		if s.Path == "" || seen[s.Path] {
+			continue
+		}
+		seen[s.Path] = true
+		data, err := os.ReadFile(s.Path)
+		if err != nil {
+			continue
+		}
+		if bytes.Contains(data, []byte(":runtime-via ")) ||
+			bytes.Contains(data, []byte("\\* :runtime-via")) {
+			// "shen-sbcl" is the canonical name for the runtime the
+			// only live-host demo uses today. When other hosts are
+			// added (shen-cl, shen-scheme), this would be reported
+			// via per-spec metadata; for the v1 prototype the name
+			// is fixed.
+			return "shen-sbcl"
+		}
+	}
+	return ""
 }
 
 // runCaptured runs a command and returns its combined stdout/stderr

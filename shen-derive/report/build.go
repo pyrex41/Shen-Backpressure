@@ -35,6 +35,16 @@ type BuildOptions struct {
 	ShenDeriveVersion string
 	ShengenVersion    string
 
+	// ShenRuntime, when non-empty, names the live Shen runtime that is
+	// composed with the build via at least one `:runtime-via` annotation
+	// in the spec. Empty means the build is pure-static — no runtime
+	// composition. Populated by callers that know they're building a
+	// project with active runtime-via specs (see
+	// docs/RUNTIME-VIA.md). Surfaces as `tools.shen_runtime` and flips
+	// `tools.shen_runtime_available` to true. v1 schema reserved both
+	// fields; this commit puts them to use without changing the schema.
+	ShenRuntime string
+
 	// Rules is the complete set of rules for this spec, fully
 	// classified. Callers obtain this by combining ClassifyDatatypes
 	// and one ClassifyDefine per (define …) block they care about.
@@ -55,6 +65,14 @@ func Build(opts BuildOptions) (*Report, error) {
 		return rules[i].Name < rules[j].Name
 	})
 
+	var shenRuntime *string
+	shenRuntimeAvailable := false
+	if opts.ShenRuntime != "" {
+		name := opts.ShenRuntime
+		shenRuntime = &name
+		shenRuntimeAvailable = true
+	}
+
 	r := &Report{
 		SchemaVersion: SchemaVersion,
 		GeneratedAt:   opts.Now.UTC().Format(time.RFC3339),
@@ -71,8 +89,8 @@ func Build(opts BuildOptions) (*Report, error) {
 			SBVersion:            opts.SBVersion,
 			ShenDeriveVersion:    opts.ShenDeriveVersion,
 			ShengenVersion:       opts.ShengenVersion,
-			ShenRuntime:          nil,
-			ShenRuntimeAvailable: false,
+			ShenRuntime:          shenRuntime,
+			ShenRuntimeAvailable: shenRuntimeAvailable,
 		},
 		Rules:     rules,
 		Signature: nil,
