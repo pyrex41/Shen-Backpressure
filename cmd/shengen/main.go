@@ -33,6 +33,12 @@ type Premise struct {
 
 type VerifiedPremise struct {
 	Raw string
+	// RuntimeVia, when non-empty, names a runtime checker function that
+	// will be called to discharge this premise instead of inlining a
+	// translated predicate. Set when the spec writes
+	// `(predicate) : verified via <name>;`. See docs/RUNTIME-VIA.md for
+	// the semantics and the compile-time witness shape.
+	RuntimeVia string
 }
 
 type Conclusion struct {
@@ -1468,6 +1474,18 @@ func buildRule(premLines, concLines []string) *Rule {
 			r.Verified = append(r.Verified, VerifiedPremise{Raw: strings.TrimSpace(strings.TrimSuffix(line, ": verified"))})
 			continue
 		}
+		// `(predicate) : verified via <fname>` — discharge this premise
+		// at runtime by calling <fname> from the constructor. The
+		// inline lowering is bypassed; see docs/RUNTIME-VIA.md.
+		if idx := strings.Index(line, ": verified via "); idx >= 0 {
+			raw := strings.TrimSpace(line[:idx])
+			via := strings.TrimSpace(line[idx+len(": verified via "):])
+			// strip any trailing semicolons/whitespace artifacts the
+			// outer trim missed.
+			via = strings.TrimRight(via, "; \t")
+			r.Verified = append(r.Verified, VerifiedPremise{Raw: raw, RuntimeVia: via})
+			continue
+		}
 		if strings.HasPrefix(line, "if ") {
 			r.Verified = append(r.Verified, VerifiedPremise{Raw: strings.TrimSpace(strings.TrimPrefix(line, "if "))})
 			continue
@@ -1625,8 +1643,45 @@ func generateGo(types []Datatype, st *SymbolTable, pkg string, specPath string) 
 			break
 		}
 	}
+
+	// Detect `:runtime-via <name>` annotations across the spec. When
+	// present we also need `"context"` and `"errors"` and emit a
+	// compile-time witness type + one `var _` declaration per distinct
+	// checker name.
+	runtimeCheckerNames := collectRuntimeCheckerNames(types)
+	hasRuntimeVia := len(runtimeCheckerNames) > 0
+
+	imports := []string{}
 	if needsFmt {
-		b.WriteString("import (\n\t\"fmt\"\n)\n\n")
+		imports = append(imports, "\"fmt\"")
+	}
+	if hasRuntimeVia {
+		imports = append(imports, "\"context\"", "\"errors\"")
+	}
+	if len(imports) > 0 {
+		b.WriteString("import (\n")
+		for _, imp := range imports {
+			b.WriteString("\t" + imp + "\n")
+		}
+		b.WriteString(")\n\n")
+	}
+
+	if hasRuntimeVia {
+		b.WriteString("// runtimeChecker is the contract every `:runtime-via <name>`\n")
+		b.WriteString("// function must satisfy. The generated constructor passes the\n")
+		b.WriteString("// predicate's spec-side name plus positional arguments; the\n")
+		b.WriteString("// checker returns (ok, err). See docs/RUNTIME-VIA.md.\n")
+		b.WriteString("type runtimeChecker func(ctx context.Context, predicate string, args ...any) (bool, error)\n\n")
+		b.WriteString("// Compile-time witnesses. The build fails if any named runtime\n")
+		b.WriteString("// checker is missing or has the wrong signature — this is what\n")
+		b.WriteString("// makes the runtime call non-skippable: there is no path through\n")
+		b.WriteString("// the constructor that does not consult the checker.\n")
+		for _, name := range runtimeCheckerNames {
+			b.WriteString(fmt.Sprintf("var _ runtimeChecker = %s\n", name))
+		}
+		b.WriteString("\n// errRuntimeCheckRejected is returned when a runtime checker\n")
+		b.WriteString("// reports the predicate is false (ok == false, err == nil).\n")
+		b.WriteString("var errRuntimeCheckRejected = errors.New(\"runtime check rejected\")\n\n")
 	}
 
 	// Generate sum type interfaces.
@@ -1683,6 +1738,50 @@ func generateGo(types []Datatype, st *SymbolTable, pkg string, specPath string) 
 	return b.String()
 }
 
+// collectRuntimeCheckerNames returns the distinct `:runtime-via <name>`
+// checker names referenced anywhere in the spec, sorted to keep emission
+// deterministic.
+func collectRuntimeCheckerNames(types []Datatype) []string {
+	seen := make(map[string]bool)
+	var names []string
+	for _, dt := range types {
+		for _, r := range dt.Rules {
+			for _, v := range r.Verified {
+				if v.RuntimeVia == "" {
+					continue
+				}
+				if seen[v.RuntimeVia] {
+					continue
+				}
+				seen[v.RuntimeVia] = true
+				names = append(names, v.RuntimeVia)
+			}
+		}
+	}
+	sortStrings(names)
+	return names
+}
+
+// sortStrings is a tiny wrapper to avoid importing sort just for one call.
+func sortStrings(xs []string) {
+	for i := 1; i < len(xs); i++ {
+		for j := i; j > 0 && xs[j-1] > xs[j]; j-- {
+			xs[j-1], xs[j] = xs[j], xs[j-1]
+		}
+	}
+}
+
+// ruleHasRuntimeVia reports whether any verified premise on r uses a
+// `:runtime-via <name>` annotation.
+func ruleHasRuntimeVia(r Rule) bool {
+	for _, v := range r.Verified {
+		if v.RuntimeVia != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func generateWrapper(b *strings.Builder, gt GeneratedType) {
 	goType := shenTypeToGo(gt.Rule.Premises[0].TypeName)
 	b.WriteString(fmt.Sprintf("type %s struct{ v %s }\n\n", gt.GoName, goType))
@@ -1700,8 +1799,18 @@ func generateConstrained(b *strings.Builder, gt GeneratedType, st *SymbolTable) 
 		varMap[p.VarName] = p.TypeName
 	}
 	b.WriteString(fmt.Sprintf("type %s struct{ v %s }\n\n", gt.GoName, goType))
-	b.WriteString(fmt.Sprintf("func New%s(x %s) (%s, error) {\n", gt.GoName, goType, gt.GoName))
+
+	hasRuntime := ruleHasRuntimeVia(gt.Rule)
+	if hasRuntime {
+		b.WriteString(fmt.Sprintf("func New%s(ctx context.Context, x %s) (%s, error) {\n", gt.GoName, goType, gt.GoName))
+	} else {
+		b.WriteString(fmt.Sprintf("func New%s(x %s) (%s, error) {\n", gt.GoName, goType, gt.GoName))
+	}
 	for _, v := range gt.Rule.Verified {
+		if v.RuntimeVia != "" {
+			emitRuntimeViaCheckGo(b, v, gt.Name, gt.GoName, []string{"x"})
+			continue
+		}
 		goExpr, errMsg := st.verifiedToGo(v, varMap)
 		safeMsg := strings.ReplaceAll(errMsg, "%", "%%")
 		safeMsg = strings.ReplaceAll(safeMsg, `"`, `\"`)
@@ -1709,6 +1818,23 @@ func generateConstrained(b *strings.Builder, gt GeneratedType, st *SymbolTable) 
 	}
 	b.WriteString(fmt.Sprintf("\treturn %s{v: x}, nil\n}\n\n", gt.GoName))
 	b.WriteString(fmt.Sprintf("func (t %s) Val() %s { return t.v }\n\n", gt.GoName, goType))
+}
+
+// emitRuntimeViaCheckGo emits the gate-site for a `:runtime-via <name>`
+// verified premise. The constructor calls the named checker with the
+// spec-side predicate name (the datatype block name) and the positional
+// args (camelCased variable names from the premise list). Any error
+// returned propagates verbatim; an `ok == false` outcome surfaces as
+// errRuntimeCheckRejected wrapped with the checker + predicate name so
+// the failure narrates which gate rejected what.
+func emitRuntimeViaCheckGo(b *strings.Builder, v VerifiedPremise, predicateName string, zeroType string, argNames []string) {
+	argsExpr := ""
+	for _, a := range argNames {
+		argsExpr += ", " + a
+	}
+	b.WriteString(fmt.Sprintf("\tok, err := %s(ctx, %q%s)\n", v.RuntimeVia, predicateName, argsExpr))
+	b.WriteString(fmt.Sprintf("\tif err != nil {\n\t\treturn %s{}, fmt.Errorf(\"%s rejected %s: %%w\", err)\n\t}\n", zeroType, v.RuntimeVia, predicateName))
+	b.WriteString(fmt.Sprintf("\tif !ok {\n\t\treturn %s{}, fmt.Errorf(\"%s rejected %s: %%w\", errRuntimeCheckRejected)\n\t}\n", zeroType, v.RuntimeVia, predicateName))
 }
 
 func generateComposite(b *strings.Builder, gt GeneratedType, st *SymbolTable) {
@@ -1734,17 +1860,28 @@ func generateComposite(b *strings.Builder, gt GeneratedType, st *SymbolTable) {
 func generateGuarded(b *strings.Builder, gt GeneratedType, st *SymbolTable) {
 	b.WriteString(fmt.Sprintf("type %s struct {\n", gt.GoName))
 	var params []string
+	var argNames []string
 	for _, p := range gt.Rule.Premises {
 		b.WriteString(fmt.Sprintf("\t%s %s\n", toCamelCase(p.VarName), shenTypeToGo(p.TypeName)))
 		params = append(params, fmt.Sprintf("%s %s", toCamelCase(p.VarName), shenTypeToGo(p.TypeName)))
+		argNames = append(argNames, toCamelCase(p.VarName))
 	}
 	b.WriteString("}\n\n")
 	varMap := make(map[string]string)
 	for _, p := range gt.Rule.Premises {
 		varMap[p.VarName] = p.TypeName
 	}
-	b.WriteString(fmt.Sprintf("func New%s(%s) (%s, error) {\n", gt.GoName, strings.Join(params, ", "), gt.GoName))
+	hasRuntime := ruleHasRuntimeVia(gt.Rule)
+	if hasRuntime {
+		b.WriteString(fmt.Sprintf("func New%s(ctx context.Context, %s) (%s, error) {\n", gt.GoName, strings.Join(params, ", "), gt.GoName))
+	} else {
+		b.WriteString(fmt.Sprintf("func New%s(%s) (%s, error) {\n", gt.GoName, strings.Join(params, ", "), gt.GoName))
+	}
 	for _, v := range gt.Rule.Verified {
+		if v.RuntimeVia != "" {
+			emitRuntimeViaCheckGo(b, v, gt.Name, gt.GoName, argNames)
+			continue
+		}
 		goExpr, errMsg := st.verifiedToGo(v, varMap)
 		safeMsg := strings.ReplaceAll(errMsg, "%", "%%")
 		safeMsg = strings.ReplaceAll(safeMsg, `"`, `\"`)
