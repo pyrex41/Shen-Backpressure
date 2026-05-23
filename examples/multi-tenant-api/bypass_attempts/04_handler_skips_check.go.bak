@@ -1,0 +1,78 @@
+// Attempt #4: a handler that "forgets" to call verified.CheckTenantAccess
+// before reading resources.
+//
+// Outcome: this file compiles fine — the Go type system doesn't
+// require handlers to call any particular function. The bypass here is
+// *semantic*: the handler simply reads resources directly from the
+// DB using only the user-id (no tenant-membership check).
+//
+// What catches it:
+//
+//   1. Code review: the function signature has no `verified.TenantAccess`
+//      parameter, so the "must walk the proof chain" discipline is
+//      lost. Spot it during review.
+//
+//   2. The local audit script bin/shenguard-audit.sh enforces a
+//      grep-based discipline: the only files allowed to import
+//      `shenguard.NewTenantAccess` / `shenguard.NewResourceAccess`
+//      are inside `internal/verified/` (the Check* wrappers). A
+//      handler that calls `shenguard.NewTenantAccess(..., true)`
+//      directly would fail this check.
+//
+//   3. The fact that this attempt produces a handler that LITERALLY
+//      DOESN'T USE the proof chain is itself the audit signal — the
+//      structural enforcement only kicks in for code that opts into
+//      the chain. The "Check*-only" discipline is the social half of
+//      the contract.
+//
+// In other words: shenguard guarantees that IF a function takes a
+// verified.TenantAccess parameter, the caller had to construct one
+// (and bind to a Check* wrapper to do so). It cannot prevent a
+// developer from writing a function that ignores the chain entirely.
+// That's a code-review concern, made enforceable by the grep gate.
+package bypass_attempts_demo
+
+import (
+	"database/sql"
+	"encoding/json"
+	"net/http"
+)
+
+// HandleListResourcesUnverified reads resources without going through
+// the proof chain. Compiles fine; would be rejected at code review.
+//
+// The signature deliberately takes no verified.TenantAccess: the
+// whole point of this bypass is to demonstrate that omitting the
+// type forces the developer to skip the gate.
+func HandleListResourcesUnverified(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// In a real handler this would extract userID from a JWT,
+		// then fetch resources for whatever tenant the URL names —
+		// without ever asking whether the user is a member.
+		userID := r.URL.Query().Get("user")
+		tenantID := r.URL.Query().Get("tenant")
+
+		rows, err := db.Query(
+			"SELECT id, title FROM resources WHERE tenant_id = ?",
+			tenantID,
+		)
+		if err != nil {
+			http.Error(w, "query failed", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		var resources []map[string]string
+		for rows.Next() {
+			var id, title string
+			rows.Scan(&id, &title)
+			resources = append(resources, map[string]string{
+				"id":    id,
+				"title": title,
+				// Note: nothing checked that `userID` is a member of `tenantID`.
+				"leaked_to": userID,
+			})
+		}
+		_ = json.NewEncoder(w).Encode(resources)
+	}
+}

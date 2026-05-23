@@ -1,0 +1,661 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-05-23T04:35:14Z",
+  "spec": {
+    "files": [
+      {
+        "path": "specs/core.shen",
+        "sha256": "5cd6e689dff7fa71d761537dcc8eaafa8243bd7240dd07cff1d5883ac1164141"
+      }
+    ],
+    "rule_count": 15
+  },
+  "impl": {
+    "git_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+    "git_dirty": true,
+    "target_languages": [
+      "go"
+    ]
+  },
+  "tools": {
+    "sb_version": "0.3.0",
+    "shen_derive_version": "0.3.0",
+    "shengen_version": "",
+    "shen_runtime": null,
+    "shen_runtime_available": false
+  },
+  "rules": [
+    {
+      "name": "authenticated-user",
+      "kind": "guarded",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype authenticated-user\n  Jwt : verified-jwt;\n  User : user-id;\n  (= User (head (head Jwt))) : verified;\n  ====================\n  [Jwt User] : authenticated-user;)\n",
+      "human_description": "A authenticated-user is a multi-field structure whose constructor enforces 1 cross-field invariant(s).",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "authenticated-user.field-jwt",
+          "expression": "Jwt : verified-jwt",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Jwt is typed verified-jwt; values of that type can only be constructed via shengen's guarded constructor, which enforces all of verified-jwt's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:135"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "authenticated-user.field-user",
+          "expression": "User : user-id",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "User is typed user-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of user-id's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:135"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "authenticated-user.verified-user-head-head-jwt",
+          "expression": "(= User (head (head Jwt))) : verified",
+          "discharge": "static",
+          "discharge_basis": "guard-constructor-validates",
+          "rationale": "shengen's generated constructor for authenticated-user rejects inputs that do not satisfy (= User (head (head Jwt))), so this premise holds for any value of type authenticated-user reachable in the impl.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:135"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "counter_examples": []
+    },
+    {
+      "name": "human-principal",
+      "kind": "wrapper",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype human-principal\n  Auth : authenticated-user;\n  ====================\n  Auth : authenticated-principal;)\n",
+      "human_description": "A human-principal value is a authenticated-user with no further runtime constraints; the type exists to keep raw authenticated-users from being mistaken for one.",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "human-principal.field-auth",
+          "expression": "Auth : authenticated-user",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Auth is typed authenticated-user; values of that type can only be constructed via shengen's guarded constructor, which enforces all of authenticated-user's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:190"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "counter_examples": []
+    },
+    {
+      "name": "jwt-audience",
+      "kind": "constrained",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype jwt-audience\n  X : string;\n  (not (= X \"\")) : verified;\n  ====================\n  X : jwt-audience;)\n",
+      "human_description": "A jwt-audience value is a string that satisfies 1 additional constraint(s) checked at construction.",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "jwt-audience.field-x",
+          "expression": "X : string",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "X is typed string; the target language's type system rejects non-string values at construction.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:69"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "jwt-audience.verified-not-x",
+          "expression": "(not (= X \"\")) : verified",
+          "discharge": "static",
+          "discharge_basis": "guard-constructor-validates",
+          "rationale": "shengen's generated constructor for jwt-audience rejects inputs that do not satisfy (not (= X \"\")), so this premise holds for any value of type jwt-audience reachable in the impl.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:69"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "counter_examples": []
+    },
+    {
+      "name": "jwt-issuer",
+      "kind": "constrained",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype jwt-issuer\n  X : string;\n  (not (= X \"\")) : verified;\n  ====================\n  X : jwt-issuer;)\n",
+      "human_description": "A jwt-issuer value is a string that satisfies 1 additional constraint(s) checked at construction.",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "jwt-issuer.field-x",
+          "expression": "X : string",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "X is typed string; the target language's type system rejects non-string values at construction.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:55"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "jwt-issuer.verified-not-x",
+          "expression": "(not (= X \"\")) : verified",
+          "discharge": "static",
+          "discharge_basis": "guard-constructor-validates",
+          "rationale": "shengen's generated constructor for jwt-issuer rejects inputs that do not satisfy (not (= X \"\")), so this premise holds for any value of type jwt-issuer reachable in the impl.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:55"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "counter_examples": []
+    },
+    {
+      "name": "parsed-claims",
+      "kind": "guarded",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype parsed-claims\n  Sub : user-id;\n  Exp : number;\n  Iss : jwt-issuer;\n  Aud : jwt-audience;\n  (\u003e Exp 0) : verified;\n  ====================\n  [Sub Exp Iss Aud] : parsed-claims;)\n",
+      "human_description": "A parsed-claims is a multi-field structure whose constructor enforces 1 cross-field invariant(s).",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "parsed-claims.field-sub",
+          "expression": "Sub : user-id",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Sub is typed user-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of user-id's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:83"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "parsed-claims.field-exp",
+          "expression": "Exp : number",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Exp is typed number; the target language's type system rejects non-number values at construction.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:83"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "parsed-claims.field-iss",
+          "expression": "Iss : jwt-issuer",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Iss is typed jwt-issuer; values of that type can only be constructed via shengen's guarded constructor, which enforces all of jwt-issuer's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:83"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "parsed-claims.field-aud",
+          "expression": "Aud : jwt-audience",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Aud is typed jwt-audience; values of that type can only be constructed via shengen's guarded constructor, which enforces all of jwt-audience's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:83"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "parsed-claims.verified-exp-0",
+          "expression": "(\u003e Exp 0) : verified",
+          "discharge": "static",
+          "discharge_basis": "guard-constructor-validates",
+          "rationale": "shengen's generated constructor for parsed-claims rejects inputs that do not satisfy (\u003e Exp 0), so this premise holds for any value of type parsed-claims reachable in the impl.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:83"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "counter_examples": []
+    },
+    {
+      "name": "resource-access",
+      "kind": "guarded",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype resource-access\n  Access : tenant-access;\n  Resource : resource-id;\n  IsOwned : boolean;\n  (= IsOwned true) : verified;\n  ====================\n  [Access Resource IsOwned] : resource-access;)\n",
+      "human_description": "A resource-access is a multi-field structure whose constructor enforces 1 cross-field invariant(s).",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "resource-access.field-access",
+          "expression": "Access : tenant-access",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Access is typed tenant-access; values of that type can only be constructed via shengen's guarded constructor, which enforces all of tenant-access's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:250"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "resource-access.field-resource",
+          "expression": "Resource : resource-id",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Resource is typed resource-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of resource-id's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:250"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "resource-access.field-isowned",
+          "expression": "IsOwned : boolean",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "IsOwned is typed boolean; the target language's type system rejects non-boolean values at construction.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:250"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "resource-access.verified-isowned-true",
+          "expression": "(= IsOwned true) : verified",
+          "discharge": "static",
+          "discharge_basis": "guard-constructor-validates",
+          "rationale": "shengen's generated constructor for resource-access rejects inputs that do not satisfy (= IsOwned true), so this premise holds for any value of type resource-access reachable in the impl.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:250"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "counter_examples": []
+    },
+    {
+      "name": "resource-id",
+      "kind": "wrapper",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype resource-id\n  X : string;\n  ====================\n  X : resource-id;)\n",
+      "human_description": "A resource-id value is a string with no further runtime constraints; the type exists to keep raw strings from being mistaken for one.",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "resource-id.field-x",
+          "expression": "X : string",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "X is typed string; the target language's type system rejects non-string values at construction.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:44"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "counter_examples": []
+    },
+    {
+      "name": "same-user?",
+      "kind": "define",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(define same-user?\n  {user-id --\u003e user-id --\u003e boolean}\n  A B -\u003e ...)",
+      "human_description": "A pure function same-user? : user-id --\u003e user-id --\u003e boolean. The Shen spec is the oracle; the impl is asserted to match it on every sampled input.",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "same-user.oracle-spec-equiv",
+          "expression": "spec(same-user?) ≡ impl(SameUser) on sampled inputs",
+          "discharge": "runtime-sample",
+          "discharge_basis": "shen-derive-sampled",
+          "rationale": "shen-derive evaluated the spec on 9 sampled cases (deterministic-default) and emitted a Go test asserting impl returns the same value on each.",
+          "samples_passed": 9,
+          "samples_failed": 0,
+          "sample_seed": "deterministic-default"
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "counter_examples": []
+    },
+    {
+      "name": "service-credential",
+      "kind": "guarded",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype service-credential\n  Service : service-id;\n  Secret : string;\n  (not (= Secret \"\")) : verified;\n  ====================\n  [Service Secret] : service-credential;)\n",
+      "human_description": "A service-credential is a multi-field structure whose constructor enforces 1 cross-field invariant(s).",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "service-credential.field-service",
+          "expression": "Service : service-id",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Service is typed service-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of service-id's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:168"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "service-credential.field-secret",
+          "expression": "Secret : string",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Secret is typed string; the target language's type system rejects non-string values at construction.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:168"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "service-credential.verified-not-secret",
+          "expression": "(not (= Secret \"\")) : verified",
+          "discharge": "static",
+          "discharge_basis": "guard-constructor-validates",
+          "rationale": "shengen's generated constructor for service-credential rejects inputs that do not satisfy (not (= Secret \"\")), so this premise holds for any value of type service-credential reachable in the impl.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:168"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "counter_examples": []
+    },
+    {
+      "name": "service-id",
+      "kind": "wrapper",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype service-id\n  X : string;\n  ====================\n  X : service-id;)\n",
+      "human_description": "A service-id value is a string with no further runtime constraints; the type exists to keep raw strings from being mistaken for one.",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "service-id.field-x",
+          "expression": "X : string",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "X is typed string; the target language's type system rejects non-string values at construction.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:157"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "counter_examples": []
+    },
+    {
+      "name": "service-principal",
+      "kind": "wrapper",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype service-principal\n  Cred : service-credential;\n  ====================\n  Cred : authenticated-principal;)\n",
+      "human_description": "A service-principal value is a service-credential with no further runtime constraints; the type exists to keep raw service-credentials from being mistaken for one.",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "service-principal.field-cred",
+          "expression": "Cred : service-credential",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Cred is typed service-credential; values of that type can only be constructed via shengen's guarded constructor, which enforces all of service-credential's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:207"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "counter_examples": []
+    },
+    {
+      "name": "tenant-access",
+      "kind": "guarded",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype tenant-access\n  Principal : authenticated-principal;\n  Tenant : tenant-id;\n  IsMember : boolean;\n  (= IsMember true) : verified;\n  ====================\n  [Principal Tenant IsMember] : tenant-access;)\n",
+      "human_description": "A tenant-access is a multi-field structure whose constructor enforces 1 cross-field invariant(s).",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "tenant-access.field-principal",
+          "expression": "Principal : authenticated-principal",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Principal is typed authenticated-principal; values of that type can only be constructed via shengen's guarded constructor, which enforces all of authenticated-principal's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:224"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "tenant-access.field-tenant",
+          "expression": "Tenant : tenant-id",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Tenant is typed tenant-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of tenant-id's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:224"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "tenant-access.field-ismember",
+          "expression": "IsMember : boolean",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "IsMember is typed boolean; the target language's type system rejects non-boolean values at construction.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:224"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "tenant-access.verified-ismember-true",
+          "expression": "(= IsMember true) : verified",
+          "discharge": "static",
+          "discharge_basis": "guard-constructor-validates",
+          "rationale": "shengen's generated constructor for tenant-access rejects inputs that do not satisfy (= IsMember true), so this premise holds for any value of type tenant-access reachable in the impl.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:224"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "counter_examples": []
+    },
+    {
+      "name": "tenant-id",
+      "kind": "wrapper",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype tenant-id\n  X : string;\n  ====================\n  X : tenant-id;)\n",
+      "human_description": "A tenant-id value is a string with no further runtime constraints; the type exists to keep raw strings from being mistaken for one.",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "tenant-id.field-x",
+          "expression": "X : string",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "X is typed string; the target language's type system rejects non-string values at construction.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:33"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "counter_examples": []
+    },
+    {
+      "name": "user-id",
+      "kind": "wrapper",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype user-id\n  X : string;\n  ====================\n  X : user-id;)\n",
+      "human_description": "A user-id value is a string with no further runtime constraints; the type exists to keep raw strings from being mistaken for one.",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "user-id.field-x",
+          "expression": "X : string",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "X is typed string; the target language's type system rejects non-string values at construction.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:22"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "counter_examples": []
+    },
+    {
+      "name": "verified-jwt",
+      "kind": "guarded",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(datatype verified-jwt\n  Claims : parsed-claims;\n  Sig : string;\n  (not (= Sig \"\")) : verified;\n  ====================\n  [Claims Sig] : verified-jwt;)\n",
+      "human_description": "A verified-jwt is a multi-field structure whose constructor enforces 1 cross-field invariant(s).",
+      "human_description_source": "auto-generated",
+      "premises": [
+        {
+          "id": "verified-jwt.field-claims",
+          "expression": "Claims : parsed-claims",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Claims is typed parsed-claims; values of that type can only be constructed via shengen's guarded constructor, which enforces all of parsed-claims's premises transitively.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:113"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "verified-jwt.field-sig",
+          "expression": "Sig : string",
+          "discharge": "static",
+          "discharge_basis": "guard-type-at-boundary",
+          "rationale": "Sig is typed string; the target language's type system rejects non-string values at construction.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:113"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "verified-jwt.verified-not-sig",
+          "expression": "(not (= Sig \"\")) : verified",
+          "discharge": "static",
+          "discharge_basis": "guard-constructor-validates",
+          "rationale": "shengen's generated constructor for verified-jwt rejects inputs that do not satisfy (not (= Sig \"\")), so this premise holds for any value of type verified-jwt reachable in the impl.",
+          "code_references": [
+            "internal/shenguard/guards_gen.go:113"
+          ],
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "counter_examples": []
+    }
+  ],
+  "summary": {
+    "rule_count": 15,
+    "rules_discharged": 15,
+    "rules_violated": 0,
+    "rules_unproven": 0,
+    "premises_total": 33,
+    "premises_static": 32,
+    "premises_runtime_sampled": 1,
+    "premises_unproven": 0
+  },
+  "signature": null
+}

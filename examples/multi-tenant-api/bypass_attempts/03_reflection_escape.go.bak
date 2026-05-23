@@ -1,0 +1,62 @@
+// Attempt #3: forge a TenantAccess via unsafe reflection.
+//
+// Outcome: the Go compiler accepts this, and at runtime the reflection
+// path SUCCEEDS — `unsafe.Pointer` plus `reflect.NewAt` can write to
+// any field regardless of export status. This is the honest limit of
+// the structural guarantee in Go: the type system stops *normal* code
+// from forging a guard value, but a determined attacker with the
+// ability to use `unsafe` can bypass field visibility.
+//
+// Why we include this anyway:
+//
+//   1. The Go community treats `unsafe.Pointer` access to other
+//      packages' unexported fields as a code-review red flag of the
+//      same severity as `eval()` in scripting languages. A reviewer
+//      who finds this idiom in a PR rejects it on sight.
+//
+//   2. The bypass is loud and grep-able. `grep -rn "unsafe.Pointer"
+//      examples/multi-tenant-api/internal/` returns nothing in the
+//      committed code; if it ever returns anything, the auditor knows
+//      where to look.
+//
+//   3. The Go runtime can be built with -gcflags "-d=checkptr" /
+//      -race / -tags purego variants that catch some unsafe misuse.
+//
+//   4. The companion guarantee — that NO ONE who doesn't already have
+//      `unsafe.Pointer` privileges can forge a guard — is the
+//      structural part of the trust model. It's described as
+//      "structural" in docs/TRUST-MODEL.md, not "impossible-in-Go."
+//
+// bin/show-bypass-attempts.sh runs this file and reports that it
+// *compiles and runs* but generates an "unsafe.Pointer" line that the
+// audit grep would flag.
+package bypass_attempts_demo
+
+import (
+	"reflect"
+	"unsafe"
+
+	"multi-tenant-api/internal/shenguard"
+)
+
+// ForgeViaReflect builds a TenantAccess by writing directly to the
+// unexported fields of an existing zero-valued instance via unsafe
+// pointers. This is the literal "type system bypass" — and it is
+// also the kind of code that any reviewer would reject on sight.
+func ForgeViaReflect() shenguard.TenantAccess {
+	var ta shenguard.TenantAccess
+	v := reflect.ValueOf(&ta).Elem()
+
+	// Set isMember = true via unsafe pointer arithmetic. Each line
+	// crosses Go's normal visibility boundary on purpose; in a real
+	// code review the `unsafe.Pointer` call below is the obvious
+	// rejection signal.
+	isMemberField := v.FieldByName("isMember")
+	*(*bool)(unsafe.Pointer(isMemberField.UnsafeAddr())) = true
+
+	tenantField := v.FieldByName("tenant")
+	tenantPtr := (*shenguard.TenantId)(unsafe.Pointer(tenantField.UnsafeAddr()))
+	*tenantPtr = shenguard.NewTenantId("t-acme")
+
+	return ta
+}
