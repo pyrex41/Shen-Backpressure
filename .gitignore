@@ -30,6 +30,14 @@ demo/*/plans/backpressure.log
 # accumulates time-stamped copies. Both are per-clone state, not source.
 .sb/
 
+# Allow-list: committed audit artifacts under each example's transcript/
+# directory. These are static snapshots a reader can inspect on GitHub
+# without cloning + installing Shen. Regenerate with:
+#   (cd examples/<name> && sb gates && cp .sb/discharge_report.json transcript/
+#    && sb audit-report > transcript/audit_report.md)
+!examples/*/transcript/discharge_report.json
+!examples/*/transcript/audit_report.md
+
 # Repomix output
 repomix-output.xml
 
