@@ -105,6 +105,36 @@ npm install @mariozechner/pi-ai
 
 Then use `streamGenerate()` in the frontend for token-by-token streaming with 18+ LLM providers.
 
+## `:runtime-via` prototype (W3.2)
+
+One verified premise on `query-text` is discharged at runtime by the
+live Shen runtime hosted in the SBCL backend rather than by an
+inlined predicate. The annotation:
+
+```shen
+(datatype query-text
+  X : string;
+  (> (length X) 0) : verified; \* :runtime-via shenEval *\
+  ==============
+  X : query-text;)
+```
+
+Shen treats the trailing `\* ... *\` block as a comment so `tc+`
+ignores it. shengen-ts reads the marker and emits a constructor that
+imports `shenEval` from `runtime/runtime_checkers.ts` and calls it
+inside an async `createOrThrow(ctx, x)`. The constructor cannot
+compile without the named function (compile-time witness), and there
+is no path to a `QueryText` value that skips the runtime call.
+
+The checker `POST`s to the backend's `/api/eval-predicate`, which
+dispatches via an allowlist (`*runtime-predicates*` in
+`backend/shen-interop.lisp`). The default `query-text` predicate
+delegates to the live Shen evaluator when available and falls back
+to CL otherwise.
+
+See `docs/RUNTIME-VIA.md` for the full design, trust-model
+implications, and a manual smoke procedure.
+
 ## Key Invariant
 
 The Shen spec enforces that AI summaries must be grounded in real sources:

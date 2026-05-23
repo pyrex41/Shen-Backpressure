@@ -1,6 +1,10 @@
 package main
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -656,6 +660,164 @@ func TestNegateGoExprPeephole(t *testing.T) {
 }
 
 // ============================================================================
+// :runtime-via annotation tests (W3.2)
+// ============================================================================
+
+// TestParseRuntimeViaAnnotation verifies that the parser recognises the
+// `: verified via <fname>` suffix and stores the checker name on the
+// VerifiedPremise. Specs without the annotation must continue to parse
+// unchanged (RuntimeVia stays "").
+func TestParseRuntimeViaAnnotation(t *testing.T) {
+	spec := `(datatype query-text
+  X : string;
+  (> (length X) 0) : verified; \* :runtime-via shenEval *\
+  ==============
+  X : query-text;)`
+	types, err := parseFile_string(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(types) != 1 {
+		t.Fatalf("expected 1 datatype, got %d", len(types))
+	}
+	r := types[0].Rules[0]
+	if len(r.Verified) != 1 {
+		t.Fatalf("expected 1 verified premise, got %d", len(r.Verified))
+	}
+	if r.Verified[0].RuntimeVia != "shenEval" {
+		t.Errorf("expected RuntimeVia=shenEval, got %q", r.Verified[0].RuntimeVia)
+	}
+	if r.Verified[0].Raw != "(> (length X) 0)" {
+		t.Errorf("expected Raw to retain the predicate; got %q", r.Verified[0].Raw)
+	}
+}
+
+// TestParseExistingVerifiedUnchanged is the back-compat guard. Specs
+// without `via` must still parse as plain verified premises with
+// RuntimeVia == "".
+func TestParseExistingVerifiedUnchanged(t *testing.T) {
+	spec := `(datatype amount
+  X : number;
+  (>= X 0) : verified;
+  ====================
+  X : amount;)`
+	types, err := parseFile_string(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := types[0].Rules[0]
+	if r.Verified[0].RuntimeVia != "" {
+		t.Errorf("expected RuntimeVia empty for plain `: verified`, got %q", r.Verified[0].RuntimeVia)
+	}
+}
+
+// TestGenerateGoRuntimeViaConstructor checks the constructor emission
+// for a constrained type whose verified premise is `:runtime-via
+// <fname>`. The generated constructor must (a) take ctx as its first
+// parameter, (b) call the named checker with the spec's datatype name +
+// argument list, (c) NOT inline the original predicate, and (d) the
+// package must declare a compile-time witness `var _ runtimeChecker =
+// <fname>` so the build fails if <fname> is absent or wrong-shaped.
+func TestGenerateGoRuntimeViaConstructor(t *testing.T) {
+	spec := `(datatype query-text
+  X : string;
+  (> (length X) 0) : verified; \* :runtime-via shenEval *\
+  ==============
+  X : query-text;)`
+	types, _ := parseFile_string(spec)
+	st := newSymbolTable()
+	st.Build(types)
+	out := generateGo(types, st, "test", "test.shen")
+
+	// (a) ctx parameter
+	if !strings.Contains(out, "func NewQueryText(ctx context.Context, x string) (QueryText, error)") {
+		t.Errorf("expected ctx-taking constructor signature.\nFull output:\n%s", out)
+	}
+	// (b) call into checker with predicate name + args
+	if !strings.Contains(out, `shenEval(ctx, "query-text", x)`) {
+		t.Errorf("expected checker call with predicate name + args.\nFull output:\n%s", out)
+	}
+	// (c) predicate not inlined
+	if strings.Contains(out, "len(x) > 0") || strings.Contains(out, "x.length") {
+		t.Errorf("predicate should NOT be inlined when :runtime-via is set.\nFull output:\n%s", out)
+	}
+	// (d) compile-time witness
+	if !strings.Contains(out, "var _ runtimeChecker = shenEval") {
+		t.Errorf("expected compile-time witness `var _ runtimeChecker = shenEval`.\nFull output:\n%s", out)
+	}
+	// runtimeChecker type alias is emitted exactly once.
+	if !strings.Contains(out, "type runtimeChecker func(ctx context.Context, predicate string, args ...any) (bool, error)") {
+		t.Errorf("expected runtimeChecker type alias.\nFull output:\n%s", out)
+	}
+	if !strings.Contains(out, `"context"`) {
+		t.Errorf("expected context import.\nFull output:\n%s", out)
+	}
+	if !strings.Contains(out, `"errors"`) {
+		t.Errorf("expected errors import.\nFull output:\n%s", out)
+	}
+}
+
+// TestGenerateGoRuntimeViaGuarded checks the multi-field guarded path:
+// runtime-via on a composite type should pass all camelCased field
+// names as positional args.
+func TestGenerateGoRuntimeViaGuarded(t *testing.T) {
+	spec := `(datatype tag-rule
+  Token : string;
+  UserId : string;
+  (= Token UserId) : verified; \* :runtime-via policyCheck *\
+  ===========================================
+  [Token UserId] : tag-rule;)`
+	types, _ := parseFile_string(spec)
+	st := newSymbolTable()
+	st.Build(types)
+	out := generateGo(types, st, "test", "test.shen")
+
+	if !strings.Contains(out, "func NewTagRule(ctx context.Context, token string, userId string) (TagRule, error)") {
+		t.Errorf("expected ctx-taking guarded constructor with all fields.\nFull output:\n%s", out)
+	}
+	if !strings.Contains(out, `policyCheck(ctx, "tag-rule", token, userId)`) {
+		t.Errorf("expected checker call with all field args.\nFull output:\n%s", out)
+	}
+}
+
+// TestGenerateGoRuntimeViaCompilePass verifies that the emitted code
+// compiles when the named runtime checker IS defined in the package,
+// and FAILS to compile when it isn't. This is the test the plan
+// requires: the synthetic compile-pass must fail when the named
+// function is absent.
+func TestGenerateGoRuntimeViaCompilePass(t *testing.T) {
+	spec := `(datatype query-text
+  X : string;
+  (> (length X) 0) : verified; \* :runtime-via shenEval *\
+  ==============
+  X : query-text;)`
+	types, _ := parseFile_string(spec)
+	st := newSymbolTable()
+	st.Build(types)
+	out := generateGo(types, st, "guards", "test.shen")
+
+	// Build a temp package with the generated code + a matching
+	// shenEval stub, then run `go build`.
+	if err := buildGoPackage(t, out, "guards", `package guards
+
+import "context"
+
+func shenEval(ctx context.Context, predicate string, args ...any) (bool, error) {
+	return true, nil
+}
+`); err != nil {
+		t.Fatalf("expected package with shenEval stub to compile; got: %v", err)
+	}
+
+	// Same generated code without the shenEval stub must FAIL to
+	// compile — the compile-time witness `var _ runtimeChecker =
+	// shenEval` is undefined.
+	if err := buildGoPackage(t, out, "guards", ""); err == nil {
+		t.Fatalf("expected build to FAIL when shenEval is missing; got nil error.\nGenerated code:\n%s", out)
+	}
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -686,4 +848,37 @@ func parseSpec_string(spec string) ([]Datatype, []Define, error) {
 		}
 	}
 	return types, defines, nil
+}
+
+// buildGoPackage writes guardsSource (the shengen output) plus
+// optional extraSource into a temp module and runs `go build ./...`.
+// Returns the build error if any. Used by TestGenerateGoRuntimeViaCompilePass
+// to verify the compile-time witness fires when the named checker is
+// absent.
+func buildGoPackage(t *testing.T, guardsSource, pkgName, extraSource string) error {
+	t.Helper()
+	dir := t.TempDir()
+	pkgDir := filepath.Join(dir, pkgName)
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		return err
+	}
+	gomod := fmt.Sprintf("module guardstest\n\ngo 1.21\n")
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "guards_gen.go"), []byte(guardsSource), 0o644); err != nil {
+		return err
+	}
+	if extraSource != "" {
+		if err := os.WriteFile(filepath.Join(pkgDir, "extra.go"), []byte(extraSource), 0o644); err != nil {
+			return err
+		}
+	}
+	cmd := exec.Command("go", "build", "./...")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v: %s", err, out)
+	}
+	return nil
 }

@@ -89,6 +89,11 @@
   ;; Verify specs (Gate 4)
   (verify-shen-specs)
 
+  ;; Register :runtime-via predicate dispatch table (W3.2 — `:runtime-via`
+  ;; annotations in specs/core.shen call back through /api/eval-predicate
+  ;; into this table).
+  (register-default-runtime-predicates)
+
   ;; Start HTTP server
   (start-server :port *port* :root cl-user::*project-root*)
 
