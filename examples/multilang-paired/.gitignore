@@ -1,0 +1,9 @@
+# Build artifacts produced by bin/parity-check.sh and per-language
+# build commands. Not committed because they're cheap to regenerate
+# and they contain machine-specific paths.
+.bin/
+go/bin/
+node_modules/
+target/
+*.pyc
+__pycache__/
