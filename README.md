@@ -334,6 +334,26 @@ the committed test. The TypeScript port at `cmd/shen-derive-ts/` is
 self-hosted and supports async crypto derivation, aliases, externs,
 and multi-spec verify.
 
+### One spec, four languages — runnable
+
+The same `.shen` spec can drive Go, TypeScript, Python, and Rust
+codegen in parallel. [`examples/multilang-paired/`](examples/multilang-paired/)
+is the end-to-end demo: one `specs/core.shen`, four CLIs, a shared
+20-row fixture table, and a parity check that exits non-zero on any
+divergence between the four implementations.
+
+| | **shen-guard (multi-language)** |
+|---|---|
+| Spec input | `examples/multilang-paired/specs/core.shen` (one file) |
+| Emitter outputs | `go/multilang_paired/guards_gen.go`, `ts/guards_gen.ts`, `py/guards_gen.py`, `rs/guards_gen.rs` (four committed files, each drift-checked by its own `tcb-audit-<lang>` gate) |
+| Behavioural contract | `bin/parity-check.sh` runs each language's CLI against `fixture-inputs.jsonl` and pairwise-diffs the JSON output |
+| Structural contract | `cmd/shengen/parity_test.go` runs all four emitters as subprocesses and asserts each produces a parseable file with the expected datatype identifiers |
+
+The demo answers the HN "why not just use Rust newtypes / Liquid
+Haskell / Lean and skip this?" question with a runnable artifact: one
+spec is the shared source for systems that already span multiple
+languages, and the build catches drift on every leg.
+
 ## Further Reading
 
 - **[Don't Waste Your Backpressure](https://banay.me/dont-waste-your-backpressure/)** — The principle behind this project. AI agents that work autonomously need automated feedback on quality and correctness. Without capturing backpressure metrics, you can't delegate longer-horizon tasks with confidence.
