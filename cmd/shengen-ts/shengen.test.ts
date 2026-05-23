@@ -353,6 +353,117 @@ test("generateTs: positive (= X \"\") still emits if (!(x === \"\"))", () => {
   );
 });
 
+// ============================================================================
+// :runtime-via annotation tests (W3.2)
+// ============================================================================
+
+test("parser: `: verified via <fname>` captures the checker name", () => {
+  const spec = `(datatype query-text
+  X : string;
+  (> (length X) 0) : verified via shenEval;
+  ==============
+  X : query-text;)`;
+  const types = parseFileString(spec);
+  const r = types[0].rules[0];
+  assert.equal(r.verified.length, 1);
+  assert.equal(r.verified[0].runtimeVia, "shenEval");
+  assert.equal(r.verified[0].raw, "(> (length X) 0)");
+});
+
+test("parser: plain `: verified` leaves runtimeVia undefined", () => {
+  const spec = `(datatype amount
+  X : number;
+  (>= X 0) : verified;
+  ====================
+  X : amount;)`;
+  const types = parseFileString(spec);
+  assert.equal(types[0].rules[0].verified[0].runtimeVia, undefined);
+});
+
+test("generateTs: :runtime-via emits async constructor + ctx param + checker call", () => {
+  const spec = `(datatype query-text
+  X : string;
+  (> (length X) 0) : verified via shenEval;
+  ==============
+  X : query-text;)`;
+  const types = parseFileString(spec);
+  const st = new SymbolTable();
+  st.build(types);
+  const out = generateTs(types, st, "test.shen");
+
+  // Constructor is async + takes ctx.
+  assert.ok(
+    out.includes("static async createOrThrow(ctx: RuntimeCheckCtx, x: string): Promise<QueryText>"),
+    `expected async ctx-taking constructor:\n${out}`
+  );
+  // The checker is called with the spec-side predicate name + args.
+  assert.ok(
+    out.includes(`await shenEval(ctx, "query-text", [x])`),
+    `expected checker call with predicate name + args:\n${out}`
+  );
+  // The original predicate must NOT be inlined.
+  assert.ok(
+    !out.includes("x.length > 0"),
+    `predicate must not be inlined when :runtime-via is set:\n${out}`
+  );
+  // Compile-time witness preamble.
+  assert.ok(
+    out.includes("export type RuntimeChecker"),
+    `expected RuntimeChecker type alias:\n${out}`
+  );
+  assert.ok(
+    out.includes("const _runtimeChecker_shenEval: RuntimeChecker"),
+    `expected witness declaration:\n${out}`
+  );
+  assert.ok(
+    out.includes(`import { shenEval as _runtimeCheckerWitness_shenEval } from "./runtime_checkers.js"`),
+    `expected import-by-name from sibling runtime_checkers module:\n${out}`
+  );
+});
+
+test("generateTs: :runtime-via on guarded composite passes all field args", () => {
+  const spec = `(datatype tag-rule
+  Token : string;
+  UserId : string;
+  (= Token UserId) : verified via policyCheck;
+  ===========================================
+  [Token UserId] : tag-rule;)`;
+  const types = parseFileString(spec);
+  const st = new SymbolTable();
+  st.build(types);
+  const out = generateTs(types, st, "test.shen");
+
+  assert.ok(
+    out.includes("static async createOrThrow(ctx: RuntimeCheckCtx, token: string, userId: string): Promise<TagRule>"),
+    `expected async ctx-taking guarded constructor:\n${out}`
+  );
+  assert.ok(
+    out.includes(`await policyCheck(ctx, "tag-rule", [token, userId])`),
+    `expected checker call with all field args:\n${out}`
+  );
+});
+
+test("generateTs: specs without :runtime-via emit no RuntimeChecker preamble", () => {
+  const spec = `(datatype amount
+  X : number;
+  (>= X 0) : verified;
+  ====================
+  X : amount;)`;
+  const types = parseFileString(spec);
+  const st = new SymbolTable();
+  st.build(types);
+  const out = generateTs(types, st, "test.shen");
+
+  assert.ok(
+    !out.includes("RuntimeChecker"),
+    `runtime-via preamble must not appear when no spec uses it:\n${out}`
+  );
+  assert.ok(
+    !out.includes("RuntimeCheckCtx"),
+    `runtime-via context type must not appear when no spec uses it:\n${out}`
+  );
+});
+
 test("negateTsExpr: strips redundant outer negation, preserves non-redundant", () => {
   assert.equal(negateTsExpr('!(x === "")'), '(x === "")');
   assert.equal(negateTsExpr("!(a === b)"), "(a === b)");
