@@ -182,6 +182,60 @@ PASS [tcb-audit] 18ms
 5/5 gates passed
 ```
 
+## Discharge Report
+
+Gate output is the green-bar TL;DR. The audit-grade artifact lives at `.sb/discharge_report.json`, a v1-locked JSON schema that records — for each spec rule and each of its premises — exactly *how* the premise was discharged. `sb audit-report` renders the JSON as a self-contained Markdown document a reviewer can open cold.
+
+This example's spec uses only structural datatypes and predicates (`(not (= X ""))`, `(> Exp Now)`, `(= IsMember true)`, etc.) — there are no `(define …)` blocks asserting a function ≡ a Go implementation. Every premise is therefore discharged **statically** by the generated guard constructors. To make the *richer* artifact visible (with the runtime-sampled and oracle-equivalence cases too), the sibling [`examples/payment/`](../payment/) example ships a committed transcript alongside its `(define processable …)` spec; the snippet below excerpts that artifact:
+
+```bash
+cat ../payment/transcript/discharge_report.json | jq '.summary'
+```
+
+```output
+{
+  "rule_count": 7,
+  "rules_discharged": 7,
+  "rules_violated": 0,
+  "rules_unproven": 0,
+  "premises_total": 14,
+  "premises_static": 13,
+  "premises_runtime_sampled": 1,
+  "premises_unproven": 0
+}
+```
+
+```bash
+head -30 ../payment/transcript/audit_report.md
+```
+
+```output
+# Discharge Report — Audit Rendering
+
+Generated 2026-05-23T03:47:33Z. Source artifact: `.sb/discharge_report.json` (schema_version=1).
+
+**Implementation commit:** `81ddf671a482f8b325db11acd04c72ec4182af03` (working tree dirty)
+
+**Spec files:**
+
+- `specs/core.shen` (sha256 `cb5d6c98c409307aa6345870d3a4f70e564085ee1222542a522e75a1bed2d9a7`)
+
+**Target languages:** go
+
+## Summary
+
+- **Rules:** 7 total — 7 discharged, 0 violated, 0 unproven
+- **Premises:** 14 total — 13 static, 1 runtime-sampled, 0 unproven
+```
+
+The discharge classification is the spec-as-audit-surface story made concrete. Each premise carries one of three labels:
+
+- **static** — the generated guard constructor mechanically rejects any input that violates the premise, so the type system carries the proof. Most premises in this example (`(not (= JwtToken ""))`, `(> Exp Now)`, `(= IsMember true)`) discharge this way; a reviewer reading the rendered report sees `guard-type-at-boundary` as the basis and a line/file reference into `internal/shenguard/guards_gen.go`.
+- **runtime-sample** — for spec rules of the form `(define f …)` that name a pure function, `shen-derive` generates a Go table-driven test that runs the Shen spec as the oracle against the implementation function on a generated input grid. The report records seed, case count, pass/fail, and on failure a ready-to-paste `go test -run …` reproducer. Payment's `processable` rule is sampled at 35 deterministic boundary cases.
+- **unproven** — the rule has neither a structural discharge path nor a sampled oracle. A reviewer treats these as honest gaps, not green-bar passes. Multi-tenant-api currently has zero unproven premises, but also zero `(define …)` rules — the Wave-2 hardening (`thoughts/shared/research/2026-05-22-hn-feedback-next-steps.md`, recommendation R1) adds cross-field predicates like `(= User (sub Claims))` that move the token↔user binding from "convention enforced in middleware" to "static discharge against a spec-level premise."
+
+For the trust-boundary write-up — which surfaces of this project are inside the TCB, what's structurally enforced vs runtime-checked vs assumed — see [`docs/TRUST-MODEL.md`](../../docs/TRUST-MODEL.md). For the per-example reviewer workflow (verify spec hash, re-run at recorded commit, read `discharged_since_commit`), see this directory's `AUDIT.md`.
+
 ## Generated Guard Types
 
 `shengen` compiles the Shen spec into Go types with unexported fields and validated constructors. The constructors are the only way to build these values, so the proof chain cannot be forged from outside the package — the Go compiler enforces it.
