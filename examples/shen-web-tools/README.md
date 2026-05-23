@@ -222,3 +222,14 @@ npm run check        # shengen drift check + build + runtime tests
 The derive sampler prepends three correlated fixture rows for the resolver:
 signed complete, unsigned complete, and partial. That keeps the phase-critical
 cases covered even when generic cartesian sampling changes.
+
+## Auditor Workflow
+
+If you're reviewing this demo for security or compliance purposes,
+start with [`AUDIT.md`](AUDIT.md) — a one-page reviewer workflow
+that walks through verifying the spec hash, reading the committed
+audit report, re-running gates at the recorded commit, and reading
+the TCB (Shen runtime boot, CL bridge providers, the
+`grounded-source` URL-match constructor, the hand-written tag
+resolver pinned by `shen-derive`). The project-level trust model
+lives at [`../../docs/TRUST-MODEL.md`](../../docs/TRUST-MODEL.md).
