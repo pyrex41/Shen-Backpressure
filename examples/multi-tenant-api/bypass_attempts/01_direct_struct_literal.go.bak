@@ -1,0 +1,32 @@
+// Attempt #1: forge a TenantAccess by constructing the struct literal
+// directly.
+//
+// Outcome: the Go compiler rejects this because TenantAccess's fields
+// (`principal`, `tenant`, `isMember`) are unexported and not in scope
+// from outside the `shenguard` package. This is the type-system
+// anchor for the "cannot forge" claim — unforgeable construction is
+// guaranteed by Go's visibility rules, not by a runtime check.
+//
+// To re-run this attempt directly:
+//
+//	cp bypass_attempts/01_direct_struct_literal.go.bak /tmp/bypass.go
+//	# (placed in a package that imports shenguard)
+//	go build ./...
+//
+// bin/show-bypass-attempts.sh does this for every .go.bak in this
+// directory.
+package bypass_attempts_demo
+
+import (
+	"multi-tenant-api/internal/shenguard"
+)
+
+func ForgeTenantAccess() shenguard.TenantAccess {
+	// Try to fabricate a TenantAccess that would let a non-member
+	// reach a handler that demands `verified.TenantAccess`.
+	return shenguard.TenantAccess{
+		principal: nil,
+		tenant:    shenguard.NewTenantId("t-acme"),
+		isMember:  true,
+	}
+}

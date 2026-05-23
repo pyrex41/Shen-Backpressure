@@ -14,7 +14,22 @@ const authUserKey contextKey = "authenticated-user"
 
 // Middleware extracts a Bearer JWT from the Authorization header,
 // validates it, and constructs an AuthenticatedUser guard type.
-// The proof chain is: raw token → JwtToken → TokenExpiry → AuthenticatedUser.
+//
+// The proof chain (post-W2.1):
+//
+//	raw token
+//	  → auth.Parse (HMAC-SHA256 + JSON-decode + expiry; TCB)
+//	  → shenguard.NewJwtIssuer / NewJwtAudience (non-empty)
+//	  → shenguard.NewParsedClaims (Exp > 0, types enforced)
+//	  → shenguard.NewVerifiedJwt   (non-empty signature)
+//	  → shenguard.NewAuthenticatedUser (User == sub(Claims) — STRUCTURAL)
+//	  → shenguard.NewHumanPrincipal
+//
+// The structural premise `(= User (head (head Jwt)))` in
+// specs/core.shen is what makes the user-id–token binding type-enforced
+// instead of convention. If a refactor accidentally threaded a
+// mismatched UserId into NewAuthenticatedUser, the constructor returns
+// an error and the middleware returns 401.
 func Middleware(secret []byte) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -24,34 +39,63 @@ func Middleware(secret []byte) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Parse and validate the JWT (checks signature + expiry)
+			// Parse and validate the JWT (HMAC verify + expiry check).
+			// `result.Signature` is the raw signature segment after a
+			// successful constant-time hmac.Equal check — see jwt.go.
 			result, err := Parse(raw, secret)
 			if err != nil {
 				http.Error(w, "invalid token: "+err.Error(), http.StatusUnauthorized)
 				return
 			}
 
-			// Build proof chain using guard type constructors
-			jwtToken, err := shenguard.NewJwtToken(raw)
+			principal, err := buildPrincipal(result)
 			if err != nil {
-				http.Error(w, "invalid token", http.StatusUnauthorized)
+				http.Error(w, "invalid token: "+err.Error(), http.StatusUnauthorized)
 				return
 			}
-
-			expiry, err := shenguard.NewTokenExpiry(result.Exp, result.Now)
-			if err != nil {
-				http.Error(w, "token expired", http.StatusUnauthorized)
-				return
-			}
-
-			userID := shenguard.NewUserId(result.Claims.Sub)
-			authUser := shenguard.NewAuthenticatedUser(jwtToken, expiry, userID)
-			principal := shenguard.NewHumanPrincipal(authUser)
 
 			ctx := context.WithValue(r.Context(), authUserKey, principal)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// buildPrincipal threads the parsed claims through the shenguard
+// constructor chain. Every constructor that returns an error here is
+// part of the type-system anchor: bypassing any of them is a
+// compile-time error in handler code (the parameter types demand
+// shenguard types, not raw strings).
+func buildPrincipal(result ParseResult) (shenguard.HumanPrincipal, error) {
+	iss, err := shenguard.NewJwtIssuer(result.Claims.Iss)
+	if err != nil {
+		return shenguard.HumanPrincipal{}, err
+	}
+	aud, err := shenguard.NewJwtAudience(result.Claims.Aud)
+	if err != nil {
+		return shenguard.HumanPrincipal{}, err
+	}
+	userID := shenguard.NewUserId(result.Claims.Sub)
+
+	claims, err := shenguard.NewParsedClaims(userID, result.Exp, iss, aud)
+	if err != nil {
+		return shenguard.HumanPrincipal{}, err
+	}
+	verifiedJwt, err := shenguard.NewVerifiedJwt(claims, result.Signature)
+	if err != nil {
+		return shenguard.HumanPrincipal{}, err
+	}
+
+	// W2.1 hardening: the structural premise (= User (head (head Jwt)))
+	// is enforced inside NewAuthenticatedUser. We thread the SAME UserId
+	// value through both parsed-claims (as `sub`) and authenticated-user
+	// (as `user`) — the constructor returns an error if they ever
+	// disagree. A handler that pairs token-A with user-B literally
+	// cannot construct an AuthenticatedUser.
+	authUser, err := shenguard.NewAuthenticatedUser(verifiedJwt, userID)
+	if err != nil {
+		return shenguard.HumanPrincipal{}, err
+	}
+	return shenguard.NewHumanPrincipal(authUser), nil
 }
 
 // PrincipalFromContext retrieves the AuthenticatedPrincipal from the request context.
