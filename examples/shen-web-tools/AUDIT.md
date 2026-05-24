@@ -42,24 +42,57 @@ cd examples/shen-web-tools
 sha256sum specs/core.shen specs/tag-block-resolver.shen specs/medicare.shen
 ```
 
-Compare to the `spec.files[].sha256` entries in
-`transcript/discharge_report.json` and
-`transcript/audit_report.md`. Note this demo lists **multiple
-specs**; the schema reserves room for multiple files in
-`spec.files[]`.
+Pin these hashes against the commit you are auditing. For the
+Go-based examples (`payment/`, `multi-tenant-api/`) the
+`spec.files[].sha256` entries inside `transcript/discharge_report.json`
+provide the same anchor; this example doesn't ship a discharge
+report (see step 2 below for why), so the spec hash you compute
+here *is* the audit anchor for the specs themselves.
 
-### 2. Read the rendered audit report
+### 2. Read the rendered audit report (caveat: not committed for this example)
 
-Open `transcript/audit_report.md`. It contains the same per-rule
-discharge tables, counter-examples, and "How to read this report"
-appendix as the other demos. The relevant rules here are
-`resolve-tag-block-children` (the resolver contract) and
-`grounded-source` (the URL-match predicate).
+The Go-based examples (`payment/`, `multi-tenant-api/`) commit a
+`transcript/discharge_report.json` and rendered
+`transcript/audit_report.md` so a reader on GitHub can inspect the
+audit artifact cold. **shen-web-tools does not** — `sb derive` on
+this example runs the TS sampler via `shen-derive-ts` and writes
+the generated test (`runtime/tag_resolver.shen-derive.test.ts`) but
+does not yet emit a per-spec discharge report JSON. The
+`shen-derive-ts` CLI under `cmd/shen-derive-ts/` is a follow-up
+gap noted in the W1.2 audit-artifacts PR body.
+
+The audit surface that *is* committed for this example:
+
+- **`runtime/tag_resolver.shen-derive.test.ts`** — the generated
+  spec-equivalence test. Read this first: it enumerates the
+  sampled inputs and the spec-vs-impl assertions that pin
+  `tag_resolver.ts` to `specs/tag-block-resolver.shen`. The
+  three correlated fixture rows (`signed-complete`,
+  `unsigned-complete`, `partial`) are prepended deterministically.
+- **`runtime/guards_gen.ts`** — the generated guard types for
+  `specs/core.shen` (`GroundedSource`, etc.). The
+  `GroundedSource.createOrThrow` constructor at lines 253-255
+  enforces the cross-field URL-match predicate.
+- **`specs/{core,tag-block-resolver,medicare}.shen`** — the
+  formal specs. The spec hashes (step 1) are the audit anchor.
+
+To regenerate a discharge report once `shen-derive-ts` grows the
+per-spec report emitter, the pattern will mirror the other
+examples: `sb gates && cp .sb/discharge_report.json
+transcript/discharge_report.json && sb audit-report >
+transcript/audit_report.md`. Until then, run `npm test` and `npm
+run shen-derive-check` to verify the committed artifacts are still
+in sync with the specs.
 
 ### 3. Re-run the gates at the recorded commit
 
+Pick the commit you want to audit (the latest `main` or the SHA
+referenced by the PR/release you are reviewing — for this example
+there is no `discharge_report.json` to read it from yet, so use
+`git log` to find the relevant commit).
+
 ```bash
-git checkout <git_commit-from-transcript/discharge_report.json>
+git checkout <commit-sha>
 cd examples/shen-web-tools
 npm install
 ../../bin/sb gates
@@ -159,9 +192,13 @@ For the full project-level trust model, see
 - `README.md` — example walkthrough and architecture
 - `specs/core.shen` and `specs/tag-block-resolver.shen` — the
   formal specs
-- `transcript/discharge_report.json` and `transcript/audit_report.md`
-  — the committed audit artifact (committed in parallel via the
-  `claude/audit-artifacts` worktree)
+- `runtime/tag_resolver.shen-derive.test.ts` — the committed
+  generated spec-equivalence test (this example's primary
+  reviewer-facing audit artifact; see step 2 above for why a
+  rendered `transcript/audit_report.md` is not committed yet)
+- For comparison, `examples/payment/transcript/audit_report.md`
+  and `examples/multi-tenant-api/transcript/audit_report.md` —
+  the rendered audit reports for the Go-based examples
 - `../../docs/TRUST-MODEL.md` — project-level trust model
 - `../../thoughts/shared/research/2026-05-05-tag-resolver-finish-line.md`
   — design notes on the resolver gate
