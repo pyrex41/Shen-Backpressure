@@ -32,7 +32,13 @@ demo/*/plans/backpressure.log
 
 # Allow-list: committed audit artifacts under each example's transcript/
 # directory. These are static snapshots a reader can inspect on GitHub
-# without cloning + installing Shen. Regenerate with:
+# without cloning + installing Shen. The Go-based examples
+# (examples/payment, examples/multi-tenant-api) ship both files;
+# examples/shen-web-tools does NOT yet — `shen-derive-ts` does not emit
+# a per-spec discharge_report.json today (tracked as a follow-up in the
+# W1.2 audit-artifacts PR body). See examples/shen-web-tools/AUDIT.md
+# for the alternate audit surface (the generated shen-derive test file).
+# Regenerate (Go examples only) with:
 #   (cd examples/<name> && sb gates && cp .sb/discharge_report.json transcript/
 #    && sb audit-report > transcript/audit_report.md)
 !examples/*/transcript/discharge_report.json
