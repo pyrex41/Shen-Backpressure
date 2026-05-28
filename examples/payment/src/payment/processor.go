@@ -4,6 +4,7 @@
 package payment
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -39,9 +40,12 @@ func NewProcessor() *Processor {
 }
 
 // CreateAccount adds a new account with the given initial balance.
-// Uses shenguard.NewAmount to enforce the non-negative invariant.
-func (p *Processor) CreateAccount(id string, initialBalance float64) error {
-	amt, err := shenguard.NewAmount(initialBalance)
+// Uses shenguard.NewAmount to enforce the non-negative invariant. The
+// amount premise is discharged at runtime by the embedded Shen
+// evaluator (profile B, `:runtime-via :eval`), so the constructor —
+// and therefore this method — takes a context.Context.
+func (p *Processor) CreateAccount(ctx context.Context, id string, initialBalance float64) error {
+	amt, err := shenguard.NewAmount(ctx, initialBalance)
 	if err != nil {
 		return err
 	}
@@ -75,7 +79,7 @@ func (p *Processor) GetBalance(id string) (float64, error) {
 //
 // This means the balance invariant is enforced by the type system —
 // you cannot call Transfer without first proving sufficient funds.
-func (p *Processor) Transfer(safe shenguard.SafeTransfer) error {
+func (p *Processor) Transfer(ctx context.Context, safe shenguard.SafeTransfer) error {
 	tx := safe.Tx()
 	fromId := tx.From().Val()
 	toId := tx.To().Val()
@@ -99,12 +103,12 @@ func (p *Processor) Transfer(safe shenguard.SafeTransfer) error {
 
 	// The balance check was already proven by the BalanceChecked constructor,
 	// but we update balances here.
-	newFromBal, err := shenguard.NewAmount(from.Balance.Val() - tx.Amount().Val())
+	newFromBal, err := shenguard.NewAmount(ctx, from.Balance.Val() - tx.Amount().Val())
 	if err != nil {
 		return fmt.Errorf("%w: account %s has %.2f, needs %.2f",
 			ErrInsufficientBalance, fromId, from.Balance.Val(), tx.Amount().Val())
 	}
-	newToBal, err := shenguard.NewAmount(to.Balance.Val() + tx.Amount().Val())
+	newToBal, err := shenguard.NewAmount(ctx, to.Balance.Val() + tx.Amount().Val())
 	if err != nil {
 		return err
 	}

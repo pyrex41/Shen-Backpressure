@@ -365,21 +365,28 @@ func finalizeDischargeReport(parts []*DischargeReport, cfg *Config, failures []p
 }
 
 // detectShenRuntime scans every spec referenced by [[derive.specs]] for
-// the `:runtime-via <name>` Shen-comment marker. If at least one
-// occurrence is found, the returned string is the Shen runtime the
-// project is composed with — currently always "shen-sbcl" because the
-// only live-runtime backend wired up is shen-web-tools' SBCL host.
-// Returns "" when no runtime-via annotation is present (the pure-static
-// case, which is the vast majority of projects).
+// `:runtime-via` Shen-comment markers and names the runtime the project
+// is composed with:
 //
-// The detection is intentionally textual to keep this function from
-// pulling shengen's parser in. The marker's grammar is documented in
-// docs/RUNTIME-VIA.md and pinned by cmd/shengen{,-ts} tests.
+//   - A named checker (`:runtime-via <fname>`, profiles A/C/D) points at
+//     a live host; the only wired backend today is shen-web-tools' SBCL
+//     host, reported as "shen-sbcl".
+//   - `:runtime-via :eval` (profile B) is discharged by the embedded
+//     shen-derive evaluator — no separate runtime process — reported as
+//     "shen-derive-eval".
+//   - A project mixing both reports "shen-sbcl" (the heavier dependency
+//     dominates the trust story). Single-string reporting is a known v1
+//     limitation; see docs/RUNTIME-VIA.md.
+//
+// Returns "" when no runtime-via annotation is present (the pure-static
+// case). Detection is intentionally textual to avoid pulling in
+// shengen's parser; the marker grammar is pinned by cmd/shengen tests.
 func detectShenRuntime(cfg *Config) string {
 	if cfg == nil {
 		return ""
 	}
 	seen := map[string]bool{}
+	evalCount, namedCount := 0, 0
 	for _, s := range cfg.DeriveSpecs {
 		if s.Path == "" || seen[s.Path] {
 			continue
@@ -389,17 +396,19 @@ func detectShenRuntime(cfg *Config) string {
 		if err != nil {
 			continue
 		}
-		if bytes.Contains(data, []byte(":runtime-via ")) ||
-			bytes.Contains(data, []byte("\\* :runtime-via")) {
-			// "shen-sbcl" is the canonical name for the runtime the
-			// only live-host demo uses today. When other hosts are
-			// added (shen-cl, shen-scheme), this would be reported
-			// via per-spec metadata; for the v1 prototype the name
-			// is fixed.
-			return "shen-sbcl"
-		}
+		total := bytes.Count(data, []byte(":runtime-via "))
+		eval := bytes.Count(data, []byte(":runtime-via :eval"))
+		evalCount += eval
+		namedCount += total - eval
 	}
-	return ""
+	switch {
+	case namedCount > 0:
+		return "shen-sbcl"
+	case evalCount > 0:
+		return "shen-derive-eval"
+	default:
+		return ""
+	}
 }
 
 // runCaptured runs a command and returns its combined stdout/stderr

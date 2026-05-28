@@ -8,13 +8,14 @@ package derived_test
 
 import (
 	"testing"
+	"context"
 	shenguard "ralph-shen-agent/internal/shenguard"
 	derived "ralph-shen-agent/internal/derived"
 )
 
 func mustAccountId(x string) shenguard.AccountId { return shenguard.NewAccountId(x) }
 
-func mustAmount(x float64) shenguard.Amount { v, err := shenguard.NewAmount(x); if err != nil { panic(err) }; return v }
+func mustAmount(x float64) shenguard.Amount { v, err := shenguard.NewAmount(context.Background(), x); if err != nil { panic(err) }; return v }
 
 func mustTransaction(a0 shenguard.Amount, a1 shenguard.AccountId, a2 shenguard.AccountId) shenguard.Transaction { return shenguard.NewTransaction(a0, a1, a2) }
 
