@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-23T03:47:33Z",
+  "generated_at": "2026-05-28T18:16:32Z",
   "spec": {
     "files": [
       {
         "path": "specs/core.shen",
-        "sha256": "cb5d6c98c409307aa6345870d3a4f70e564085ee1222542a522e75a1bed2d9a7"
+        "sha256": "51f38561a5106b251086bfc5f5f68430a27a4c400c6cae5474c6020f2bde2607"
       }
     ],
     "rule_count": 7
   },
   "impl": {
-    "git_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+    "git_commit": "643ba55f2850fcfb411f3b1b1d8c2477f67547a4",
     "git_dirty": true,
     "target_languages": [
       "go"
@@ -21,8 +21,8 @@
     "sb_version": "0.3.0",
     "shen_derive_version": "0.3.0",
     "shengen_version": "",
-    "shen_runtime": null,
-    "shen_runtime_available": false
+    "shen_runtime": "shen-derive-eval",
+    "shen_runtime_available": true
   },
   "rules": [
     {
@@ -40,7 +40,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "X is typed string; the target language's type system rejects non-string values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:15"
+            "internal/shenguard/guards_gen.go:22"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -66,7 +66,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Id is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:85"
+            "internal/shenguard/guards_gen.go:96"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -79,7 +79,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Balance is typed amount; values of that type can only be constructed via shengen's guarded constructor, which enforces all of amount's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:85"
+            "internal/shenguard/guards_gen.go:96"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -105,7 +105,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "X is typed number; the target language's type system rejects non-number values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:26"
+            "internal/shenguard/guards_gen.go:33"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -114,15 +114,16 @@
         {
           "id": "amount.verified-x-0",
           "expression": "(\u003e= X 0) : verified",
-          "discharge": "static",
-          "discharge_basis": "guard-constructor-validates",
-          "rationale": "shengen's generated constructor for amount rejects inputs that do not satisfy (\u003e= X 0), so this premise holds for any value of type amount reachable in the impl.",
+          "discharge": "runtime-evaluator",
+          "discharge_basis": "runtime-via-evaluator",
+          "rationale": "amount is evaluated at runtime by the shen-derive evaluator against the spec expression (\u003e= X 0); the spec and the runtime check are the same source.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:26"
+            "internal/shenguard/guards_gen.go:33"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "runtime_profile": "B"
         }
       ],
       "status": "discharged",
@@ -144,7 +145,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Bal is typed number; the target language's type system rejects non-number values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:63"
+            "internal/shenguard/guards_gen.go:74"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -157,7 +158,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Tx is typed transaction; values of that type can only be constructed via shengen's guarded constructor, which enforces all of transaction's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:63"
+            "internal/shenguard/guards_gen.go:74"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -170,7 +171,7 @@
           "discharge_basis": "guard-constructor-validates",
           "rationale": "shengen's generated constructor for balance-invariant rejects inputs that do not satisfy (\u003e= Bal (head Tx)), so this premise holds for any value of type balance-invariant reachable in the impl.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:63"
+            "internal/shenguard/guards_gen.go:74"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -219,7 +220,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Tx is typed transaction; values of that type can only be constructed via shengen's guarded constructor, which enforces all of transaction's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:104"
+            "internal/shenguard/guards_gen.go:115"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -232,7 +233,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Check is typed balance-checked; values of that type can only be constructed via shengen's guarded constructor, which enforces all of balance-checked's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:104"
+            "internal/shenguard/guards_gen.go:115"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -258,7 +259,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Amount is typed amount; values of that type can only be constructed via shengen's guarded constructor, which enforces all of amount's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:40"
+            "internal/shenguard/guards_gen.go:51"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -271,7 +272,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "From is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:40"
+            "internal/shenguard/guards_gen.go:51"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -284,7 +285,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "To is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:40"
+            "internal/shenguard/guards_gen.go:51"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -302,9 +303,10 @@
     "rules_violated": 0,
     "rules_unproven": 0,
     "premises_total": 14,
-    "premises_static": 13,
+    "premises_static": 12,
     "premises_runtime_sampled": 1,
-    "premises_unproven": 0
+    "premises_unproven": 0,
+    "premises_runtime_evaluator": 1
   },
   "signature": null
 }

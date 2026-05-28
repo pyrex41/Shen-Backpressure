@@ -1,12 +1,12 @@
 # Discharge Report — Audit Rendering
 
-Generated 2026-05-23T03:47:33Z. Source artifact: `.sb/discharge_report.json` (schema_version=1).
+Generated 2026-05-28T18:16:32Z. Source artifact: `.sb/discharge_report.json` (schema_version=1).
 
-**Implementation commit:** `81ddf671a482f8b325db11acd04c72ec4182af03` (working tree dirty)
+**Implementation commit:** `643ba55f2850fcfb411f3b1b1d8c2477f67547a4` (working tree dirty)
 
 **Spec files:**
 
-- `specs/core.shen` (sha256 `cb5d6c98c409307aa6345870d3a4f70e564085ee1222542a522e75a1bed2d9a7`)
+- `specs/core.shen` (sha256 `51f38561a5106b251086bfc5f5f68430a27a4c400c6cae5474c6020f2bde2607`)
 
 **Target languages:** go
 
@@ -17,12 +17,12 @@ Generated 2026-05-23T03:47:33Z. Source artifact: `.sb/discharge_report.json` (sc
 | sb | 0.3.0 |
 | shen-derive | 0.3.0 |
 | shengen | — |
-| shen runtime | not detected |
+| shen runtime | shen-derive-eval |
 
 ## Summary
 
 - **Rules:** 7 total — 7 discharged, 0 violated, 0 unproven
-- **Premises:** 14 total — 13 static, 1 runtime-sampled, 0 unproven
+- **Premises:** 14 total — 12 static, 1 runtime-evaluator, 1 runtime-sampled, 0 unproven
 
 ## Rules
 
@@ -47,7 +47,7 @@ Continuously discharged since commit `81ddf671a482f8b325db11acd04c72ec4182af03`.
 |---|---|---|---|---|
 | `account-id.field-x` | `X : string` | static | guard-type-at-boundary | X is typed string; the target language's type system rejects non-string values at construction. |
 
-- `account-id.field-x` code references: `internal/shenguard/guards_gen.go:15`
+- `account-id.field-x` code references: `internal/shenguard/guards_gen.go:22`
 
 ### `account-state` — composite (✅ Discharged)
 
@@ -72,8 +72,8 @@ Continuously discharged since commit `81ddf671a482f8b325db11acd04c72ec4182af03`.
 | `account-state.field-id` | `Id : account-id` | static | guard-type-at-boundary | Id is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively. |
 | `account-state.field-balance` | `Balance : amount` | static | guard-type-at-boundary | Balance is typed amount; values of that type can only be constructed via shengen's guarded constructor, which enforces all of amount's premises transitively. |
 
-- `account-state.field-id` code references: `internal/shenguard/guards_gen.go:85`
-- `account-state.field-balance` code references: `internal/shenguard/guards_gen.go:85`
+- `account-state.field-id` code references: `internal/shenguard/guards_gen.go:96`
+- `account-state.field-balance` code references: `internal/shenguard/guards_gen.go:96`
 
 ### `amount` — constrained (✅ Discharged)
 
@@ -96,10 +96,10 @@ Continuously discharged since commit `81ddf671a482f8b325db11acd04c72ec4182af03`.
 | ID | Expression | Discharge | Basis | Rationale |
 |---|---|---|---|---|
 | `amount.field-x` | `X : number` | static | guard-type-at-boundary | X is typed number; the target language's type system rejects non-number values at construction. |
-| `amount.verified-x-0` | `(>= X 0) : verified` | static | guard-constructor-validates | shengen's generated constructor for amount rejects inputs that do not satisfy (>= X 0), so this premise holds for any value of type amount reachable in the impl. |
+| `amount.verified-x-0` | `(>= X 0) : verified` | runtime-evaluator | runtime-via-evaluator | amount is evaluated at runtime by the shen-derive evaluator against the spec expression (>= X 0); the spec and the runtime check are the same source. |
 
-- `amount.field-x` code references: `internal/shenguard/guards_gen.go:26`
-- `amount.verified-x-0` code references: `internal/shenguard/guards_gen.go:26`
+- `amount.field-x` code references: `internal/shenguard/guards_gen.go:33`
+- `amount.verified-x-0` code references: `internal/shenguard/guards_gen.go:33`
 
 ### `balance-invariant` — guarded (✅ Discharged)
 
@@ -126,9 +126,9 @@ Continuously discharged since commit `81ddf671a482f8b325db11acd04c72ec4182af03`.
 | `balance-invariant.field-tx` | `Tx : transaction` | static | guard-type-at-boundary | Tx is typed transaction; values of that type can only be constructed via shengen's guarded constructor, which enforces all of transaction's premises transitively. |
 | `balance-invariant.verified-bal-head-tx` | `(>= Bal (head Tx)) : verified` | static | guard-constructor-validates | shengen's generated constructor for balance-invariant rejects inputs that do not satisfy (>= Bal (head Tx)), so this premise holds for any value of type balance-invariant reachable in the impl. |
 
-- `balance-invariant.field-bal` code references: `internal/shenguard/guards_gen.go:63`
-- `balance-invariant.field-tx` code references: `internal/shenguard/guards_gen.go:63`
-- `balance-invariant.verified-bal-head-tx` code references: `internal/shenguard/guards_gen.go:63`
+- `balance-invariant.field-bal` code references: `internal/shenguard/guards_gen.go:74`
+- `balance-invariant.field-tx` code references: `internal/shenguard/guards_gen.go:74`
+- `balance-invariant.verified-bal-head-tx` code references: `internal/shenguard/guards_gen.go:74`
 
 ### `processable` — define (✅ Discharged)
 
@@ -176,8 +176,8 @@ Continuously discharged since commit `81ddf671a482f8b325db11acd04c72ec4182af03`.
 | `safe-transfer.field-tx` | `Tx : transaction` | static | guard-type-at-boundary | Tx is typed transaction; values of that type can only be constructed via shengen's guarded constructor, which enforces all of transaction's premises transitively. |
 | `safe-transfer.field-check` | `Check : balance-checked` | static | guard-type-at-boundary | Check is typed balance-checked; values of that type can only be constructed via shengen's guarded constructor, which enforces all of balance-checked's premises transitively. |
 
-- `safe-transfer.field-tx` code references: `internal/shenguard/guards_gen.go:104`
-- `safe-transfer.field-check` code references: `internal/shenguard/guards_gen.go:104`
+- `safe-transfer.field-tx` code references: `internal/shenguard/guards_gen.go:115`
+- `safe-transfer.field-check` code references: `internal/shenguard/guards_gen.go:115`
 
 ### `transaction` — composite (✅ Discharged)
 
@@ -204,9 +204,9 @@ Continuously discharged since commit `81ddf671a482f8b325db11acd04c72ec4182af03`.
 | `transaction.field-from` | `From : account-id` | static | guard-type-at-boundary | From is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively. |
 | `transaction.field-to` | `To : account-id` | static | guard-type-at-boundary | To is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively. |
 
-- `transaction.field-amount` code references: `internal/shenguard/guards_gen.go:40`
-- `transaction.field-from` code references: `internal/shenguard/guards_gen.go:40`
-- `transaction.field-to` code references: `internal/shenguard/guards_gen.go:40`
+- `transaction.field-amount` code references: `internal/shenguard/guards_gen.go:51`
+- `transaction.field-from` code references: `internal/shenguard/guards_gen.go:51`
+- `transaction.field-to` code references: `internal/shenguard/guards_gen.go:51`
 
 
 ## How to Read This Report
