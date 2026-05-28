@@ -144,6 +144,73 @@ func TestConstraintFilteringRejectsNegativesForAmount(t *testing.T) {
 	}
 }
 
+func TestRuntimeViaHelperThreadsContext(t *testing.T) {
+	// A `:runtime-via :eval` premise makes the generated constructor take
+	// a context.Context. The verify harness's `mustXxx` helper must supply
+	// one (context.Background()) without changing its own signature, and
+	// the emitted test file must import "context".
+	src := `
+(datatype amount
+  X : number;
+  (>= X 0) : verified; \* :runtime-via :eval *\
+  ====================
+  X : amount;)
+
+(define double-amount
+  {amount --> amount}
+  A -> (* 2 (val A)))
+`
+	tmp := t_tempFile(src)
+	defer t_removeFile(tmp)
+	sf, err := specfile.ParseFile(tmp)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	tt := specfile.BuildTypeTable(sf.Datatypes, "example.com/demo/internal/shenguard", "shenguard")
+
+	amount := tt.Entries["amount"]
+	if amount == nil {
+		t.Fatal("amount type not in table")
+	}
+	if !amount.CtorTakesCtx {
+		t.Fatal("amount has a :runtime-via premise but CtorTakesCtx is false")
+	}
+
+	def := sf.FindDefine("double-amount")
+	if def == nil {
+		t.Fatal("missing double-amount")
+	}
+	h, err := BuildHarness(&HarnessConfig{
+		Spec:        def,
+		TypeTable:   tt,
+		ImplPkgPath: "example.com/demo/internal/derived",
+		ImplPkgName: "derived",
+		ImplFunc:    "DoubleAmount",
+		TestPkgName: "derived_test",
+		MaxCases:    6,
+	})
+	if err != nil {
+		t.Fatalf("BuildHarness: %v", err)
+	}
+	source, err := h.Emit()
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	t.Logf("source:\n%s", source)
+
+	if !strings.Contains(source, `"context"`) {
+		t.Errorf("emitted source missing the \"context\" import")
+	}
+	// The mustAmount helper threads context.Background() into the ctor but
+	// keeps its own signature ctx-free (the case table stays unchanged).
+	if !strings.Contains(source, "func mustAmount(x float64)") {
+		t.Errorf("mustAmount helper signature should not take a context")
+	}
+	if !strings.Contains(source, "shenguard.NewAmount(context.Background(), x)") {
+		t.Errorf("mustAmount should call the constructor with context.Background()")
+	}
+}
+
 func TestDomainTypedReturn(t *testing.T) {
 	// A spec whose return type is a constrained guard type.
 	// double-amount takes an amount and returns double the underlying value,
