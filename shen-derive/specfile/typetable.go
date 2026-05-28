@@ -33,6 +33,12 @@ type TypeEntry struct {
 	// For constrained and guarded: raw verified s-expressions, e.g. "(>= X 0)".
 	Verified []string
 
+	// CtorTakesCtx is true when the generated constructor takes a
+	// context.Context as its first parameter — i.e. the type has at
+	// least one `:runtime-via` verified premise (any profile). Callers
+	// and the verify harness's `mustXxx` helper must thread a context.
+	CtorTakesCtx bool
+
 	// For composite/guarded:
 	Fields []Field
 }
@@ -113,6 +119,9 @@ func BuildTypeTable(datatypes []Datatype, importPath, importAlias string) *TypeT
 			if entry.Category == CatConstrained || entry.Category == CatGuarded {
 				for _, v := range r.Verified {
 					entry.Verified = append(entry.Verified, v.Raw)
+					if v.RuntimeVia != nil {
+						entry.CtorTakesCtx = true
+					}
 				}
 			}
 
