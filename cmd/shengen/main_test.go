@@ -780,6 +780,92 @@ func TestGenerateGoRuntimeViaGuarded(t *testing.T) {
 	}
 }
 
+// TestGenerateGoRuntimeViaEval checks profile-B emission: a
+// `:runtime-via :eval` premise must call the embedded evaluator host
+// (evalhost.Check) with the predicate's raw s-expression and the Shen
+// variable names, import evalhost, and NOT emit a runtimeChecker
+// witness (the evaluator is the checker — there is no named function).
+func TestGenerateGoRuntimeViaEval(t *testing.T) {
+	spec := `(datatype amount
+  X : number;
+  (>= X 0) : verified; \* :runtime-via :eval *\
+  ====================
+  X : amount;)`
+	types, _ := parseFile_string(spec)
+	st := newSymbolTable()
+	st.Build(types)
+	out := generateGo(types, st, "test", "test.shen")
+
+	// (a) ctx-taking constructor.
+	if !strings.Contains(out, "func NewAmount(ctx context.Context, x float64) (Amount, error)") {
+		t.Errorf("expected ctx-taking constructor.\nFull output:\n%s", out)
+	}
+	// (b) evalhost.Check call with raw predicate + Shen var names + arg.
+	if !strings.Contains(out, `evalhost.Check(ctx, "(>= X 0)", []string{"X"}, x)`) {
+		t.Errorf("expected evalhost.Check call with raw predicate + var names.\nFull output:\n%s", out)
+	}
+	// (c) evalhost imported.
+	if !strings.Contains(out, evalhostImportPath) {
+		t.Errorf("expected evalhost import %q.\nFull output:\n%s", evalhostImportPath, out)
+	}
+	// (d) NO runtimeChecker witness type (profile B uses the evaluator).
+	if strings.Contains(out, "type runtimeChecker func") {
+		t.Errorf("profile B must not emit a runtimeChecker witness type.\nFull output:\n%s", out)
+	}
+	// (e) predicate not inlined as Go.
+	if strings.Contains(out, "x >= 0") {
+		t.Errorf("predicate should NOT be inlined when :runtime-via :eval is set.\nFull output:\n%s", out)
+	}
+	// (f) shared rejection error still present.
+	if !strings.Contains(out, "errRuntimeCheckRejected") {
+		t.Errorf("expected errRuntimeCheckRejected.\nFull output:\n%s", out)
+	}
+}
+
+// TestParseRuntimeViaModifiers checks the extended grammar: :eval, and
+// named checkers carrying :sampled / :requires-db modifiers parse into
+// the right runtimeViaSpec shape.
+func TestParseRuntimeViaModifiers(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want runtimeViaSpec
+	}{
+		{"shenEval", runtimeViaSpec{checker: "shenEval"}},
+		{":eval", runtimeViaSpec{eval: true}},
+		{"checkThing :sampled", runtimeViaSpec{checker: "checkThing", sampled: true}},
+		{"checkMembership :requires-db", runtimeViaSpec{checker: "checkMembership", requiresDB: true}},
+	}
+	for _, c := range cases {
+		got := parseRuntimeVia(c.raw)
+		if got != c.want {
+			t.Errorf("parseRuntimeVia(%q) = %+v, want %+v", c.raw, got, c.want)
+		}
+	}
+}
+
+// TestGenerateGoRuntimeViaSampledIsProfileA confirms a named checker
+// carrying the :sampled modifier still emits the named-checker
+// constructor (profile C emission is identical to profile A; the
+// sampled-equivalence test is generated separately by sb derive).
+func TestGenerateGoRuntimeViaSampledIsProfileA(t *testing.T) {
+	spec := `(datatype query-text
+  X : string;
+  (> (length X) 0) : verified; \* :runtime-via shenEval :sampled *\
+  ==============
+  X : query-text;)`
+	types, _ := parseFile_string(spec)
+	st := newSymbolTable()
+	st.Build(types)
+	out := generateGo(types, st, "test", "test.shen")
+
+	if !strings.Contains(out, `shenEval(ctx, "query-text", x)`) {
+		t.Errorf("expected named-checker call (the :sampled modifier must not change emission).\nFull output:\n%s", out)
+	}
+	if !strings.Contains(out, "var _ runtimeChecker = shenEval") {
+		t.Errorf("expected the checker witness for the :sampled named checker.\nFull output:\n%s", out)
+	}
+}
+
 // TestGenerateGoRuntimeViaCompilePass verifies that the emitted code
 // compiles when the named runtime checker IS defined in the package,
 // and FAILS to compile when it isn't. This is the test the plan
