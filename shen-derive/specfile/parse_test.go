@@ -415,6 +415,14 @@ func TestParseMultipleDefinesInFile(t *testing.T) {
 }
 
 func TestParseDosageSpec(t *testing.T) {
+	// The dosage-calculator example was removed in commit eb3be68
+	// (demo-readiness cleanup) but this test was left behind. Skip
+	// rather than delete, in case the multi-clause-define fixture
+	// returns; the parsing it exercises is also covered by inline
+	// parseContent tests above.
+	if _, err := os.Stat("../../examples/dosage-calculator/specs/core.shen"); os.IsNotExist(err) {
+		t.Skip("dosage-calculator example removed in eb3be68; fixture no longer present")
+	}
 	sf, err := ParseFile(filepath.Clean("../../examples/dosage-calculator/specs/core.shen"))
 	if err != nil {
 		t.Fatalf("ParseFile: %v", err)
@@ -538,12 +546,80 @@ func TestParseDocAnnotations(t *testing.T) {
 	}
 }
 
+// TestExtractRuntimeViaMarkers pins parsing of the :runtime-via
+// annotation grammar through the full parse path, including survival of
+// the global comment-strip pass. Each datatype carries one verified
+// premise; only some carry a marker.
+func TestExtractRuntimeViaMarkers(t *testing.T) {
+	src := `
+\* :doc "A wrapper with a plain verified premise — no marker." *\
+(datatype plain
+  X : string;
+  (not (= X "")) : verified;
+  ==============
+  X : plain;)
+
+(datatype prof-a
+  X : string;
+  (> (length X) 0) : verified; \* :runtime-via shenEval *\
+  ==============
+  X : prof-a;)
+
+(datatype prof-b
+  X : string;
+  (> (length X) 0) : verified; \* :runtime-via :eval *\
+  ==============
+  X : prof-b;)
+
+(datatype prof-c
+  X : string;
+  (> (length X) 0) : verified; \* :runtime-via checkThing :sampled *\
+  ==============
+  X : prof-c;)
+
+(datatype prof-d
+  X : string;
+  (> (length X) 0) : verified; \* :runtime-via checkTenantMembership :requires-db *\
+  ==============
+  X : prof-d;)
+`
+	sf, err := parseContent(src)
+	if err != nil {
+		t.Fatalf("parseContent: %v", err)
+	}
+
+	marker := func(name string) *RuntimeViaMarker {
+		dt := sf.FindDatatype(name)
+		if dt == nil || len(dt.Rules) == 0 || len(dt.Rules[0].Verified) == 0 {
+			t.Fatalf("%s: no verified premise parsed", name)
+		}
+		return dt.Rules[0].Verified[0].RuntimeVia
+	}
+
+	if m := marker("plain"); m != nil {
+		t.Errorf("plain: marker = %+v, want nil", m)
+	}
+	if m := marker("prof-a"); m == nil || m.Profile() != "A" || m.Checker != "shenEval" {
+		t.Errorf("prof-a: marker = %+v, want {Checker:shenEval} profile A", m)
+	}
+	if m := marker("prof-b"); m == nil || m.Profile() != "B" || !m.Eval {
+		t.Errorf("prof-b: marker = %+v, want {Eval:true} profile B", m)
+	}
+	if m := marker("prof-c"); m == nil || m.Profile() != "C" || m.Checker != "checkThing" || !m.Sampled {
+		t.Errorf("prof-c: marker = %+v, want {Checker:checkThing,Sampled} profile C", m)
+	}
+	if m := marker("prof-d"); m == nil || m.Profile() != "D" || m.Checker != "checkTenantMembership" || !m.RequiresDB {
+		t.Errorf("prof-d: marker = %+v, want {Checker:checkTenantMembership,RequiresDB} profile D", m)
+	}
+}
+
 // parseContent is a test helper that parses content without needing a file.
 func parseContent(content string) (*SpecFile, error) {
+	markers := extractRuntimeViaMarkers(content)
 	content = stripShenComments(content)
 	sf := &SpecFile{Path: "<test>"}
 	for _, block := range extractBlocks(content, "(datatype ") {
-		if dt, err := parseDatatype(block); err != nil {
+		if dt, err := parseDatatype(block, markers); err != nil {
 			return nil, err
 		} else if dt != nil {
 			sf.Datatypes = append(sf.Datatypes, *dt)
