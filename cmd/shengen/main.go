@@ -1678,12 +1678,16 @@ func generateGo(types []Datatype, st *SymbolTable, pkg string, specPath string) 
 		}
 	}
 
-	// Detect `:runtime-via <name>` annotations across the spec. When
-	// present we also need `"context"` and `"errors"` and emit a
-	// compile-time witness type + one `var _` declaration per distinct
-	// checker name.
+	// Detect `:runtime-via` annotations across the spec.
+	//   - Named checkers (profiles A/C/D) need `"context"`/`"errors"`, a
+	//     `runtimeChecker` witness type, and one `var _` per checker.
+	//   - `:eval` (profile B) needs `"context"`/`"errors"` and the
+	//     evalhost import, but no witness type — the evaluator is the
+	//     checker.
 	runtimeCheckerNames := collectRuntimeCheckerNames(types)
-	hasRuntimeVia := len(runtimeCheckerNames) > 0
+	hasNamedChecker := len(runtimeCheckerNames) > 0
+	hasEval := hasEvalRuntimeVia(types)
+	hasRuntimeVia := hasNamedChecker || hasEval
 
 	imports := []string{}
 	if needsFmt {
@@ -1691,6 +1695,9 @@ func generateGo(types []Datatype, st *SymbolTable, pkg string, specPath string) 
 	}
 	if hasRuntimeVia {
 		imports = append(imports, "\"context\"", "\"errors\"")
+	}
+	if hasEval {
+		imports = append(imports, fmt.Sprintf("%q", evalhostImportPath))
 	}
 	if len(imports) > 0 {
 		b.WriteString("import (\n")
@@ -1700,7 +1707,7 @@ func generateGo(types []Datatype, st *SymbolTable, pkg string, specPath string) 
 		b.WriteString(")\n\n")
 	}
 
-	if hasRuntimeVia {
+	if hasNamedChecker {
 		b.WriteString("// runtimeChecker is the contract every `:runtime-via <name>`\n")
 		b.WriteString("// function must satisfy. The generated constructor passes the\n")
 		b.WriteString("// predicate's spec-side name plus positional arguments; the\n")
@@ -1713,7 +1720,10 @@ func generateGo(types []Datatype, st *SymbolTable, pkg string, specPath string) 
 		for _, name := range runtimeCheckerNames {
 			b.WriteString(fmt.Sprintf("var _ runtimeChecker = %s\n", name))
 		}
-		b.WriteString("\n// errRuntimeCheckRejected is returned when a runtime checker\n")
+		b.WriteString("\n")
+	}
+	if hasRuntimeVia {
+		b.WriteString("// errRuntimeCheckRejected is returned when a runtime check\n")
 		b.WriteString("// reports the predicate is false (ok == false, err == nil).\n")
 		b.WriteString("var errRuntimeCheckRejected = errors.New(\"runtime check rejected\")\n\n")
 	}
@@ -1772,9 +1782,45 @@ func generateGo(types []Datatype, st *SymbolTable, pkg string, specPath string) 
 	return b.String()
 }
 
-// collectRuntimeCheckerNames returns the distinct `:runtime-via <name>`
-// checker names referenced anywhere in the spec, sorted to keep emission
-// deterministic.
+// runtimeViaSpec is the parsed form of a `:runtime-via` annotation.
+// Grammar: `:runtime-via {<fname> | :eval} [:sampled] [:requires-db]`.
+// The raw marker text is stored on VerifiedPremise.RuntimeVia; this
+// splits it into its components. See docs/RUNTIME-VIA.md (profiles A–D).
+type runtimeViaSpec struct {
+	checker    string // bound checker fn (profiles A, C, D); "" when eval
+	eval       bool   // :eval — evaluator-hosted (profile B)
+	sampled    bool   // :sampled — shen-derive emits a sampled-equivalence test (profile C)
+	requiresDB bool   // :requires-db — checker takes a DB handle (profile D)
+}
+
+// parseRuntimeVia splits a raw marker (everything after `:runtime-via `)
+// into its components.
+func parseRuntimeVia(raw string) runtimeViaSpec {
+	fields := strings.Fields(raw)
+	var s runtimeViaSpec
+	if len(fields) == 0 {
+		return s
+	}
+	if fields[0] == ":eval" {
+		s.eval = true
+	} else {
+		s.checker = fields[0]
+	}
+	for _, t := range fields[1:] {
+		switch t {
+		case ":sampled":
+			s.sampled = true
+		case ":requires-db":
+			s.requiresDB = true
+		}
+	}
+	return s
+}
+
+// collectRuntimeCheckerNames returns the distinct named checkers
+// referenced by `:runtime-via <name>` annotations (profiles A/C/D),
+// sorted to keep emission deterministic. `:eval` premises (profile B)
+// use the embedded evaluator and contribute no checker witness.
 func collectRuntimeCheckerNames(types []Datatype) []string {
 	seen := make(map[string]bool)
 	var names []string
@@ -1784,17 +1830,43 @@ func collectRuntimeCheckerNames(types []Datatype) []string {
 				if v.RuntimeVia == "" {
 					continue
 				}
-				if seen[v.RuntimeVia] {
+				spec := parseRuntimeVia(v.RuntimeVia)
+				if spec.checker == "" {
+					continue // :eval — no witness
+				}
+				if seen[spec.checker] {
 					continue
 				}
-				seen[v.RuntimeVia] = true
-				names = append(names, v.RuntimeVia)
+				seen[spec.checker] = true
+				names = append(names, spec.checker)
 			}
 		}
 	}
 	sortStrings(names)
 	return names
 }
+
+// hasEvalRuntimeVia reports whether any verified premise in the spec
+// uses `:runtime-via :eval` (profile B), which requires the evalhost
+// import in the generated module.
+func hasEvalRuntimeVia(types []Datatype) bool {
+	for _, dt := range types {
+		for _, r := range dt.Rules {
+			for _, v := range r.Verified {
+				if v.RuntimeVia != "" && parseRuntimeVia(v.RuntimeVia).eval {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// evalhostImportPath is the canonical import path of the embedded
+// evaluator host that profile-B (`:runtime-via :eval`) constructors
+// call. Projects using profile B must have the shen-derive module on
+// their module graph (a require + replace in go.mod).
+const evalhostImportPath = "github.com/pyrex41/Shen-Backpressure/shen-derive/runtime/evalhost"
 
 // sortStrings is a tiny wrapper to avoid importing sort just for one call.
 func sortStrings(xs []string) {
@@ -1842,7 +1914,7 @@ func generateConstrained(b *strings.Builder, gt GeneratedType, st *SymbolTable) 
 	}
 	for _, v := range gt.Rule.Verified {
 		if v.RuntimeVia != "" {
-			emitRuntimeViaCheckGo(b, v, gt.Name, gt.GoName, []string{"x"})
+			emitRuntimeViaCheckGo(b, v, gt.Name, gt.GoName, []string{gt.Rule.Premises[0].VarName}, []string{"x"})
 			continue
 		}
 		goExpr, errMsg := st.verifiedToGo(v, varMap)
@@ -1854,21 +1926,49 @@ func generateConstrained(b *strings.Builder, gt GeneratedType, st *SymbolTable) 
 	b.WriteString(fmt.Sprintf("func (t %s) Val() %s { return t.v }\n\n", gt.GoName, goType))
 }
 
-// emitRuntimeViaCheckGo emits the gate-site for a `:runtime-via <name>`
-// verified premise. The constructor calls the named checker with the
-// spec-side predicate name (the datatype block name) and the positional
-// args (camelCased variable names from the premise list). Any error
-// returned propagates verbatim; an `ok == false` outcome surfaces as
-// errRuntimeCheckRejected wrapped with the checker + predicate name so
-// the failure narrates which gate rejected what.
-func emitRuntimeViaCheckGo(b *strings.Builder, v VerifiedPremise, predicateName string, zeroType string, argNames []string) {
+// emitRuntimeViaCheckGo emits the gate-site for a `:runtime-via`
+// verified premise.
+//
+// For a named checker (profiles A/C/D) the constructor calls the
+// checker with the spec-side predicate name (the datatype block name)
+// and the positional goArgs (camelCased variable names from the premise
+// list).
+//
+// For `:eval` (profile B) the constructor calls the embedded evaluator
+// host with the premise's raw s-expression and the Shen variable names
+// bound positionally to goArgs — the spec predicate IS the runtime
+// check, no separate checker.
+//
+// In both cases any error propagates verbatim and an `ok == false`
+// outcome surfaces as errRuntimeCheckRejected wrapped with the
+// predicate name, so the failure narrates which gate rejected what.
+func emitRuntimeViaCheckGo(b *strings.Builder, v VerifiedPremise, predicateName string, zeroType string, shenVarNames []string, goArgs []string) {
+	spec := parseRuntimeVia(v.RuntimeVia)
+
+	if spec.eval {
+		nameLits := make([]string, len(shenVarNames))
+		for i, n := range shenVarNames {
+			nameLits[i] = strconv.Quote(n)
+		}
+		namesArr := "[]string{" + strings.Join(nameLits, ", ") + "}"
+		argsExpr := ""
+		for _, a := range goArgs {
+			argsExpr += ", " + a
+		}
+		b.WriteString(fmt.Sprintf("\tok, err := evalhost.Check(ctx, %q, %s%s)\n", v.Raw, namesArr, argsExpr))
+		b.WriteString(fmt.Sprintf("\tif err != nil {\n\t\treturn %s{}, fmt.Errorf(\"evalhost rejected %s: %%w\", err)\n\t}\n", zeroType, predicateName))
+		b.WriteString(fmt.Sprintf("\tif !ok {\n\t\treturn %s{}, fmt.Errorf(\"evalhost rejected %s: %%w\", errRuntimeCheckRejected)\n\t}\n", zeroType, predicateName))
+		return
+	}
+
+	checker := spec.checker
 	argsExpr := ""
-	for _, a := range argNames {
+	for _, a := range goArgs {
 		argsExpr += ", " + a
 	}
-	b.WriteString(fmt.Sprintf("\tok, err := %s(ctx, %q%s)\n", v.RuntimeVia, predicateName, argsExpr))
-	b.WriteString(fmt.Sprintf("\tif err != nil {\n\t\treturn %s{}, fmt.Errorf(\"%s rejected %s: %%w\", err)\n\t}\n", zeroType, v.RuntimeVia, predicateName))
-	b.WriteString(fmt.Sprintf("\tif !ok {\n\t\treturn %s{}, fmt.Errorf(\"%s rejected %s: %%w\", errRuntimeCheckRejected)\n\t}\n", zeroType, v.RuntimeVia, predicateName))
+	b.WriteString(fmt.Sprintf("\tok, err := %s(ctx, %q%s)\n", checker, predicateName, argsExpr))
+	b.WriteString(fmt.Sprintf("\tif err != nil {\n\t\treturn %s{}, fmt.Errorf(\"%s rejected %s: %%w\", err)\n\t}\n", zeroType, checker, predicateName))
+	b.WriteString(fmt.Sprintf("\tif !ok {\n\t\treturn %s{}, fmt.Errorf(\"%s rejected %s: %%w\", errRuntimeCheckRejected)\n\t}\n", zeroType, checker, predicateName))
 }
 
 func generateComposite(b *strings.Builder, gt GeneratedType, st *SymbolTable) {
@@ -1895,10 +1995,12 @@ func generateGuarded(b *strings.Builder, gt GeneratedType, st *SymbolTable) {
 	b.WriteString(fmt.Sprintf("type %s struct {\n", gt.GoName))
 	var params []string
 	var argNames []string
+	var shenVarNames []string
 	for _, p := range gt.Rule.Premises {
 		b.WriteString(fmt.Sprintf("\t%s %s\n", toCamelCase(p.VarName), shenTypeToGo(p.TypeName)))
 		params = append(params, fmt.Sprintf("%s %s", toCamelCase(p.VarName), shenTypeToGo(p.TypeName)))
 		argNames = append(argNames, toCamelCase(p.VarName))
+		shenVarNames = append(shenVarNames, p.VarName)
 	}
 	b.WriteString("}\n\n")
 	varMap := make(map[string]string)
@@ -1913,7 +2015,7 @@ func generateGuarded(b *strings.Builder, gt GeneratedType, st *SymbolTable) {
 	}
 	for _, v := range gt.Rule.Verified {
 		if v.RuntimeVia != "" {
-			emitRuntimeViaCheckGo(b, v, gt.Name, gt.GoName, argNames)
+			emitRuntimeViaCheckGo(b, v, gt.Name, gt.GoName, shenVarNames, argNames)
 			continue
 		}
 		goExpr, errMsg := st.verifiedToGo(v, varMap)
