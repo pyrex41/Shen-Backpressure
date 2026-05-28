@@ -99,6 +99,15 @@ type DischargePremise struct {
 	SamplesPassed  int      `json:"samples_passed"`
 	SamplesFailed  int      `json:"samples_failed"`
 	SampleSeed     *string  `json:"sample_seed"`
+
+	// Runtime-via fields (mirror shen-derive/report/schema.go). Present
+	// only for :runtime-via premises; omitempty keeps pre-runtime-via
+	// reports byte-identical. Passed through verbatim from the per-spec
+	// report shen-derive emits.
+	RuntimeProfile  string  `json:"runtime_profile,omitempty"`
+	RuntimeChecker  *string `json:"runtime_checker,omitempty"`
+	EquivalenceTest *string `json:"equivalence_test,omitempty"`
+	DBQueryExcerpt  *string `json:"db_query_excerpt,omitempty"`
 }
 
 type DischargeCounter struct {
@@ -122,6 +131,12 @@ type DischargeSummary struct {
 	PremisesStatic         int `json:"premises_static"`
 	PremisesRuntimeSampled int `json:"premises_runtime_sampled"`
 	PremisesUnproven       int `json:"premises_unproven"`
+
+	// Runtime-via premise buckets (mirror shen-derive/report/schema.go).
+	PremisesRuntimeAttested        int `json:"premises_runtime_attested,omitempty"`
+	PremisesRuntimeEvaluator       int `json:"premises_runtime_evaluator,omitempty"`
+	PremisesRuntimeAttestedSampled int `json:"premises_runtime_attested_sampled,omitempty"`
+	PremisesRuntimeAttestedDB      int `json:"premises_runtime_attested_db,omitempty"`
 }
 
 type DischargeSignature struct {
@@ -139,6 +154,12 @@ const (
 	DischargeStatic         = "static"
 	DischargeRuntimeSampled = "runtime-sample"
 	DischargeUnproven       = "unproven"
+
+	// Runtime-via discharge values (mirror shen-derive/report/schema.go).
+	DischargeRuntimeAttested        = "runtime-attested"
+	DischargeRuntimeEvaluator       = "runtime-evaluator"
+	DischargeRuntimeAttestedSampled = "runtime-attested-sampled"
+	DischargeRuntimeAttestedDB      = "runtime-attested-db"
 )
 
 // loadDischarge reads a discharge report from path. Returns nil and
@@ -262,6 +283,14 @@ func computeDischargeSummary(rules []DischargeRule) DischargeSummary {
 				s.PremisesRuntimeSampled++
 			case DischargeUnproven:
 				s.PremisesUnproven++
+			case DischargeRuntimeAttested:
+				s.PremisesRuntimeAttested++
+			case DischargeRuntimeEvaluator:
+				s.PremisesRuntimeEvaluator++
+			case DischargeRuntimeAttestedSampled:
+				s.PremisesRuntimeAttestedSampled++
+			case DischargeRuntimeAttestedDB:
+				s.PremisesRuntimeAttestedDB++
 			}
 		}
 	}

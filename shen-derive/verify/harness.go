@@ -405,8 +405,16 @@ func (h *Harness) Emit() (string, error) {
 
 	b.WriteString("package " + cfg.TestPkgName + "\n\n")
 
+	// Helper constructors for every type referenced via "mustXxx".
+	// Collected before imports because a `:runtime-via` constructor
+	// makes a helper thread context.Background(), pulling in "context".
+	helpers, needsContext := collectHelpers(h, cfg.TypeTable)
+
 	// Imports.
 	imports := []string{`"testing"`}
+	if needsContext {
+		imports = append(imports, `"context"`)
+	}
 	if cfg.TypeTable.ImportPath != "" {
 		imports = append(imports, fmt.Sprintf("%s %q", cfg.TypeTable.ImportAlias, cfg.TypeTable.ImportPath))
 	}
@@ -419,8 +427,6 @@ func (h *Harness) Emit() (string, error) {
 	}
 	b.WriteString(")\n\n")
 
-	// Helper constructors for every type referenced via "mustXxx".
-	helpers := collectHelpers(h, cfg.TypeTable)
 	for _, helper := range helpers {
 		b.WriteString(helper)
 		b.WriteString("\n")
@@ -506,7 +512,7 @@ func (h *Harness) Emit() (string, error) {
 // collectHelpers scans the harness's generated Go expressions for
 // references to "mustXxx" helper constructors and emits a Go source body
 // for each one.
-func collectHelpers(h *Harness, tt *specfile.TypeTable) []string {
+func collectHelpers(h *Harness, tt *specfile.TypeTable) ([]string, bool) {
 	needed := map[string]bool{}
 	var walk func(s string)
 	walk = func(s string) {
@@ -566,6 +572,7 @@ func collectHelpers(h *Harness, tt *specfile.TypeTable) []string {
 	sort.Strings(names)
 
 	var out []string
+	needsContext := false
 	for _, name := range names {
 		shenName := shenNameForHelper(name, tt)
 		if shenName == "" {
@@ -575,9 +582,12 @@ func collectHelpers(h *Harness, tt *specfile.TypeTable) []string {
 		if entry == nil {
 			continue
 		}
+		if entry.CtorTakesCtx {
+			needsContext = true
+		}
 		out = append(out, emitHelper(entry, tt))
 	}
-	return out
+	return out, needsContext
 }
 
 // shenNameForHelper finds the entry whose GoName matches "Xxx" in "mustXxx".
@@ -602,6 +612,15 @@ func emitHelper(entry *specfile.TypeEntry, tt *specfile.TypeTable) string {
 		constructor = tt.ImportAlias + "." + constructor
 	}
 
+	// ctxArg is prepended to the constructor call when the type's
+	// constructor takes a context.Context (a `:runtime-via` premise).
+	// The helper supplies context.Background(); its own signature does
+	// not take a ctx so the generated test table stays unchanged.
+	ctxArg := ""
+	if entry.CtorTakesCtx {
+		ctxArg = "context.Background(), "
+	}
+
 	switch entry.Category {
 	case specfile.CatWrapper:
 		return fmt.Sprintf(
@@ -611,8 +630,8 @@ func emitHelper(entry *specfile.TypeEntry, tt *specfile.TypeTable) string {
 
 	case specfile.CatConstrained:
 		return fmt.Sprintf(
-			"func %s(x %s) %s { v, err := %s(x); if err != nil { panic(err) }; return v }\n",
-			helperName, entry.GoPrimType, qualified, constructor,
+			"func %s(x %s) %s { v, err := %s(%sx); if err != nil { panic(err) }; return v }\n",
+			helperName, entry.GoPrimType, qualified, constructor, ctxArg,
 		)
 
 	case specfile.CatComposite, specfile.CatGuarded:
@@ -625,8 +644,8 @@ func emitHelper(entry *specfile.TypeEntry, tt *specfile.TypeTable) string {
 		}
 		if entry.Category == specfile.CatGuarded {
 			return fmt.Sprintf(
-				"func %s(%s) %s { v, err := %s(%s); if err != nil { panic(err) }; return v }\n",
-				helperName, strings.Join(params, ", "), qualified, constructor, strings.Join(argNames, ", "),
+				"func %s(%s) %s { v, err := %s(%s%s); if err != nil { panic(err) }; return v }\n",
+				helperName, strings.Join(params, ", "), qualified, constructor, ctxArg, strings.Join(argNames, ", "),
 			)
 		}
 		return fmt.Sprintf(

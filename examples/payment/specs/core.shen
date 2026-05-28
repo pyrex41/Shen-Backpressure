@@ -10,7 +10,7 @@
 
 (datatype amount
   X : number;
-  (>= X 0) : verified;
+  (>= X 0) : verified; \* :runtime-via :eval *\
   ====================
   X : amount;)
 
