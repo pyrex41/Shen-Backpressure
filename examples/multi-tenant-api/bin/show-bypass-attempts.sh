@@ -74,7 +74,7 @@ for src in $ATTEMPTS; do
         # predicate, code review, or grep gate — is described in
         # the file itself).
         printf '| %d | `%s.go.bak` | %s | **compiles**, rejected by %s |\n' \
-            "$idx" "$base" "$(echo "$desc" | sed -e 's|"|\\"|g')" \
+            "$idx" "$base" "$desc" \
             "$(case $base in
                 02_*)  echo "runtime predicate \`(= User (head (head Jwt)))\`" ;;
                 03_*)  echo "code review (\`unsafe.Pointer\` red flag)" ;;
@@ -89,7 +89,7 @@ for src in $ATTEMPTS; do
             ERR_LINE=$(echo "$BUILD_OUT" | head -1)
         fi
         printf '| %d | `%s.go.bak` | %s | **FAILS at compile**: `%s` |\n' \
-            "$idx" "$base" "$(echo "$desc" | sed -e 's|"|\\"|g')" \
+            "$idx" "$base" "$desc" \
             "$(echo "$ERR_LINE" | sed -e 's|`|"|g' -e 's|"|""|g')"
     fi
 done
