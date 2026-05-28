@@ -83,15 +83,10 @@ func classifyDatatypeRule(specPath string, dt specfile.Datatype, r specfile.Rule
 	}
 	for _, v := range r.Verified {
 		prem := Premise{
-			ID:             premiseID(dt.Name, "verified", slugifyExpr(v.Raw)),
-			Expression:     fmt.Sprintf("%s : verified", v.Raw),
-			Discharge:      DischargeStatic,
-			DischargeBasis: BasisGuardConstructorValidates,
-			Rationale: fmt.Sprintf(
-				"shengen's generated constructor for %s rejects inputs that do not satisfy %s, so this premise holds for any value of type %s reachable in the impl.",
-				dt.Name, v.Raw, dt.Name,
-			),
+			ID:         premiseID(dt.Name, "verified", slugifyExpr(v.Raw)),
+			Expression: fmt.Sprintf("%s : verified", v.Raw),
 		}
+		applyVerifiedDischarge(&prem, dt.Name, v)
 		if guardPath != "" {
 			if line, ok := guardLines[dt.Name]; ok {
 				prem.CodeReferences = []string{fmt.Sprintf("%s:%d", guardPath, line)}
@@ -100,6 +95,58 @@ func classifyDatatypeRule(specPath string, dt specfile.Datatype, r specfile.Rule
 		rule.Premises = append(rule.Premises, prem)
 	}
 	return rule
+}
+
+// applyVerifiedDischarge sets the discharge classification for a
+// verified premise. A plain premise (no :runtime-via marker) is
+// statically discharged by the generated constructor. A premise
+// carrying a marker is classified by its runtime-via profile (A–D);
+// see docs/RUNTIME-VIA.md.
+func applyVerifiedDischarge(prem *Premise, dtName string, v specfile.VerifiedPremise) {
+	m := v.RuntimeVia
+	if m == nil {
+		prem.Discharge = DischargeStatic
+		prem.DischargeBasis = BasisGuardConstructorValidates
+		prem.Rationale = fmt.Sprintf(
+			"shengen's generated constructor for %s rejects inputs that do not satisfy %s, so this premise holds for any value of type %s reachable in the impl.",
+			dtName, v.Raw, dtName,
+		)
+		return
+	}
+	prem.RuntimeProfile = m.Profile()
+	switch m.Profile() {
+	case "B":
+		prem.Discharge = DischargeRuntimeEvaluator
+		prem.DischargeBasis = BasisRuntimeViaEvaluator
+		prem.Rationale = fmt.Sprintf(
+			"%s is evaluated at runtime by the shen-derive evaluator against the spec expression %s; the spec and the runtime check are the same source.",
+			dtName, v.Raw,
+		)
+	case "C":
+		prem.Discharge = DischargeRuntimeAttestedSampled
+		prem.DischargeBasis = BasisRuntimeViaSampledEquivalence
+		prem.RuntimeChecker = strPtr(m.Checker)
+		prem.Rationale = fmt.Sprintf(
+			"%s is checked at runtime by %s; a shen-derive sampled-equivalence test pins %s to the spec predicate %s so drift is caught at gate time.",
+			dtName, m.Checker, m.Checker, v.Raw,
+		)
+	case "D":
+		prem.Discharge = DischargeRuntimeAttestedDB
+		prem.DischargeBasis = BasisRuntimeViaDBAttested
+		prem.RuntimeChecker = strPtr(m.Checker)
+		prem.Rationale = fmt.Sprintf(
+			"%s is attested at runtime by the DB-backed checker %s; the constructor structurally requires a DB handle and the predicate %s holds for any constructed value.",
+			dtName, m.Checker, v.Raw,
+		)
+	default: // "A"
+		prem.Discharge = DischargeRuntimeAttested
+		prem.DischargeBasis = BasisRuntimeViaWitness
+		prem.RuntimeChecker = strPtr(m.Checker)
+		prem.Rationale = fmt.Sprintf(
+			"%s is checked at runtime by the bespoke checker %s; a compile-time witness makes the call non-skippable. The checker's correctness is part of the TCB (no sampled oracle).",
+			dtName, m.Checker,
+		)
+	}
 }
 
 // ClassifyDefine produces a Rule for a (define …) block. The
