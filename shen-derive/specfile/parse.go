@@ -49,6 +49,50 @@ type Premise struct {
 
 type VerifiedPremise struct {
 	Raw string // raw s-expression text, e.g. "(>= X 0)"
+	// RuntimeVia is the parsed `:runtime-via` annotation when the
+	// premise carries one (a trailing `\* :runtime-via … *\` Shen
+	// comment), nil otherwise. shengen strips this comment before
+	// tc+; the marker tells shen-derive how the premise is discharged
+	// at runtime (see docs/RUNTIME-VIA.md).
+	RuntimeVia *RuntimeViaMarker
+}
+
+// RuntimeViaMarker is the parsed form of a `:runtime-via` annotation.
+// Grammar: `:runtime-via {<fname> | :eval} [:sampled] [:requires-db]`.
+type RuntimeViaMarker struct {
+	// Checker is the bound checker function name (profiles A, C, D).
+	// Empty when Eval is true.
+	Checker string
+	// Eval is true for `:runtime-via :eval` — the shen-derive evaluator
+	// hosts the check directly from the spec predicate (profile B).
+	Eval bool
+	// Sampled is true for the `:sampled` modifier — shen-derive emits a
+	// committed test pinning the bespoke checker to the spec predicate
+	// (profile C).
+	Sampled bool
+	// RequiresDB is true for the `:requires-db` modifier — the checker
+	// takes a DB handle; the generated constructor demands one (profile
+	// D).
+	RequiresDB bool
+}
+
+// Profile returns the discharge profile letter (A–D) per
+// docs/RUNTIME-VIA.md. A nil marker (plain `verified` premise) returns
+// "". Precedence: Eval→B, RequiresDB→D, Sampled→C, else→A.
+func (m *RuntimeViaMarker) Profile() string {
+	if m == nil {
+		return ""
+	}
+	switch {
+	case m.Eval:
+		return "B"
+	case m.RequiresDB:
+		return "D"
+	case m.Sampled:
+		return "C"
+	default:
+		return "A"
+	}
 }
 
 type Conclusion struct {
@@ -118,12 +162,13 @@ func ParseFile(path string) (*SpecFile, error) {
 	}
 	raw := string(data)
 	docs := extractDocAnnotations(raw)
+	markers := extractRuntimeViaMarkers(raw)
 	content := stripShenComments(raw)
 
 	sf := &SpecFile{Path: path}
 
 	for _, block := range extractBlocks(content, "(datatype ") {
-		if dt, err := parseDatatype(block); err != nil {
+		if dt, err := parseDatatype(block, markers); err != nil {
 			return nil, fmt.Errorf("%s: datatype: %w", path, err)
 		} else if dt != nil {
 			if d, ok := docs["(datatype "+dt.Name]; ok {
@@ -286,6 +331,139 @@ func nextFormKey(raw string, start int) string {
 	return ""
 }
 
+// extractRuntimeViaMarkers scans the RAW source (before comment
+// stripping) for trailing `\* :runtime-via … *\` annotations on
+// verified-premise lines. It returns a map keyed by
+// "<datatype-name>|<premise-raw>" so the parser can re-attach each
+// marker to its premise after the global comment strip has removed it.
+//
+// The walker tracks string literals and block comments so a `:doc`
+// comment or a `: verified` substring inside prose is never mistaken
+// for a marker. The current datatype name is tracked by detecting
+// `(datatype NAME` forms outside comments and strings.
+func extractRuntimeViaMarkers(raw string) map[string]*RuntimeViaMarker {
+	out := map[string]*RuntimeViaMarker{}
+	currentDatatype := ""
+	i := 0
+	for i < len(raw) {
+		// Skip string literals.
+		if raw[i] == '"' {
+			i++
+			for i < len(raw) {
+				if raw[i] == '\\' && i+1 < len(raw) {
+					i += 2
+					continue
+				}
+				if raw[i] == '"' {
+					i++
+					break
+				}
+				i++
+			}
+			continue
+		}
+		// Block comment: \* ... *\
+		if i+1 < len(raw) && raw[i] == '\\' && raw[i+1] == '*' {
+			openIdx := i
+			end := strings.Index(raw[i+2:], "*\\")
+			if end == -1 {
+				return out
+			}
+			body := strings.TrimSpace(raw[i+2 : i+2+end])
+			i += end + 4
+			marker := parseRuntimeViaMarker(body)
+			if marker == nil {
+				continue
+			}
+			// The marker attaches to the premise on the same line,
+			// before the comment opener.
+			lineStart := strings.LastIndexByte(raw[:openIdx], '\n') + 1
+			prefix := raw[lineStart:openIdx]
+			if premiseRaw, ok := premiseRawFromLinePrefix(prefix); ok && currentDatatype != "" {
+				out[currentDatatype+"|"+premiseRaw] = marker
+			}
+			continue
+		}
+		// Line comment: \\ ...
+		if i+1 < len(raw) && raw[i] == '\\' && raw[i+1] == '\\' {
+			for i < len(raw) && raw[i] != '\n' {
+				i++
+			}
+			continue
+		}
+		// Detect `(datatype NAME` outside comments and strings.
+		if raw[i] == '(' && strings.HasPrefix(raw[i:], "(datatype ") {
+			rest := raw[i+len("(datatype "):]
+			nameEnd := 0
+			for nameEnd < len(rest) {
+				c := rest[nameEnd]
+				if c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '(' || c == ')' {
+					break
+				}
+				nameEnd++
+			}
+			currentDatatype = rest[:nameEnd]
+			i += len("(datatype ") + nameEnd
+			continue
+		}
+		i++
+	}
+	return out
+}
+
+// parseRuntimeViaMarker parses a block-comment body into a marker, or
+// returns nil if the body is not a `:runtime-via` annotation. Grammar:
+// `:runtime-via {<fname> | :eval} [:sampled] [:requires-db]`.
+func parseRuntimeViaMarker(body string) *RuntimeViaMarker {
+	rest := ""
+	for _, prefix := range []string{":runtime-via ", "runtime-via "} {
+		if strings.HasPrefix(body, prefix) {
+			rest = strings.TrimSpace(strings.TrimPrefix(body, prefix))
+			break
+		}
+	}
+	if rest == "" {
+		return nil
+	}
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		return nil
+	}
+	m := &RuntimeViaMarker{}
+	if fields[0] == ":eval" {
+		m.Eval = true
+	} else {
+		m.Checker = fields[0]
+	}
+	for _, tok := range fields[1:] {
+		switch tok {
+		case ":sampled":
+			m.Sampled = true
+		case ":requires-db":
+			m.RequiresDB = true
+		}
+	}
+	return m
+}
+
+// premiseRawFromLinePrefix extracts the verified-premise raw expression
+// from the text preceding a runtime-via comment on the same line, e.g.
+// "  (> (length X) 0) : verified; " → "(> (length X) 0)". The result
+// matches the Raw value buildRule computes for the same premise after
+// comment stripping.
+func premiseRawFromLinePrefix(prefix string) (string, bool) {
+	s := strings.TrimSpace(prefix)
+	s = strings.TrimSuffix(s, ";")
+	s = strings.TrimSpace(s)
+	if strings.HasSuffix(s, ": verified") {
+		return strings.TrimSpace(strings.TrimSuffix(s, ": verified")), true
+	}
+	if strings.HasPrefix(s, "if ") {
+		return strings.TrimSpace(strings.TrimPrefix(s, "if ")), true
+	}
+	return "", false
+}
+
 // FindDefine returns the named define block or nil.
 func (sf *SpecFile) FindDefine(name string) *Define {
 	for i := range sf.Defines {
@@ -413,7 +591,7 @@ func extractBlocks(content, prefix string) []string {
 
 // --- Datatype parser ---
 
-func parseDatatype(block string) (*Datatype, error) {
+func parseDatatype(block string, markers map[string]*RuntimeViaMarker) (*Datatype, error) {
 	block = strings.TrimPrefix(block, "(datatype ")
 	nlIdx := strings.Index(block, "\n")
 	if nlIdx == -1 {
@@ -432,6 +610,14 @@ func parseDatatype(block string) (*Datatype, error) {
 			return
 		}
 		if r := buildRule(premLines, concLines); r != nil {
+			// Associate any :runtime-via marker extracted from the raw
+			// source (before comment stripping) with its verified
+			// premise. Keyed by datatype name + premise raw expression.
+			for i := range r.Verified {
+				if m, ok := markers[name+"|"+r.Verified[i].Raw]; ok {
+					r.Verified[i].RuntimeVia = m
+				}
+			}
 			dt.Rules = append(dt.Rules, *r)
 		}
 	}

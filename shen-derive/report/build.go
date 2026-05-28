@@ -122,6 +122,14 @@ func summarise(rules []Rule) Summary {
 				s.PremisesRuntimeSampled++
 			case DischargeUnproven:
 				s.PremisesUnproven++
+			case DischargeRuntimeAttested:
+				s.PremisesRuntimeAttested++
+			case DischargeRuntimeEvaluator:
+				s.PremisesRuntimeEvaluator++
+			case DischargeRuntimeAttestedSampled:
+				s.PremisesRuntimeAttestedSampled++
+			case DischargeRuntimeAttestedDB:
+				s.PremisesRuntimeAttestedDB++
 			}
 		}
 	}
