@@ -95,6 +95,13 @@ const (
 )
 
 // Premise is one obligation of a rule and how it's discharged.
+//
+// The runtime-via fields (RuntimeProfile, RuntimeChecker,
+// EquivalenceTest, DBQueryExcerpt) are populated only for premises
+// carrying a `:runtime-via` annotation. They are additive — premises
+// discharged statically or by sampling omit them entirely, so reports
+// for projects with no runtime-via are byte-identical to pre-runtime-via
+// output. See docs/RUNTIME-VIA.md for the four profiles (A–D).
 type Premise struct {
 	ID             string   `json:"id"`
 	Expression     string   `json:"expression"`
@@ -105,6 +112,22 @@ type Premise struct {
 	SamplesPassed  int      `json:"samples_passed"`
 	SamplesFailed  int      `json:"samples_failed"`
 	SampleSeed     *string  `json:"sample_seed"`
+
+	// RuntimeProfile is "A" | "B" | "C" | "D" for runtime-via premises,
+	// "" otherwise. Rendered in the audit report as the human-facing
+	// profile label (see RuntimeProfileLabel).
+	RuntimeProfile string `json:"runtime_profile,omitempty"`
+	// RuntimeChecker names the bound checker function for profiles
+	// A, C, and D. Nil for profile B (the evaluator is the checker).
+	RuntimeChecker *string `json:"runtime_checker,omitempty"`
+	// EquivalenceTest is the relative path to the generated
+	// sampled-equivalence test that pins the bespoke checker to the
+	// spec predicate. Profile C only.
+	EquivalenceTest *string `json:"equivalence_test,omitempty"`
+	// DBQueryExcerpt is the SQL (or other query) the DB-attested
+	// checker registered at gate time, surfaced so an auditor sees the
+	// query without leaving the report. Profile D only.
+	DBQueryExcerpt *string `json:"db_query_excerpt,omitempty"`
 }
 
 // Discharge values.
@@ -112,6 +135,13 @@ const (
 	DischargeStatic         = "static"
 	DischargeRuntimeSampled = "runtime-sample"
 	DischargeUnproven       = "unproven"
+
+	// Runtime-via discharge values (additive, v1). Each corresponds to
+	// one of the four profiles in docs/RUNTIME-VIA.md.
+	DischargeRuntimeAttested        = "runtime-attested"         // Profile A: bespoke checker, no oracle
+	DischargeRuntimeEvaluator       = "runtime-evaluator"        // Profile B: evaluator-hosted from spec
+	DischargeRuntimeAttestedSampled = "runtime-attested-sampled" // Profile C: bespoke + sampled-equivalence
+	DischargeRuntimeAttestedDB      = "runtime-attested-db"      // Profile D: DB-attested
 )
 
 // DischargeBasis values used in v0.
@@ -120,7 +150,31 @@ const (
 	BasisGuardConstructorValidates = "guard-constructor-validates"
 	BasisShenDeriveSampled         = "shen-derive-sampled"
 	BasisNotDischarged             = "not-discharged"
+
+	// Runtime-via discharge bases (additive, v1).
+	BasisRuntimeViaWitness            = "runtime-via-witness"             // Profile A
+	BasisRuntimeViaEvaluator          = "runtime-via-evaluator"          // Profile B
+	BasisRuntimeViaSampledEquivalence = "runtime-via-sampled-equivalence" // Profile C
+	BasisRuntimeViaDBAttested         = "runtime-via-db-attested"        // Profile D
 )
+
+// RuntimeProfileLabel maps the internal profile letter to the
+// human-facing label used in the audit report. Empty profile ("")
+// returns "".
+func RuntimeProfileLabel(profile string) string {
+	switch profile {
+	case "A":
+		return "bespoke checker"
+	case "B":
+		return "evaluator-hosted"
+	case "C":
+		return "bespoke checker + sampled equivalence"
+	case "D":
+		return "DB-attested"
+	default:
+		return ""
+	}
+}
 
 // CounterExample is a concrete witness of a rule violation.
 type CounterExample struct {
@@ -146,6 +200,14 @@ type Summary struct {
 	PremisesStatic         int `json:"premises_static"`
 	PremisesRuntimeSampled int `json:"premises_runtime_sampled"`
 	PremisesUnproven       int `json:"premises_unproven"`
+
+	// Runtime-via premise counters (additive, v1). omitempty so reports
+	// with no runtime-via premises stay byte-identical to pre-runtime-via
+	// output.
+	PremisesRuntimeAttested        int `json:"premises_runtime_attested,omitempty"`
+	PremisesRuntimeEvaluator       int `json:"premises_runtime_evaluator,omitempty"`
+	PremisesRuntimeAttestedSampled int `json:"premises_runtime_attested_sampled,omitempty"`
+	PremisesRuntimeAttestedDB      int `json:"premises_runtime_attested_db,omitempty"`
 }
 
 // Signature is the placeholder for a cryptographic signature over
