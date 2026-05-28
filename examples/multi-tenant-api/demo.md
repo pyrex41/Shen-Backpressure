@@ -361,7 +361,7 @@ the attempt is rotated into the package and built.
 | 1 | `01_direct_struct_literal.go.bak` | forge a TenantAccess by constructing the struct literal | **FAILS at compile**: `internal/bypass_harness/01_direct_struct_literal.go:28:3: cannot refer to unexported field principal in struct literal of type shenguard.TenantAccess` |
 | 2 | `02_mismatched_user_id.go.bak` | pair token-A with user-B's UserId (the singron HN | **compiles**, rejected by runtime predicate `(= User (head (head Jwt)))` |
 | 3 | `03_reflection_escape.go.bak` | forge a TenantAccess via unsafe reflection. | **compiles**, rejected by code review (`unsafe.Pointer` red flag) |
-| 4 | `04_handler_skips_check.go.bak` | a handler that \"forgets\" to call verified.CheckTenantAccess | **compiles**, rejected by the `shenguard.New*` grep gate in `bin/shenguard-audit.sh` |
+| 4 | `04_handler_skips_check.go.bak` | a handler that "forgets" to call verified.CheckTenantAccess | **compiles**, rejected by the `shenguard.New*` grep gate in `bin/shenguard-audit.sh` |
 | 5 | `05_inject_isowned_true.go.bak` | call shenguard.NewResourceAccess directly with | **compiles**, rejected by the `shenguard.New*` grep gate in `bin/shenguard-audit.sh` |
 
 **How to read the table.** A "FAILS at compile" outcome is a
