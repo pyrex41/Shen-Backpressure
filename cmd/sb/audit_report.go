@@ -141,8 +141,13 @@ func renderAuditMarkdown(r *DischargeReport, sourcePath string) string {
 	s := r.Summary
 	fmt.Fprintf(&b, "- **Rules:** %d total — %d discharged, %d violated, %d unproven\n",
 		s.RuleCount, s.RulesDischarged, s.RulesViolated, s.RulesUnproven)
-	fmt.Fprintf(&b, "- **Premises:** %d total — %d static, %d runtime-sampled, %d unproven\n",
-		s.PremisesTotal, s.PremisesStatic, s.PremisesRuntimeSampled, s.PremisesUnproven)
+	if s.PremisesRuntimeEvaluator > 0 {
+		fmt.Fprintf(&b, "- **Premises:** %d total — %d static, %d runtime-evaluator, %d runtime-sampled, %d unproven\n",
+			s.PremisesTotal, s.PremisesStatic, s.PremisesRuntimeEvaluator, s.PremisesRuntimeSampled, s.PremisesUnproven)
+	} else {
+		fmt.Fprintf(&b, "- **Premises:** %d total — %d static, %d runtime-sampled, %d unproven\n",
+			s.PremisesTotal, s.PremisesStatic, s.PremisesRuntimeSampled, s.PremisesUnproven)
+	}
 
 	if s.RulesViolated > 0 {
 		b.WriteString("\n> :warning: **At least one rule is currently violated.** See per-rule sections below for counter-examples.\n")
