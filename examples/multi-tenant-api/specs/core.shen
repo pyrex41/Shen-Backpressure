@@ -139,6 +139,15 @@
 
 \* --- TenantAccess — requires authenticated principal who is a member --- *\
 
+\* @decidable-fragment: tenant-access
+   This rule is tagged for the Decidable-Shen-fragment tier.
+   Judgment (sequent/Prolog): no general recursion, Datalog/Horn body,
+   only allowed total forms (=, element?, comparisons), bounded.
+   Can be certified + run directly in shen-go / shen-lua etc with
+   termination guarantee (middle tier in lattice: Cedar ⊂ ... ⊂ Decidable-Shen-fragment ⊂ full-TC pure-Shen).
+   tc+ / small Prolog pass can ignore for now or discharge later.
+ *\
+
 (datatype tenant-access
   Principal : authenticated-principal;
   Tenant : tenant-id;
@@ -148,6 +157,12 @@
   [Principal Tenant IsMember] : tenant-access;)
 
 \* --- ResourceAccess — requires tenant access + tenant owns resource --- *\
+
+\* @decidable-fragment: resource-access
+   Same judgment as tenant-access: Horn-clause verified premise, total,
+   no recursion. Certifiable for direct execution in Shen runtime ports
+   (native data, guaranteed termination for the policy slice).
+ *\
 
 (datatype resource-access
   Access : tenant-access;

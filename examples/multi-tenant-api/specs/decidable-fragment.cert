@@ -1,0 +1,5 @@
+# decidable-fragment certified (sketch)
+# targets: tenant-access,resource-access
+# judgment: sequent-calculus + prolog gatekeeper (no general recursion; Horn bodies only)
+# tier: Decidable-Shen-fragment (Cedar ⊂ Rego ⊂ this ⊂ full-TC pure-Shen)
+# can run directly in shen-* ports or via total-eval stub

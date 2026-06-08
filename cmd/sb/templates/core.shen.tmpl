@@ -20,3 +20,15 @@
   Qty : amount;
   ===========================
   [Id Qty] : line-item;)
+
+\* Example of decidable-fragment tagging (for the native-Shen terminating
+   runtime policy tier parallel to Cedar). The judgment (sequent calculus
+   + Prolog) + tiny emitter certifies no general recursion + stratified
+   Horn bodies. (See plan + shen-cedar for lattice.)
+\*
+\* @decidable-fragment: example-policy-predicate
+(datatype example-policy-predicate
+  X : string;
+  (= X "allow") : verified;
+  ===========================
+  X : example-policy-predicate;)
