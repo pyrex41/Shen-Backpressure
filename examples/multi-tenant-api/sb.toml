@@ -67,5 +67,31 @@ impl_func = "SameUser"
 guard_pkg = "multi-tenant-api/internal/shenguard"
 out_file  = "internal/derived/same_user_spec_test.go"
 
+# Gate 6+ — runtime policy emission for Cedar (SMT tier) + Rego (middle terminating tier).
+#
+# `sb context` surfaces both under .cedar / .rego (and markdown sections).
+# `sb policy` (and auto "shen-cedar" + "shen-rego" gates) run the respective
+# emitters. --regen writes committed; otherwise drift detection (tempfile diff).
+#
+# Cedar uses JSON schema/policies (cedar validate/authorize).
+# Rego uses primary .rego text (opa eval / conftest). Same targets for n-way diff.
+[cedar]
+schema_out   = "policies/cedar/schema.json"
+policies_out = "policies/cedar/policies.json"
+targets      = ["tenant-access", "resource-access"]
+
+[rego]
+module_out = "policies/rego/authz.rego"
+targets    = ["tenant-access", "resource-access"]
+package    = "multi_tenant_authz"
+
+# Decidable-Shen-fragment tier (native-Shen but terminating "decidable" runtime policy).
+# Parallel to [cedar]; uses @decidable-fragment annotations in specs (or targets).
+# `sb policy --decidable` (and the "shen-decidable" gate) runs the tiny recognizer/check/cert
+# inside shen-cedar + the pure-shen-fragment-eval stub for differential n-way.
+# At a Shen port (shen-go etc) the certified restricted rules can be embedded directly.
+[decidable-shen]
+targets = ["tenant-access", "resource-access"]
+
 [loop]
 harness = "claude -p"

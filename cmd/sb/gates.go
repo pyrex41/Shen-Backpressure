@@ -162,6 +162,45 @@ func buildGateList(cfg *Config) []gate {
 		}
 	}
 
+	// Always append shen-cedar (sb policy) gate when [cedar] is present in sb.toml
+	// (modeled exactly after derive auto-registration).
+	if cfg.Cedar.SchemaOut != "" || cfg.Cedar.PoliciesOut != "" || len(cfg.Cedar.Targets) > 0 {
+		if self, err := os.Executable(); err == nil {
+			gates = append(gates, gate{
+				name: "shen-cedar",
+				kind: GateKindCommand,
+				cmd:  self,
+				args: []string{"policy"},
+			})
+		}
+	}
+
+	// Append shen-rego (sb policy) gate when [rego] present. The policy command
+	// handles Rego emission+drift+opa validate when RegoConfig is populated.
+	if cfg.Rego.ModuleOut != "" || len(cfg.Rego.Targets) > 0 {
+		if self, err := os.Executable(); err == nil {
+			gates = append(gates, gate{
+				name: "shen-rego",
+				kind: GateKindCommand,
+				cmd:  self,
+				args: []string{"policy"},
+			})
+		}
+	}
+
+	// Always append shen-decidable gate (decidable-Shen-fragment tier) when [decidable-shen] present.
+	// Reuses the policy subcommand for sketch (it will detect DecidableShenConfig and run cert + stub eval).
+	if cfg.DecidableShen.Enabled || len(cfg.DecidableShen.Targets) > 0 {
+		if self, err := os.Executable(); err == nil {
+			gates = append(gates, gate{
+				name: "shen-decidable",
+				kind: GateKindCommand,
+				cmd:  self,
+				args: []string{"policy", "--decidable"},
+			})
+		}
+	}
+
 	return gates
 }
 

@@ -1,0 +1,18 @@
+entity User in [Tenant] = {
+  "id"?: String
+};
+entity Tenant;
+entity Resource = {
+  "tenantId"?: String
+};
+
+action "read" appliesTo {
+  principal: [User],
+  resource: [Resource],
+  context: {
+    exp: Long,
+    isMember: Bool,
+    isOwned: Bool,
+    level: String
+  }
+};

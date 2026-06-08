@@ -1,4 +1,4 @@
-.PHONY: all shengen build test shen-check audit run run-relaxed clean
+.PHONY: all shengen build test shen-check audit run run-relaxed cedar-verify rego-verify policy-verify clean clean-policies
 
 # Run all verification gates in order
 all: shengen test build shen-check audit
@@ -23,6 +23,20 @@ shen-check:
 audit:
 	./bin/shenguard-audit.sh
 
+# Gate 6 (n-way): Differential agreement (guard ctors vs Cedar vs Rego vs decidable-fragment).
+# This is the soundness gate for the lowering across tiers (Cedar ⊂ Rego ⊂ Decidable-Shen-fragment).
+# The cedar-verify binary (generalized) drives:
+#   - shen-cedar + real `cedar authorize` (or in-proc) on emitted JSON
+#   - shen-rego + `opa eval` on emitted .rego for same samples
+#   - (sketch) pure-shen-fragment total-eval
+# Reports + jsonl under policies/*/ ; committed samples enable drift detection.
+cedar-verify:
+	go run ./cmd/cedar-verify -max-samples=24
+
+# Convenience: run the (now multi-emitter) verify focusing on Rego path.
+rego-verify:
+	go run ./cmd/cedar-verify -max-samples=24
+
 # Run Ralph loop (strict mode)
 run:
 	go run ./cmd/ralph
@@ -33,3 +47,8 @@ run-relaxed:
 
 clean:
 	rm -f bin/shengen
+
+# Clean emitted Cedar policies + verify artifacts (sketch for the new gate)
+clean-policies:
+	rm -rf policies/cedar
+

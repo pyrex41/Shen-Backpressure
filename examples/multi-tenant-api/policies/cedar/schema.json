@@ -1,0 +1,82 @@
+{
+  "schema": "2021-06-01",
+  "entities": {
+    "Resource": {
+      "shape": {
+        "attributes": {
+          "id": {
+            "type": "String"
+          },
+          "tenantId": {
+            "type": "String"
+          }
+        },
+        "type": "Record"
+      }
+    },
+    "Tenant": {
+      "shape": {
+        "attributes": {
+          "id": {
+            "type": "String"
+          }
+        },
+        "type": "Record"
+      }
+    },
+    "User": {
+      "memberOfTypes": [
+        "Tenant"
+      ],
+      "shape": {
+        "attributes": {
+          "id": {
+            "type": "String"
+          }
+        },
+        "type": "Record"
+      }
+    }
+  },
+  "actions": {
+    "read": {
+      "appliesTo": {
+        "context": {
+          "attributes": {
+            "exp": {
+              "type": "Long"
+            },
+            "isMember": {
+              "type": "Bool"
+            },
+            "isOwned": {
+              "type": "Bool"
+            },
+            "level": {
+              "type": "String"
+            },
+            "secret": {
+              "type": "String"
+            },
+            "sig": {
+              "type": "String"
+            },
+            "user": {
+              "type": "String"
+            },
+            "x": {
+              "type": "String"
+            }
+          },
+          "type": "Record"
+        },
+        "principalTypes": [
+          "User"
+        ],
+        "resourceTypes": [
+          "Resource"
+        ]
+      }
+    }
+  }
+}
