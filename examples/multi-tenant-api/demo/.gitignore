@@ -1,0 +1,6 @@
+# Transient demo output — keep the .sh / .md demo files tracked.
+*.log
+.snap-*/
+demo-snap.*/
+*.tmp
+*.bak
