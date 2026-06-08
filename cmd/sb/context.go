@@ -14,12 +14,15 @@ import (
 // `sb context` for both JSON and Markdown output, and by the Ralph loop to
 // hydrate LLM harness prompts.
 type ProjectContext struct {
-	Project      ProjectInfo            `json:"project"`
-	Types        []TypeInfo             `json:"types"`
-	Derive       *DeriveInfo            `json:"derive,omitempty"`
-	Gates        []GateInfo             `json:"gates"`
-	Discharge    *DischargeContextInfo  `json:"discharge,omitempty"`
-	Backpressure *BackpressureInfo      `json:"backpressure,omitempty"`
+	Project       ProjectInfo              `json:"project"`
+	Types         []TypeInfo               `json:"types"`
+	Derive        *DeriveInfo              `json:"derive,omitempty"`
+	Cedar         *CedarPolicyInfo         `json:"cedar,omitempty"`          // Cedar (SMT-strong) runtime policy emitter
+	Rego          *RegoPolicyInfo          `json:"rego,omitempty"`           // Rego (OPA, middle terminating runtime) emitter; .rego text primary
+	DecidableShen *DecidableShenPolicyInfo `json:"decidable_shen,omitempty"` // Decidable-Shen-fragment (native terminating) runtime policy tier
+	Gates         []GateInfo               `json:"gates"`
+	Discharge     *DischargeContextInfo    `json:"discharge,omitempty"`
+	Backpressure  *BackpressureInfo        `json:"backpressure,omitempty"`
 }
 
 // DischargeContextInfo is the context-rendering view of the latest
@@ -89,6 +92,38 @@ type DeriveSpecInfo struct {
 	OutFile  string `json:"out_file"`
 }
 
+// CedarPolicyInfo summarises [cedar] (and future sibling policy emitter) config
+// for sb context output and prompt hydration. This makes the runtime policy
+// targets visible to agents and the discharge/evidence story (Cedar JSON as a
+// stronger provenance tier than pure sampling for the access slice).
+type CedarPolicyInfo struct {
+	Enabled     bool     `json:"enabled"`
+	SchemaOut   string   `json:"schema_out,omitempty"`
+	PoliciesOut string   `json:"policies_out,omitempty"`
+	Targets     []string `json:"targets,omitempty"`
+}
+
+// RegoPolicyInfo summarises [rego] config for context + prompts.
+// Primary artifact is the .rego text module (opa eval friendly).
+// Documents the middle tier position: more expressive than Cedar for
+// aggregation/document/infra gating rules; still terminating.
+type RegoPolicyInfo struct {
+	Enabled   bool     `json:"enabled"`
+	ModuleOut string   `json:"module_out,omitempty"`
+	Targets   []string `json:"targets,omitempty"`
+}
+
+// DecidableShenPolicyInfo summarises the decidable-Shen-fragment tier
+// (the "runtime shen that is also decidable", middle lattice tier).
+// Annotation-driven ( @decidable-fragment ), certified by fragment judgment
+// (sequent calculus / Prolog gatekeeper). Can run directly in Shen ports or
+// via tiny total-eval stub. Extends differential n-way comparison.
+type DecidableShenPolicyInfo struct {
+	Enabled bool     `json:"enabled"`
+	Targets []string `json:"targets,omitempty"`
+	// Future: CertPath, EvalStub etc for the emitter artifacts.
+}
+
 // GateInfo mirrors a single gate from the manifest (or the synthesised legacy
 // five-gate list) for context output.
 //
@@ -151,6 +186,30 @@ func BuildContext(cfg *Config) (*ProjectContext, error) {
 			})
 		}
 		ctx.Derive = di
+	}
+
+	if cfg.Cedar.SchemaOut != "" || cfg.Cedar.PoliciesOut != "" || len(cfg.Cedar.Targets) > 0 {
+		ctx.Cedar = &CedarPolicyInfo{
+			Enabled:     true,
+			SchemaOut:   cfg.Cedar.SchemaOut,
+			PoliciesOut: cfg.Cedar.PoliciesOut,
+			Targets:     append([]string(nil), cfg.Cedar.Targets...),
+		}
+	}
+
+	if cfg.Rego.ModuleOut != "" || len(cfg.Rego.Targets) > 0 {
+		ctx.Rego = &RegoPolicyInfo{
+			Enabled:   true,
+			ModuleOut: cfg.Rego.ModuleOut,
+			Targets:   append([]string(nil), cfg.Rego.Targets...),
+		}
+	}
+
+	if cfg.DecidableShen.Enabled || len(cfg.DecidableShen.Targets) > 0 {
+		ctx.DecidableShen = &DecidableShenPolicyInfo{
+			Enabled: true,
+			Targets: append([]string(nil), cfg.DecidableShen.Targets...),
+		}
 	}
 
 	if di := readDischargeContext(DischargeReportPath); di != nil {
@@ -250,6 +309,20 @@ func buildGateInfos(cfg *Config) []GateInfo {
 	}
 	if len(cfg.DeriveSpecs) > 0 {
 		out = append(out, GateInfo{Name: "shen-derive", Kind: "derive"})
+	}
+	// Append shen-cedar policy gate entry (for context listing) when CedarConfig present,
+	// matching the auto-append logic in gates.go and derive handling.
+	if cfg.Cedar.SchemaOut != "" || cfg.Cedar.PoliciesOut != "" || len(cfg.Cedar.Targets) > 0 {
+		out = append(out, GateInfo{Name: "shen-cedar", Kind: "policy"})
+	}
+	// Append shen-rego policy gate entry (parallel to cedar).
+	if cfg.Rego.ModuleOut != "" || len(cfg.Rego.Targets) > 0 {
+		out = append(out, GateInfo{Name: "shen-rego", Kind: "policy"})
+	}
+	// Append shen-decidable (decidable fragment) gate when DecidableShen config present.
+	// (Sketch: certification + pure-shen-fragment-eval for differential.)
+	if cfg.DecidableShen.Enabled || len(cfg.DecidableShen.Targets) > 0 {
+		out = append(out, GateInfo{Name: "shen-decidable", Kind: "policy"})
 	}
 	// Defensive overlay of last-run results. readGatesLastRun returns
 	// nil on any I/O or parse error; gateLastResultByName returns nil
@@ -354,6 +427,49 @@ func (ctx *ProjectContext) RenderMarkdown() string {
 
 	if ctx.Discharge != nil {
 		renderDischargeSection(&b, ctx.Discharge)
+	}
+
+	if ctx.Cedar != nil && ctx.Cedar.Enabled {
+		b.WriteString("\n### Cedar Policies (runtime emitter)\n\n")
+		if ctx.Cedar.SchemaOut != "" {
+			fmt.Fprintf(&b, "- schema: %s\n", ctx.Cedar.SchemaOut)
+		}
+		if ctx.Cedar.PoliciesOut != "" {
+			fmt.Fprintf(&b, "- policies: %s\n", ctx.Cedar.PoliciesOut)
+		}
+		if len(ctx.Cedar.Targets) > 0 {
+			fmt.Fprintf(&b, "- targets: %s\n", strings.Join(ctx.Cedar.Targets, ", "))
+		} else {
+			b.WriteString("- targets: (inferred from shape / @policy-target annotations)\n")
+		}
+		b.WriteString("(Cedar is the SMT-strongest tier for snapshot access predicates.)\n")
+	}
+
+	if ctx.Rego != nil && ctx.Rego.Enabled {
+		b.WriteString("\n### Rego Policies (OPA middle-tier terminating runtime emitter)\n\n")
+		if ctx.Rego.ModuleOut != "" {
+			fmt.Fprintf(&b, "- module (primary text .rego): %s\n", ctx.Rego.ModuleOut)
+		}
+		if len(ctx.Rego.Targets) > 0 {
+			fmt.Fprintf(&b, "- targets: %s\n", strings.Join(ctx.Rego.Targets, ", "))
+		} else {
+			b.WriteString("- targets: (inferred from shape / @policy-target annotations)\n")
+		}
+		b.WriteString("(Rego: Datalog-derived, supports aggregation/joins/walk/graph for what Cedar cannot express. Primary form is text .rego (opa eval / conftest). Reserve for non-hot-path + infra gating. Lattice: Cedar (SMT) ⊂ Rego (terminating foreign) ⊂ Decidable-Shen-fragment ⊂ full-TC pure-Shen.)\n")
+	}
+
+	if ctx.DecidableShen != nil && ctx.DecidableShen.Enabled {
+		b.WriteString("\n### Decidable-Shen-Fragment (native runtime policy tier)\n\n")
+		b.WriteString("Shen-native but decidable fragment (sequent calculus + Prolog gatekeeper).\n")
+		b.WriteString("Restricted: no general recursion, stratified/Horn bodies, total forms only.\n")
+		if len(ctx.DecidableShen.Targets) > 0 {
+			fmt.Fprintf(&b, "- targets: %s\n", strings.Join(ctx.DecidableShen.Targets, ", "))
+		} else {
+			b.WriteString("- targets: (inferred or @decidable-fragment annotated; see specs)\n")
+		}
+		b.WriteString("- emitter/mode: tiny recognizer + certifier (or total-eval stub); can run directly in shen-* ports with termination guarantee.\n")
+		b.WriteString("- lattice: Cedar ⊂ Rego ⊂ Decidable-Shen-fragment ⊂ full-TC pure-Shen\n")
+		b.WriteString("- differential: extends n-way (guard vs Cedar vs pure-shen-fragment-eval on same samples)\n")
 	}
 
 	if ctx.Backpressure != nil && ctx.Backpressure.HasFailures {

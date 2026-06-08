@@ -718,3 +718,43 @@ cat plans/fix_plan.md
 - [x] Build htmx admin dashboard (tenant list, user list, access logs, resource browser)
 - [x] Integration tests for proof chain (cross-tenant access rejected, expired token rejected, non-member rejected, valid access accepted)
 ```
+
+## sb context and sb policy with Cedar config
+
+With the added `sb.toml` (containing a `[cedar]` section targeting the access predicates `tenant-access` and `resource-access` from the spec), `sb context` now surfaces Cedar emitter config (for prompt hydration and visibility of the runtime policy tier).
+
+Reproducible verification (run from the `examples/multi-tenant-api/` directory, assuming `sb` on PATH or using `../../cmd/sb/sb` / `go run ../../cmd/sb`):
+
+```bash
+sb context --format json | jq '.cedar'
+```
+
+Expected (illustrative; paths from sb.toml):
+
+```json
+{
+  "enabled": true,
+  "schema_out": "policies/cedar/schema.json",
+  "policies_out": "policies/cedar/policies.json",
+  "targets": [
+    "tenant-access",
+    "resource-access"
+  ]
+}
+```
+
+The gates list in context (and `sb gates`) will also include the auto-registered "shen-cedar" entry (a `sb policy` subcommand invocation) when Cedar config is present:
+
+```bash
+sb context --format json | jq '.gates | map(select(.name == "shen-cedar"))'
+```
+
+`sb policy --help` shows the subcommand (modeled on derive/gen, using FindShenCedar + --regen vs. drift).
+
+```bash
+sb policy --help
+sb policy --regen   # to (re)generate the committed policies/cedar/*.json
+sb policy           # drift check (fails if committed outputs differ from emitter)
+```
+
+(See cmd/sb/policy.go, config.go:FindShenCedar, gates.go:buildGateList, context.go:BuildContext/buildGateInfos, and the sb.toml [cedar] table.)

@@ -1,0 +1,458 @@
+{
+  "format_version": 1,
+  "policy_store_id": "shen-backpressure-v0",
+  "policies": [
+    {
+      "policy_id": "permit-tenant-access-0",
+      "effect": "permit",
+      "annotations": {
+        "shen_conclusion": "tenant-access",
+        "shen_datatype": "tenant-access",
+        "shen_source": "datatype tenant-access",
+        "shen_variant": "0"
+      },
+      "definition": {
+        "action": {
+          "op": "All"
+        },
+        "conditions": [
+          {
+            "body": {
+              "==": {
+                "left": {
+                  ".": {
+                    "attr": "level",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": "tenant"
+                }
+              }
+            },
+            "kind": "when"
+          },
+          {
+            "body": {
+              "==": {
+                "left": {
+                  ".": {
+                    "attr": "isMember",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": true
+                }
+              }
+            },
+            "kind": "when"
+          },
+          {
+            "body": {
+              "!=": {
+                "left": {
+                  ".": {
+                    "attr": "sig",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": ""
+                }
+              }
+            },
+            "kind": "when"
+          },
+          {
+            "body": {
+              "\u003e": {
+                "left": {
+                  ".": {
+                    "attr": "exp",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": 0
+                }
+              }
+            },
+            "kind": "when"
+          },
+          {
+            "body": {
+              "!=": {
+                "left": {
+                  ".": {
+                    "attr": "x",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": ""
+                }
+              }
+            },
+            "kind": "when"
+          },
+          {
+            "body": {
+              "!=": {
+                "left": {
+                  ".": {
+                    "attr": "x",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": ""
+                }
+              }
+            },
+            "kind": "when"
+          }
+        ],
+        "principal": {
+          "op": "All"
+        },
+        "resource": {
+          "op": "All"
+        }
+      }
+    },
+    {
+      "policy_id": "permit-tenant-access-1",
+      "effect": "permit",
+      "annotations": {
+        "shen_conclusion": "tenant-access",
+        "shen_datatype": "tenant-access",
+        "shen_source": "datatype tenant-access",
+        "shen_variant": "1"
+      },
+      "definition": {
+        "action": {
+          "op": "All"
+        },
+        "conditions": [
+          {
+            "body": {
+              "==": {
+                "left": {
+                  ".": {
+                    "attr": "level",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": "tenant"
+                }
+              }
+            },
+            "kind": "when"
+          },
+          {
+            "body": {
+              "==": {
+                "left": {
+                  ".": {
+                    "attr": "isMember",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": true
+                }
+              }
+            },
+            "kind": "when"
+          },
+          {
+            "body": {
+              "!=": {
+                "left": {
+                  ".": {
+                    "attr": "secret",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": ""
+                }
+              }
+            },
+            "kind": "when"
+          }
+        ],
+        "principal": {
+          "op": "All"
+        },
+        "resource": {
+          "op": "All"
+        }
+      }
+    },
+    {
+      "policy_id": "permit-resource-access-0",
+      "effect": "permit",
+      "annotations": {
+        "shen_conclusion": "resource-access",
+        "shen_datatype": "resource-access",
+        "shen_source": "datatype resource-access",
+        "shen_variant": "0"
+      },
+      "definition": {
+        "action": {
+          "op": "All"
+        },
+        "conditions": [
+          {
+            "body": {
+              "==": {
+                "left": {
+                  ".": {
+                    "attr": "level",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": "resource"
+                }
+              }
+            },
+            "kind": "when"
+          },
+          {
+            "body": {
+              "==": {
+                "left": {
+                  ".": {
+                    "attr": "isOwned",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": true
+                }
+              }
+            },
+            "kind": "when"
+          },
+          {
+            "body": {
+              "==": {
+                "left": {
+                  ".": {
+                    "attr": "isMember",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": true
+                }
+              }
+            },
+            "kind": "when"
+          },
+          {
+            "body": {
+              "!=": {
+                "left": {
+                  ".": {
+                    "attr": "sig",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": ""
+                }
+              }
+            },
+            "kind": "when"
+          },
+          {
+            "body": {
+              "\u003e": {
+                "left": {
+                  ".": {
+                    "attr": "exp",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": 0
+                }
+              }
+            },
+            "kind": "when"
+          },
+          {
+            "body": {
+              "!=": {
+                "left": {
+                  ".": {
+                    "attr": "x",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": ""
+                }
+              }
+            },
+            "kind": "when"
+          },
+          {
+            "body": {
+              "!=": {
+                "left": {
+                  ".": {
+                    "attr": "x",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": ""
+                }
+              }
+            },
+            "kind": "when"
+          }
+        ],
+        "principal": {
+          "op": "All"
+        },
+        "resource": {
+          "op": "All"
+        }
+      }
+    },
+    {
+      "policy_id": "permit-resource-access-1",
+      "effect": "permit",
+      "annotations": {
+        "shen_conclusion": "resource-access",
+        "shen_datatype": "resource-access",
+        "shen_source": "datatype resource-access",
+        "shen_variant": "1"
+      },
+      "definition": {
+        "action": {
+          "op": "All"
+        },
+        "conditions": [
+          {
+            "body": {
+              "==": {
+                "left": {
+                  ".": {
+                    "attr": "level",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": "resource"
+                }
+              }
+            },
+            "kind": "when"
+          },
+          {
+            "body": {
+              "==": {
+                "left": {
+                  ".": {
+                    "attr": "isOwned",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": true
+                }
+              }
+            },
+            "kind": "when"
+          },
+          {
+            "body": {
+              "==": {
+                "left": {
+                  ".": {
+                    "attr": "isMember",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": true
+                }
+              }
+            },
+            "kind": "when"
+          },
+          {
+            "body": {
+              "!=": {
+                "left": {
+                  ".": {
+                    "attr": "secret",
+                    "left": {
+                      "Var": "context"
+                    }
+                  }
+                },
+                "right": {
+                  "Value": ""
+                }
+              }
+            },
+            "kind": "when"
+          }
+        ],
+        "principal": {
+          "op": "All"
+        },
+        "resource": {
+          "op": "All"
+        }
+      }
+    }
+  ]
+}

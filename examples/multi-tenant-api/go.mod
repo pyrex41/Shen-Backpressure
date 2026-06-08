@@ -2,7 +2,13 @@ module multi-tenant-api
 
 go 1.25.6
 
-require golang.org/x/sync v0.20.0
+require (
+	github.com/pyrex41/Shen-Backpressure/policyspec v0.0.0
+	golang.org/x/sync v0.20.0
+	modernc.org/sqlite v1.47.0
+)
+
+replace github.com/pyrex41/Shen-Backpressure/policyspec => ../../policyspec
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -14,5 +20,4 @@ require (
 	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.47.0 // indirect
 )

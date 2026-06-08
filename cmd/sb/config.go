@@ -48,6 +48,20 @@ type Config struct {
 	DeriveDir   string       // path to shen-derive module (default ../../shen-derive)
 	DeriveSpecs []DeriveSpec // one entry per (define ...) to verify
 
+	// Cedar (SMT-strong tier) runtime policy emitter config.
+	// Populated from [cedar] in sb.toml.
+	Cedar CedarConfig
+
+	// Rego (middle terminating runtime tier, OPA) runtime policy emitter config.
+	// Parallel to CedarConfig; populated from [rego] in sb.toml. Text .rego is primary.
+	Rego RegoConfig
+
+	// DecidableShen (native-Shen but terminating "decidable fragment" runtime policy tier).
+	// Parallel middle tier in the lattice: Cedar ⊂ Rego ⊂ Decidable-Shen-fragment ⊂ full-TC pure-Shen.
+	// Uses Shen's own sequent calculus + embedded Prolog as gatekeeper.
+	// Populated from [decidable-shen] (sketch; can generalize to [[emitters]] later).
+	DecidableShen DecidableShenConfig
+
 	// Loop config
 	Harness        string // LLM harness command (e.g. "claude -p")
 	MaxIter        int    // max loop iterations
@@ -69,6 +83,49 @@ type DeriveSpec struct {
 	GuardPkg string // Go import path (go) or relative TS module path (ts) of the shengen guard module
 	OutFile  string // path to the committed generated test file
 	Seed     int64  // optional RNG seed; 0 = deterministic
+}
+
+// CedarConfig configures the Cedar (SMT tier) runtime emitter.
+// Dedicated [cedar] table for clarity (Cedar preferred on overlap for SMT value).
+type CedarConfig struct {
+	SchemaOut   string   // path for emitted Cedar schema JSON (entity types, attributes, appliesTo)
+	PoliciesOut string   // path for emitted Cedar policies JSON (or policy set)
+	Targets     []string // explicit conclusion or block names to treat as access predicates (e.g. "tenant-access"); empty means infer from shape/names
+}
+
+// RegoConfig configures the Rego (OPA, middle terminating runtime tier) emitter.
+// Parallel structure to CedarConfig. Primary output is .rego text (for opa eval /
+// conftest). See plan: Rego for aggregation/joins/infra gating; Cedar faster for hot path.
+type RegoConfig struct {
+	ModuleOut string   // path for primary emitted Rego text module (.rego)
+	Targets   []string // explicit targets (or infer *-access etc); same selection rules as cedar
+	Package   string   // Rego package name for the emitted module (default "policy")
+}
+
+// DecidableShenConfig configures the "decidable Shen fragment" native runtime policy tier.
+// This is the sketch for the middle tier that is still pure Shen (sequent calculus shaped)
+// but restricted to a decidable fragment (no general recursion, stratified rules,
+// total functions via measures, Datalog/Horn-clause policy bodies, bounded iteration).
+// The "emitter/mode" is lighter than Cedar: it recognizes the fragment via annotations
+// or shape (e.g. @decidable-fragment), does a simple static check (no recursion on targets,
+// only allowed forms), and either certifies the original .shen as safe to run directly
+// or emits a tiny certified module / total-evaluator stub.
+// At runtime (shen-go, shen-lua, shen-cl ports): embed and execute the restricted predicate
+// directly with guaranteed termination for the policy slice. Zero translation drift.
+// Judgment can be discharged by tc+ or a small Prolog pass over the sequent rules.
+// Prefer single-home with Cedar winning on overlap (SMT value); this tier gives Shen-native
+// terminating enforcement without external dep. Differential extends n-way comparison.
+type DecidableShenConfig struct {
+	Enabled bool     // presence of section enables the tier (for sketch)
+	Targets []string // explicit targets for the decidable fragment (e.g. tenant-access); empty = infer
+	// Future: CertOut string for a certified .shen or .cert sidecar; EvalStubOut etc.
+}
+
+// tomlCedar mirrors the [cedar] table in sb.toml (new + legacy).
+type tomlCedar struct {
+	SchemaOut   string   `toml:"schema_out"`
+	PoliciesOut string   `toml:"policies_out"`
+	Targets     []string `toml:"targets"`
 }
 
 // tomlDeriveSpec mirrors a [[derive.specs]] entry in sb.toml.
@@ -118,6 +175,19 @@ type tomlConfigNew struct {
 		Dir   string           `toml:"dir"`
 		Specs []tomlDeriveSpec `toml:"specs"`
 	} `toml:"derive"`
+	Cedar struct {
+		SchemaOut   string   `toml:"schema_out"`
+		PoliciesOut string   `toml:"policies_out"`
+		Targets     []string `toml:"targets"`
+	} `toml:"cedar"`
+	Rego struct {
+		ModuleOut string   `toml:"module_out"`
+		Targets   []string `toml:"targets"`
+		Package   string   `toml:"package"`
+	} `toml:"rego"`
+	DecidableShen struct {
+		Targets []string `toml:"targets"`
+	} `toml:"decidable-shen"`
 	Loop struct {
 		Harness string `toml:"harness"`
 		MaxIter int    `toml:"max_iter"`
@@ -153,6 +223,19 @@ type tomlConfigLegacy struct {
 		Dir   string           `toml:"dir"`
 		Specs []tomlDeriveSpec `toml:"specs"`
 	} `toml:"derive"`
+	Cedar struct {
+		SchemaOut   string   `toml:"schema_out"`
+		PoliciesOut string   `toml:"policies_out"`
+		Targets     []string `toml:"targets"`
+	} `toml:"cedar"`
+	Rego struct {
+		ModuleOut string   `toml:"module_out"`
+		Targets   []string `toml:"targets"`
+		Package   string   `toml:"package"`
+	} `toml:"rego"`
+	DecidableShen struct {
+		Targets []string `toml:"targets"`
+	} `toml:"decidable-shen"`
 	Loop struct {
 		Harness string `toml:"harness"`
 		MaxIter int    `toml:"max_iter"`
@@ -206,6 +289,9 @@ func LoadConfig() (*Config, error) {
 			}
 
 			applyDerive(cfg, tcNew.Derive.Dir, tcNew.Derive.Specs)
+			applyCedar(cfg, tcNew.Cedar.SchemaOut, tcNew.Cedar.PoliciesOut, tcNew.Cedar.Targets)
+			applyRego(cfg, tcNew.Rego.ModuleOut, tcNew.Rego.Targets, tcNew.Rego.Package)
+			applyDecidableShen(cfg, tcNew.DecidableShen.Targets)
 			applyLoop(cfg, tcNew.Loop.Harness, tcNew.Loop.MaxIter,
 				tcNew.Loop.Timeout, tcNew.Loop.Prompt, tcNew.Loop.Plan)
 		} else {
@@ -221,6 +307,9 @@ func LoadConfig() (*Config, error) {
 			cfg.Relaxed = tcLegacy.Gates.Relaxed
 
 			applyDerive(cfg, tcLegacy.Derive.Dir, tcLegacy.Derive.Specs)
+			applyCedar(cfg, tcLegacy.Cedar.SchemaOut, tcLegacy.Cedar.PoliciesOut, tcLegacy.Cedar.Targets)
+			applyRego(cfg, tcLegacy.Rego.ModuleOut, tcLegacy.Rego.Targets, tcLegacy.Rego.Package)
+			applyDecidableShen(cfg, tcLegacy.DecidableShen.Targets)
 			applyLoop(cfg, tcLegacy.Loop.Harness, tcLegacy.Loop.MaxIter,
 				tcLegacy.Loop.Timeout, tcLegacy.Loop.Prompt, tcLegacy.Loop.Plan)
 		}
@@ -348,6 +437,46 @@ func applyDerive(cfg *Config, dir string, specs []tomlDeriveSpec) {
 	}
 }
 
+// applyCedar sets the Cedar emitter config (v0 dedicated [cedar] table).
+// Targets may be empty (emitter will infer Cedar-shaped rules by name/shape).
+func applyCedar(cfg *Config, schemaOut, policiesOut string, targets []string) {
+	if schemaOut != "" {
+		cfg.Cedar.SchemaOut = schemaOut
+	}
+	if policiesOut != "" {
+		cfg.Cedar.PoliciesOut = policiesOut
+	}
+	if len(targets) > 0 {
+		cfg.Cedar.Targets = append([]string(nil), targets...)
+	}
+}
+
+// applyRego sets the Rego (OPA) emitter config from [rego] table (parallel to applyCedar).
+// ModuleOut is the primary .rego text output path.
+func applyRego(cfg *Config, moduleOut string, targets []string, pkg string) {
+	if moduleOut != "" {
+		cfg.Rego.ModuleOut = moduleOut
+	}
+	if len(targets) > 0 {
+		cfg.Rego.Targets = append([]string(nil), targets...)
+	}
+	if pkg != "" {
+		cfg.Rego.Package = pkg
+	}
+}
+
+// applyDecidableShen sets the decidable-Shen-fragment config from [decidable-shen].
+// Targets empty => inference (by *-access etc, or @decidable-fragment annotations).
+// The config presence (or non-empty targets) enables the tier in context/gates/policy.
+func applyDecidableShen(cfg *Config, targets []string) {
+	if len(targets) > 0 {
+		cfg.DecidableShen.Targets = append([]string(nil), targets...)
+	}
+	// Sketch enabling: if caller passed targets (from toml table) enable; otherwise leave false
+	// (real presence detection would require toml meta; for sketch we rely on sb.toml having the table + targets).
+	cfg.DecidableShen.Enabled = len(cfg.DecidableShen.Targets) > 0
+}
+
 // applyLoop sets the loop config from TOML values.
 func applyLoop(cfg *Config, harness string, maxIter int, timeout, prompt, plan string) {
 	if harness != "" {
@@ -473,4 +602,136 @@ func SplitCommand(cmd string) (string, []string) {
 		return "", nil
 	}
 	return parts[0], parts[1:]
+}
+
+// FindShenCedar locates the shen-cedar binary using the discovery chain:
+// ./bin/shen-cedar -> $SHEN_CEDAR_PATH -> $PATH -> build from cmd/shen-cedar/main.go
+// (modeled exactly on FindShengen for consistency).
+func FindShenCedar() (string, error) {
+	if _, err := os.Stat("bin/shen-cedar"); err == nil {
+		return "bin/shen-cedar", nil
+	}
+	if p := os.Getenv("SHEN_CEDAR_PATH"); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	if p, err := exec.LookPath("shen-cedar"); err == nil {
+		return p, nil
+	}
+
+	// Try to build from source
+	candidates := []string{
+		"cmd/shen-cedar/main.go",
+		"../../cmd/shen-cedar/main.go",
+	}
+	for _, src := range candidates {
+		if _, err := os.Stat(src); err == nil {
+			srcDir := filepath.Dir(src)
+			outPath := filepath.Join(os.TempDir(), "shen-backpressure-shen-cedar")
+			fmt.Fprintf(os.Stderr, "Building shen-cedar from %s...\n", srcDir)
+			cmd := exec.Command("go", "build", "-o", outPath, ".")
+			cmd.Dir = srcDir
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("building shen-cedar from %s: %w", srcDir, err)
+			}
+			return outPath, nil
+		}
+	}
+
+	return "", fmt.Errorf("shen-cedar not found: check bin/shen-cedar, $SHEN_CEDAR_PATH, $PATH, or cmd/shen-cedar/main.go")
+}
+
+// FindCedar locates the cedar binary using the discovery chain:
+// $CEDAR_PATH -> $PATH -> common locations (~/.cargo/bin/cedar etc.).
+// Used by sb policy (when available) to run `cedar validate` on emitted
+// artifacts for official validation (the "same pattern" as cedar-verify).
+func FindCedar() (string, error) {
+	if p := os.Getenv("CEDAR_PATH"); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	if p, err := exec.LookPath("cedar"); err == nil {
+		return p, nil
+	}
+
+	// Common locations
+	candidates := []string{
+		os.ExpandEnv("$HOME/.cargo/bin/cedar"),
+		"/usr/local/bin/cedar",
+		"/opt/homebrew/bin/cedar",
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c, nil
+		}
+	}
+
+	return "", fmt.Errorf("cedar not found: install with `cargo install cedar-policy-cli` (or set $CEDAR_PATH / add to PATH)")
+}
+
+// FindShenRego locates the shen-rego binary (parallel to FindShenCedar).
+// Discovery: ./bin/shen-rego -> $SHEN_REGO_PATH -> $PATH -> build from cmd/shen-rego/main.go
+func FindShenRego() (string, error) {
+	if _, err := os.Stat("bin/shen-rego"); err == nil {
+		return "bin/shen-rego", nil
+	}
+	if p := os.Getenv("SHEN_REGO_PATH"); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	if p, err := exec.LookPath("shen-rego"); err == nil {
+		return p, nil
+	}
+
+	// Try to build from source
+	candidates := []string{
+		"cmd/shen-rego/main.go",
+		"../../cmd/shen-rego/main.go",
+	}
+	for _, src := range candidates {
+		if _, err := os.Stat(src); err == nil {
+			srcDir := filepath.Dir(src)
+			outPath := filepath.Join(os.TempDir(), "shen-backpressure-shen-rego")
+			fmt.Fprintf(os.Stderr, "Building shen-rego from %s...\n", srcDir)
+			cmd := exec.Command("go", "build", "-o", outPath, ".")
+			cmd.Dir = srcDir
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("building shen-rego from %s: %w", srcDir, err)
+			}
+			return outPath, nil
+		}
+	}
+
+	return "", fmt.Errorf("shen-rego not found: check bin/shen-rego, $SHEN_REGO_PATH, $PATH, or cmd/shen-rego/main.go")
+}
+
+// FindOpa locates the opa binary (for real Rego validation/eval in sb policy + verify harness).
+// $OPA_PATH -> $PATH -> common locations.
+func FindOpa() (string, error) {
+	if p := os.Getenv("OPA_PATH"); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	if p, err := exec.LookPath("opa"); err == nil {
+		return p, nil
+	}
+
+	candidates := []string{
+		os.ExpandEnv("$HOME/.local/bin/opa"),
+		"/usr/local/bin/opa",
+		"/opt/homebrew/bin/opa",
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c, nil
+		}
+	}
+
+	return "", fmt.Errorf("opa not found: install from https://www.openpolicyagent.org/docs/latest/#opa-installation (or set $OPA_PATH)")
 }
