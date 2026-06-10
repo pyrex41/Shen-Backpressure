@@ -859,6 +859,12 @@ type agreementReport struct {
 	// Pure-shen vs guard mismatches (should be zero for the restricted fragment).
 	GuardDenyPureAllow int `json:"guard_deny_pure_allow"`
 	GuardAllowPureDeny int `json:"guard_allow_pure_deny"`
+
+	// shen-lua tier: the fragment evaluated on the real Shen kernel
+	// (type-inhabitation via shen.typecheck). -1 allows == tier skipped.
+	ShenLuaAllows         int `json:"shen_lua_allows"`
+	GuardDenyShenLuaAllow int `json:"guard_deny_shen_lua_allow"`
+	GuardAllowShenLuaDeny int `json:"guard_allow_shen_lua_deny"`
 }
 
 func main() {
@@ -1008,6 +1014,17 @@ func main() {
 		fmt.Fprintln(os.Stderr, "cedar-verify: (no opa binary; Rego tier will be skipped in n-way matrix)")
 	}
 
+	// 2c. shen-lua n-way path: the decidable fragment on the REAL Shen kernel
+	// (runtime/shen-lua/policy.lua answers via shen.typecheck). Optional tier,
+	// skipped without luajit / shen-lua just like cedar/opa.
+	shenLuaEval, slReason := newShenLuaEvaluator(exampleRoot)
+	if shenLuaEval != nil {
+		defer shenLuaEval.Close()
+		fmt.Fprintln(os.Stderr, "cedar-verify: shen-lua tier up (kernel typechecker as the fragment evaluator)")
+	} else {
+		fmt.Fprintf(os.Stderr, "cedar-verify: (shen-lua tier skipped: %s)\n", slReason)
+	}
+
 	// 3. Generate samples (boundary + cartesian, capped).
 	samples := genAccessSamples(*maxSamples)
 	fmt.Fprintf(os.Stderr, "cedar-verify: generated %d samples (max=%d)\n", len(samples), *maxSamples)
@@ -1031,6 +1048,9 @@ func main() {
 		gard                   int // guard-allow + rego-deny
 		gdpa                   int // guard-deny + pure-allow
 		gapd                   int // guard-allow + pure-deny
+		shenLuaAllows          int
+		gdsla                  int // guard-deny + shen-lua-allow
+		gasld                  int // guard-allow + shen-lua-deny
 		evaluationErrors       int
 		records                []sampleRecord
 	)
@@ -1109,6 +1129,29 @@ func main() {
 				s.Level, pdir, s.PrincipalID, s.TenantID, s.IsMember, s.IsOwned, guardAllow, pureAllow))
 		}
 
+		if shenLuaEval != nil {
+			slAllow, slErr := shenLuaEval.Allow(s)
+			if slErr != nil {
+				fmt.Fprintf(os.Stderr, "shen-lua eval error on sample %d: %v\n", i, slErr)
+				evaluationErrors++
+			} else {
+				if slAllow {
+					shenLuaAllows++
+				}
+				if guardAllow != slAllow {
+					sdir := "G+ S-"
+					if !guardAllow && slAllow {
+						sdir = "G- S+"
+						gdsla++
+					} else {
+						gasld++
+					}
+					mismatches = append(mismatches, fmt.Sprintf("%s %s (shen-lua) p=%s t=%s member=%v owned=%v : guard=%v shenlua=%v",
+						s.Level, sdir, s.PrincipalID, s.TenantID, s.IsMember, s.IsOwned, guardAllow, slAllow))
+				}
+			}
+		}
+
 		rec := sampleRecord{
 			PrincipalID:      s.PrincipalID,
 			TenantID:         s.TenantID,
@@ -1142,6 +1185,12 @@ func main() {
 		GuardAllowRegoDeny:     gard,
 		GuardDenyPureAllow:     gdpa,
 		GuardAllowPureDeny:     gapd,
+		ShenLuaAllows:          -1,
+		GuardDenyShenLuaAllow:  gdsla,
+		GuardAllowShenLuaDeny:  gasld,
+	}
+	if shenLuaEval != nil {
+		rep.ShenLuaAllows = shenLuaAllows
 	}
 
 	// 5. Write artifacts consumable by future real Cedar batch.
@@ -1165,6 +1214,12 @@ func main() {
 	fmt.Printf("  Guard-allow + Cedar-deny: %d  (policy too strict)\n", rep.GuardAllowCedarDeny)
 	fmt.Printf("  Guard-allow + Rego-deny: %d   (Rego too strict)\n", rep.GuardAllowRegoDeny)
 	fmt.Printf("pure-shen vs guard mismatches: G-P+=%d G+P-=%d (should be 0 for the fragment)\n", rep.GuardDenyPureAllow, rep.GuardAllowPureDeny)
+	if shenLuaEval != nil {
+		fmt.Printf("shen-lua (kernel typechecker) allows: %d\n", rep.ShenLuaAllows)
+		fmt.Printf("shen-lua vs guard mismatches: G-S+=%d G+S-=%d (should be 0: same judgment, no lowering)\n", rep.GuardDenyShenLuaAllow, rep.GuardAllowShenLuaDeny)
+	} else {
+		fmt.Println("shen-lua tier: skipped (install luajit + shen-lua to run the fragment on the real kernel)")
+	}
 	fmt.Println()
 	if len(mismatches) > 0 {
 		fmt.Println("First 12 mismatches (full list in verify-samples.jsonl):")
@@ -1206,11 +1261,12 @@ func main() {
 	// Strict mode is an agreement gate: any evaluator error or guard/policy
 	// mismatch means the lowering is not merge-ready.
 	if *strict && (rep.EvaluationErrors > 0 || rep.Mismatches > 0) {
-		fmt.Fprintf(os.Stderr, "cedar-verify: FAIL — evaluator errors=%d mismatches=%d (G-C+=%d G+C-=%d G-R+=%d G+R-=%d G-P+=%d G+P-=%d)\n",
+		fmt.Fprintf(os.Stderr, "cedar-verify: FAIL — evaluator errors=%d mismatches=%d (G-C+=%d G+C-=%d G-R+=%d G+R-=%d G-P+=%d G+P-=%d G-S+=%d G+S-=%d)\n",
 			rep.EvaluationErrors, rep.Mismatches,
 			rep.GuardDenyCedarAllow, rep.GuardAllowCedarDeny,
 			rep.GuardDenyRegoAllow, rep.GuardAllowRegoDeny,
-			rep.GuardDenyPureAllow, rep.GuardAllowPureDeny)
+			rep.GuardDenyPureAllow, rep.GuardAllowPureDeny,
+			rep.GuardDenyShenLuaAllow, rep.GuardAllowShenLuaDeny)
 		os.Exit(1)
 	}
 }
