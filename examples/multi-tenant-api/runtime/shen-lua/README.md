@@ -47,10 +47,14 @@ approximation; this is the real judgment):
 - The full proof chain runs per request: the W2.1 cross-field binding
   `(= User (head (head Jwt)))`, the non-empty signature, exp > 0 — not just
   the membership/ownership flags the flat Cedar/Rego fragment covers.
-- Measured cost: ~270 µs per `resource-access` check (full chain, allow path),
-  ~70 µs for a `tenant-access` deny — OPA-class latency, from a kernel that
-  warm-boots in ~30 ms and embeds anywhere Lua runs (OpenResty, Envoy,
-  nginx — places Cedar/Rego need a sidecar).
+- Measured cost: **~1.0–1.1 ms per check** (full chain, ~1000 kernel
+  inferences each; deny ≈ allow). Within a normal authz budget — an OPA
+  sidecar costs a network hop before its own evaluation starts — from a
+  kernel that warm-boots in ~30 ms and embeds anywhere Lua runs (OpenResty,
+  Envoy, nginx). Earlier ~270 µs readings were contaminated: the long bench
+  crossed the kernel's cumulative inference cap mid-loop and the remainder
+  were fast-fail throws (see the per-decision budget note in
+  `sb_policy.lua`).
 
 ## Run it
 
