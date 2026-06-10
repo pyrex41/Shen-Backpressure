@@ -1,4 +1,5 @@
--- policy.lua — the Decidable-Shen-fragment tier, run on the REAL Shen kernel.
+-- policy.lua — CLI/differential runner for the Decidable-Shen-fragment tier
+-- on the REAL Shen kernel.
 --
 -- Every other tier in the lattice (Cedar, Rego, the Go EvalClauses evaluator,
 -- the generated guard ctors) is a LOWERING of specs/core.shen. This runner is
@@ -10,10 +11,10 @@
 --        :<=>  [principal T isMember] : tenant-access
 --
 -- The `: verified` premises in the spec are discharged by one extra datatype
--- rule (sb-discharge-verified below): a ground premise holds iff it evaluates
--- to true. Evaluation of those premises is total BECAUSE the targets are in
--- the certified decidable fragment (no recursion, flat =/not/comparisons/
--- element? on ground data — see `sb policy --decidable` and
+-- rule (see sb_policy.lua): a ground premise holds iff it evaluates to true.
+-- Evaluation of those premises is total BECAUSE the targets are in the
+-- certified decidable fragment (no recursion, flat =/not/comparisons/element?
+-- on ground data — see `sb policy --decidable` and
 -- specs/decidable-fragment.cert). That certification is the termination
 -- argument for this runner; outside the fragment, premise evaluation could
 -- diverge and this tier must not be used.
@@ -38,6 +39,7 @@ local function die(msg)
 end
 
 -- ---- args ------------------------------------------------------------------
+local here = arg[0]:match("^(.*)[/\\][^/\\]*$") or "."
 local specpath, bench = nil, false
 do
   local i = 1
@@ -47,99 +49,15 @@ do
     else die("unknown arg: " .. arg[i]) end
   end
 end
-if not specpath then
-  -- default: spec relative to this script's location
-  local here = arg[0]:match("^(.*)[/\\][^/\\]*$") or "."
-  specpath = here .. "/../../specs/core.shen"
-end
-do
-  local f = io.open(specpath, "r")
-  if not f then die("spec not found: " .. specpath .. " (use --spec)") end
-  f:close()
-end
+specpath = specpath or (here .. "/../../specs/core.shen")
 
--- ---- boot shen-lua ---------------------------------------------------------
-local sldir = os.getenv("SHEN_LUA_DIR")
-if sldir and sldir ~= "" then
-  package.path = sldir .. "/?.lua;" .. package.path
-end
-local ok, shen = pcall(require, "shen")
-if not ok then
-  die("cannot require 'shen' — set SHEN_LUA_DIR to a shen-lua checkout " ..
-      "or `luarocks install shen` (https://github.com/pyrex41/shen-lua)\n" ..
-      tostring(shen))
-end
-shen.boot{ quiet = true }
-local P, R = shen.prims, shen.runtime
-
--- ---- the discharge rule ----------------------------------------------------
--- A ground `: verified` premise holds iff it evaluates to true. The premises
--- of fragment-certified targets are total ground computations, so `eval` here
--- always terminates; trap-error fails closed on anything else.
-shen.eval([[
-(define sb.holds?
-  Premise -> (trap-error (= true (eval Premise)) (/. E false)))
-(datatype sb-discharge-verified
-  if (sb.holds? Premise)
-  ______________________
-  Premise : verified;)
-]])
-
--- ---- load the actual spec (source of truth, no lowering) -------------------
-do
-  local prev = P.GLOBALS["*hush*"]
-  P.GLOBALS["*hush*"] = true        -- keep the load echo off the protocol stream
-  local okl, res = pcall(shen.call, "load", specpath)
-  P.GLOBALS["*hush*"] = prev
-  if not okl then die("spec load failed: " .. tostring(res)) end
-end
-
--- ---- syntax-tree construction ----------------------------------------------
--- shen.typecheck takes SYNTAX, not values: the syntax of the list [a b] is
--- the application (cons a (cons b ())). Strings/numbers/booleans are their
--- own syntax.
-local CONS, NIL = R.intern("cons"), R.NIL
-local function l3(a, b, c) return R.cons(a, R.cons(b, R.cons(c, NIL))) end
-local function syn(arr, i)
-  i = i or 1
-  if i > #arr then return NIL end
-  return l3(CONS, arr[i], syn(arr, i + 1))
-end
-
--- Mirror of cedar-verify's makeDummyPrincipal: a valid HUMAN principal whose
--- only request-varying parts are the identity strings and the boolean flags
--- (iss/aud/sig non-empty, exp > 0, user-id bound to the JWT sub).
-local function principal_syn(sub)
-  local claims = syn{ sub, 9999999999, "shen-backpressure", "api", }
-  local jwt    = syn{ claims, "dummy-sig-non-empty" }
-  return syn{ jwt, sub }            -- authenticated-user (= the human principal)
-end
-
-local TENANT_ACCESS   = R.intern("tenant-access")
-local RESOURCE_ACCESS = R.intern("resource-access")
-local typecheck = P.F["shen.typecheck"]
-
-local function allow(level, prin, tenant, resource, isMember, isOwned)
-  local pterm = principal_syn(prin)
-  local tterm = syn{ pterm, tenant, isMember }
-  local term, ty
-  if level == "tenant" then
-    term, ty = tterm, TENANT_ACCESS
-  elseif level == "resource" then
-    term, ty = syn{ tterm, resource, isOwned }, RESOURCE_ACCESS
-  else
-    return false
-  end
-  local okc, res = pcall(typecheck, term, ty)
-  return okc and res ~= false
-end
-
--- ---- self-test: refuse to serve if the kernel disagrees with the spec ------
-assert(allow("tenant",   "u1", "t1", "",   true,  false) == true,  "self-test: member must allow")
-assert(allow("tenant",   "u1", "t1", "",   false, false) == false, "self-test: non-member must deny")
-assert(allow("resource", "u1", "t1", "r1", true,  true)  == true,  "self-test: owned must allow")
-assert(allow("resource", "u1", "t1", "r1", true,  false) == false, "self-test: unowned must deny")
-assert(allow("resource", "u1", "t1", "r1", false, true)  == false, "self-test: resource needs tenant-access")
+-- ---- boot the shared policy core --------------------------------------------
+package.path = here .. "/?.lua;" .. package.path
+local ok, sb = pcall(function()
+  return require("sb_policy").init{ spec = specpath }
+end)
+if not ok then die(tostring(sb)) end
+local allow = sb.allow
 
 -- ---- bench mode -------------------------------------------------------------
 if bench then
