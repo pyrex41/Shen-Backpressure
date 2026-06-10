@@ -21,7 +21,8 @@ func TestClassifyDatatypes_Payment(t *testing.T) {
 		t.Fatalf("rules: got %d, want %d", len(rules), len(sf.Datatypes))
 	}
 
-	// amount is constrained: one value premise + one verified premise.
+	// amount is constrained: one value premise (static) + one verified
+	// premise carrying :runtime-via :eval (profile B, evaluator-hosted).
 	var amount *Rule
 	for i := range rules {
 		if rules[i].Name == "amount" {
@@ -40,10 +41,19 @@ func TestClassifyDatatypes_Payment(t *testing.T) {
 	if got := len(amount.Premises); got != 2 {
 		t.Errorf("amount.Premises: got %d, want 2", got)
 	}
+	profileB := 0
 	for _, p := range amount.Premises {
-		if p.Discharge != DischargeStatic {
-			t.Errorf("amount premise %s: discharge = %q, want static", p.ID, p.Discharge)
+		want := DischargeStatic
+		if p.RuntimeProfile == "B" {
+			profileB++
+			want = DischargeRuntimeEvaluator
 		}
+		if p.Discharge != want {
+			t.Errorf("amount premise %s: discharge = %q, want %q", p.ID, p.Discharge, want)
+		}
+	}
+	if profileB != 1 {
+		t.Errorf("amount profile-B premises: got %d, want 1", profileB)
 	}
 }
 
