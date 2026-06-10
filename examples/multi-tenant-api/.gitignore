@@ -8,3 +8,8 @@ policies/cedar/verify-report.txt
 policies/cedar/verify-samples.jsonl
 .shen-kernel-cache.bin
 cedar-verify
+runtime/openresty/logs/
+runtime/openresty/*_temp/
+runtime/openresty/nginx.pid
+runtime/openresty/html/
+.shen-kernel-cache.openresty.bin
