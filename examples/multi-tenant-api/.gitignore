@@ -6,3 +6,5 @@ plans/backpressure.log
 policies/cedar/verify-report.json
 policies/cedar/verify-report.txt
 policies/cedar/verify-samples.jsonl
+.shen-kernel-cache.bin
+cedar-verify
