@@ -1,4 +1,4 @@
-.PHONY: all shengen build test shen-check audit run run-relaxed cedar-verify rego-verify policy-verify clean clean-policies
+.PHONY: all shengen build test shen-check audit run run-relaxed cedar-verify rego-verify shen-lua-verify policy-verify clean clean-policies
 
 # Run all verification gates in order
 all: shengen test build shen-check audit
@@ -36,6 +36,15 @@ cedar-verify:
 # Convenience: run the (now multi-emitter) verify focusing on Rego path.
 rego-verify:
 	go run ./cmd/cedar-verify -max-samples=24
+
+# shen-lua tier: the decidable fragment evaluated on the REAL Shen kernel
+# (type inhabitation via shen.typecheck — no lowering). cedar-verify picks the
+# tier up automatically when luajit + shen-lua are present; this target makes
+# it explicit and benches the per-check cost. Set SHEN_LUA_DIR to a shen-lua
+# checkout (or `luarocks install shen`).
+shen-lua-verify:
+	go run ./cmd/cedar-verify -max-samples=48
+	cd runtime/shen-lua && luajit policy.lua --bench
 
 # Run Ralph loop (strict mode)
 run:
