@@ -415,7 +415,10 @@ func (h *Harness) Emit() (string, error) {
 	if needsContext {
 		imports = append(imports, `"context"`)
 	}
-	if cfg.TypeTable.ImportPath != "" {
+	// Only import the guard package when a mustXxx helper references it —
+	// specs over plain strings/numbers generate no helpers, and an
+	// unconditional import fails the build with "imported and not used".
+	if cfg.TypeTable.ImportPath != "" && len(helpers) > 0 {
 		imports = append(imports, fmt.Sprintf("%s %q", cfg.TypeTable.ImportAlias, cfg.TypeTable.ImportPath))
 	}
 	if cfg.ImplPkgPath != "" && cfg.ImplPkgName != cfg.TestPkgName {
