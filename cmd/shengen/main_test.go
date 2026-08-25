@@ -83,6 +83,21 @@ func TestParseComposite(t *testing.T) {
 	}
 }
 
+func TestParseTaggedCompositeOmitsConstructorTag(t *testing.T) {
+	spec := `(datatype step-wait
+  Duration : ticks;
+  ===========================
+  [step-wait Duration] : step;)`
+	types, err := parseFile_string(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := types[0].Rules[0]
+	if got, want := r.Conc.Fields, []string{"Duration"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("tagged conclusion fields = %v, want %v", got, want)
+	}
+}
+
 func TestParseGuardedWithDifferentBlockName(t *testing.T) {
 	spec := `(datatype balance-invariant
   Bal : number;
@@ -138,6 +153,32 @@ func TestParseSideCondition(t *testing.T) {
 	}
 	if r.Verified[0].Raw != "(element? Op [+ - * /])" {
 		t.Errorf("unexpected verified: %q", r.Verified[0].Raw)
+	}
+}
+
+func TestGenerateGoElementQuotedStringsAndMultilinePremise(t *testing.T) {
+	spec := `(datatype diagnostic-code
+  X : string;
+  (element? X ["E_ONE" "E_TWO"
+               "E_THREE"])
+    : verified;
+  ==========================
+  X : diagnostic-code;)`
+	types, err := parseFile_string(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(types[0].Rules[0].Verified); got != 1 {
+		t.Fatalf("verified premise count = %d, want 1", got)
+	}
+	st := newSymbolTable()
+	st.Build(types)
+	out := generateGo(types, st, "test", "test.shen")
+	if !strings.Contains(out, `map[string]bool{"E_ONE": true, "E_TWO": true, "E_THREE": true}[x]`) {
+		t.Fatalf("quoted multiline element? emitted incorrectly:\n%s", out)
+	}
+	if strings.Contains(out, `"\\\"E_ONE\\\""`) || strings.Contains(out, "/* TODO:") {
+		t.Fatalf("quoted atoms or an unhandled premise leaked into output:\n%s", out)
 	}
 }
 

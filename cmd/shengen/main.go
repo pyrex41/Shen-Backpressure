@@ -110,7 +110,7 @@ type TypeInfo struct {
 type SymbolTable struct {
 	Types          map[string]*TypeInfo
 	ConcCount      map[string]int      // how many blocks produce each conclusion type
-	SumTypes       map[string][]string  // conclusion type → list of concrete block names
+	SumTypes       map[string][]string // conclusion type → list of concrete block names
 	Defines        map[string]*Define
 	DefineResolved map[string]*DefineResolved
 }
@@ -218,7 +218,7 @@ func (st *SymbolTable) Build(types []Datatype) {
 	}
 }
 
-func (st *SymbolTable) Lookup(name string) *TypeInfo  { return st.Types[name] }
+func (st *SymbolTable) Lookup(name string) *TypeInfo { return st.Types[name] }
 func (st *SymbolTable) IsWrapper(shenType string) bool {
 	info := st.Lookup(shenType)
 	return info != nil && (info.Category == "wrapper" || info.Category == "constrained")
@@ -527,9 +527,10 @@ func (st *SymbolTable) translateEq(expr *SExpr, varMap map[string]string) (strin
 // fails by finding fields with matching types between two composite variables.
 //
 // For (= (tail (tail (head Profile))) (tail Copy)):
-//   Profile : known-profile → fields [Id:user-id, Email:email-addr, Demo:demographics]
-//   Copy    : copy-content  → fields [Body:string, Demo:demographics]
-//   Shared field type: demographics → profile.Demo == copy.Demo
+//
+//	Profile : known-profile → fields [Id:user-id, Email:email-addr, Demo:demographics]
+//	Copy    : copy-content  → fields [Body:string, Demo:demographics]
+//	Shared field type: demographics → profile.Demo == copy.Demo
 func (st *SymbolTable) structuralMatchFallback(expr *SExpr, varMap map[string]string) (string, string, bool) {
 	if len(expr.Children) != 3 {
 		return "", "", false
@@ -747,6 +748,12 @@ func (st *SymbolTable) translateElementPremise(expr *SExpr, varMap map[string]st
 		// Generate a map literal membership check
 		var pairs []string
 		for _, e := range elements {
+			// Shen string atoms retain their surrounding quotes in the simple
+			// tokenizer. Unquote them before applying %q so the generated Go key
+			// is "none", not "\"none\"". Bare Shen symbols remain unchanged.
+			if unquoted, err := strconv.Unquote(e); err == nil {
+				e = unquoted
+			}
 			pairs = append(pairs, fmt.Sprintf("%q: true", e))
 		}
 		mapLiteral := "map[string]bool{" + strings.Join(pairs, ", ") + "}"
@@ -1497,7 +1504,20 @@ func extractRuntimeViaComment(line string) (name string, stripped string, ok boo
 
 func buildRule(premLines, concLines []string) *Rule {
 	r := &Rule{}
-	for _, line := range premLines {
+	// A verified s-expression may span lines. Coalesce it before classifying
+	// premises so a readable enum list is not silently discarded.
+	var logicalPremLines []string
+	for i := 0; i < len(premLines); i++ {
+		line := strings.TrimSpace(premLines[i])
+		if strings.HasPrefix(line, "(") && !strings.Contains(line, ": verified") {
+			for i+1 < len(premLines) && !strings.Contains(line, ": verified") {
+				i++
+				line += " " + strings.TrimSpace(premLines[i])
+			}
+		}
+		logicalPremLines = append(logicalPremLines, line)
+	}
+	for _, line := range logicalPremLines {
 		line = strings.TrimSuffix(strings.TrimSpace(line), ";")
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -1540,7 +1560,19 @@ func buildRule(premLines, concLines []string) *Rule {
 	lhs, rhs := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 	r.Conc.TypeName = rhs
 	if strings.HasPrefix(lhs, "[") && strings.HasSuffix(lhs, "]") {
-		r.Conc.Fields = strings.Fields(lhs[1 : len(lhs)-1])
+		// A Shen semantic sum normally uses a literal constructor tag followed
+		// by its typed payload, e.g. [step-wait Duration].  Literal atoms are
+		// not host fields: the concrete generated variant type already carries
+		// that information.  Keep only conclusion names introduced by premises.
+		premises := make(map[string]bool, len(r.Premises))
+		for _, p := range r.Premises {
+			premises[p.VarName] = true
+		}
+		for _, field := range strings.Fields(lhs[1 : len(lhs)-1]) {
+			if premises[field] {
+				r.Conc.Fields = append(r.Conc.Fields, field)
+			}
+		}
 	} else {
 		r.Conc.Fields = []string{lhs}
 		r.Conc.IsWrapped = true
