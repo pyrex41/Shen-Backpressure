@@ -1324,6 +1324,19 @@ func allChar(s string, ch rune) bool {
 	return true
 }
 
+// premLineStartsNewPremise reports whether line begins a new logical
+// premise instead of continuing a multiline verified s-expression.
+func premLineStartsNewPremise(line string) bool {
+	t := strings.TrimSpace(line)
+	if t == "" || strings.HasPrefix(t, "if ") {
+		return true
+	}
+	if len(t) >= 3 && (allChar(t, '=') || allChar(t, '_')) {
+		return true
+	}
+	return strings.Contains(t, " : ") && !strings.Contains(t, ": verified")
+}
+
 func parseDefine(block string) *Define {
 	// Strip outer parens: (define name\n body)
 	block = strings.TrimPrefix(block, "(define ")
@@ -1511,8 +1524,12 @@ func buildRule(premLines, concLines []string) *Rule {
 		line := strings.TrimSpace(premLines[i])
 		if strings.HasPrefix(line, "(") && !strings.Contains(line, ": verified") {
 			for i+1 < len(premLines) && !strings.Contains(line, ": verified") {
+				next := strings.TrimSpace(premLines[i+1])
+				if premLineStartsNewPremise(next) {
+					break
+				}
 				i++
-				line += " " + strings.TrimSpace(premLines[i])
+				line += " " + next
 			}
 		}
 		logicalPremLines = append(logicalPremLines, line)

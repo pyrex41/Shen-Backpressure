@@ -156,6 +156,28 @@ func TestParseSideCondition(t *testing.T) {
 	}
 }
 
+func TestParseUnverifiedParenPremiseDoesNotSwallowTypedPremise(t *testing.T) {
+	spec := `(datatype tagged-step
+  (element? Kind [wait act])
+  Duration : ticks;
+  ===========================
+  [step-wait Duration] : step;)`
+	types, err := parseFile_string(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(types) != 1 || len(types[0].Rules) != 1 {
+		t.Fatalf("expected 1 datatype with 1 rule, got %+v", types)
+	}
+	r := types[0].Rules[0]
+	if len(r.Premises) != 1 || r.Premises[0].VarName != "Duration" || r.Premises[0].TypeName != "ticks" {
+		t.Fatalf("typed premise swallowed: premises=%+v verified=%+v", r.Premises, r.Verified)
+	}
+	if got, want := r.Conc.Fields, []string{"Duration"}; len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("conclusion fields = %v, want %v", got, want)
+	}
+}
+
 func TestGenerateGoElementQuotedStringsAndMultilinePremise(t *testing.T) {
 	spec := `(datatype diagnostic-code
   X : string;
