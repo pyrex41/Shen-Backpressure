@@ -2,6 +2,8 @@
 
 Formal verification gates for AI coding loops, in the language you're already using.
 
+**Intro:** [Structural backpressure beats smarter agents](https://reubenbrooks.dev/blog/structural-backpressure-beats-smarter-agents/)
+
 ## The Problem
 
 AI coding loops use tests as the only gate. Tests are empirical: they
