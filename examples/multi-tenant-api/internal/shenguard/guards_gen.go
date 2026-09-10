@@ -8,7 +8,25 @@ package shenguard
 
 import (
 	"fmt"
+	"context"
+	"errors"
 )
+
+// runtimeChecker is the contract every `:runtime-via <name>`
+// function must satisfy. The generated constructor passes the
+// predicate's spec-side name plus positional arguments; the
+// checker returns (ok, err). See docs/RUNTIME-VIA.md.
+type runtimeChecker func(ctx context.Context, predicate string, args ...any) (bool, error)
+
+// Compile-time witnesses. The build fails if any named runtime
+// checker is missing or has the wrong signature — this is what
+// makes the runtime call non-skippable: there is no path through
+// the constructor that does not consult the checker.
+var _ runtimeChecker = checkTenantMembership
+
+// errRuntimeCheckRejected is returned when a runtime check
+// reports the predicate is false (ok == false, err == nil).
+var errRuntimeCheckRejected = errors.New("runtime check rejected")
 
 // --- AuthenticatedPrincipal (sum type) ---
 // Multiple Shen datatype blocks produce this type.
@@ -227,9 +245,13 @@ type TenantAccess struct {
 	isMember bool
 }
 
-func NewTenantAccess(principal AuthenticatedPrincipal, tenant TenantId, isMember bool) (TenantAccess, error) {
-	if !(isMember == true) {
-		return TenantAccess{}, fmt.Errorf("isMember must equal true")
+func NewTenantAccess(ctx context.Context, principal AuthenticatedPrincipal, tenant TenantId, isMember bool) (TenantAccess, error) {
+	ok, err := checkTenantMembership(ctx, "tenant-access", principal, tenant, isMember)
+	if err != nil {
+		return TenantAccess{}, fmt.Errorf("checkTenantMembership rejected tenant-access: %w", err)
+	}
+	if !ok {
+		return TenantAccess{}, fmt.Errorf("checkTenantMembership rejected tenant-access: %w", errRuntimeCheckRejected)
 	}
 	return TenantAccess{
 		principal: principal,

@@ -1,6 +1,7 @@
 package verified
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 
@@ -61,7 +62,7 @@ func TestCheckTenantAccessGranted(t *testing.T) {
 	principal, _ := makePrincipal(t, "u-alice")
 	tenantID := shenguard.NewTenantId("t-acme")
 
-	access, err := CheckTenantAccess(d, principal, tenantID)
+	access, err := CheckTenantAccess(context.Background(), d, principal, tenantID)
 	if err != nil {
 		t.Fatalf("CheckTenantAccess: %v", err)
 	}
@@ -85,7 +86,7 @@ func TestCheckTenantAccessDenied(t *testing.T) {
 	principal, _ := makePrincipal(t, "u-bob")
 	tenantID := shenguard.NewTenantId("t-acme")
 
-	_, err = CheckTenantAccess(d, principal, tenantID)
+	_, err = CheckTenantAccess(context.Background(), d, principal, tenantID)
 	if err == nil {
 		t.Fatal("expected error for non-member access, got nil")
 	}
@@ -104,7 +105,7 @@ func TestCheckTenantAccessNonexistentUser(t *testing.T) {
 	principal, _ := makePrincipal(t, "u-nobody")
 	tenantID := shenguard.NewTenantId("t-acme")
 
-	_, err = CheckTenantAccess(d, principal, tenantID)
+	_, err = CheckTenantAccess(context.Background(), d, principal, tenantID)
 	if err == nil {
 		t.Fatal("expected error for nonexistent user, got nil")
 	}
@@ -154,7 +155,7 @@ func makeTenantAccess(t *testing.T, d *sql.DB, userID, tenantID string) shenguar
 	t.Helper()
 	principal, _ := makePrincipal(t, userID)
 	tid := shenguard.NewTenantId(tenantID)
-	access, err := CheckTenantAccess(d, principal, tid)
+	access, err := CheckTenantAccess(context.Background(), d, principal, tid)
 	if err != nil {
 		t.Fatalf("CheckTenantAccess: %v", err)
 	}
@@ -175,7 +176,7 @@ func TestCheckResourceAccessGranted(t *testing.T) {
 	access := makeTenantAccess(t, d, "u-alice", "t-acme")
 	resourceID := shenguard.NewResourceId("r-1")
 
-	ra, err := CheckResourceAccess(d, access, resourceID)
+	ra, err := CheckResourceAccess(context.Background(), d, access, resourceID)
 	if err != nil {
 		t.Fatalf("CheckResourceAccess: %v", err)
 	}
@@ -202,7 +203,7 @@ func TestCheckResourceAccessDeniedCrossTenant(t *testing.T) {
 	access := makeTenantAccess(t, d, "u-alice", "t-acme")
 	resourceID := shenguard.NewResourceId("r-3")
 
-	_, err = CheckResourceAccess(d, access, resourceID)
+	_, err = CheckResourceAccess(context.Background(), d, access, resourceID)
 	if err == nil {
 		t.Fatal("expected error for cross-tenant resource access, got nil")
 	}
@@ -221,8 +222,46 @@ func TestCheckResourceAccessDeniedNonexistent(t *testing.T) {
 	access := makeTenantAccess(t, d, "u-alice", "t-acme")
 	resourceID := shenguard.NewResourceId("r-nonexistent")
 
-	_, err = CheckResourceAccess(d, access, resourceID)
+	_, err = CheckResourceAccess(context.Background(), d, access, resourceID)
 	if err == nil {
 		t.Fatal("expected error for nonexistent resource, got nil")
+	}
+}
+
+// TestRuntimeViaCheckerIsAuthoritative demonstrates the post-2
+// :runtime-via change: the membership decision now lives in the
+// spec-driven checker (checkTenantMembership) rather than in the
+// wrapper. When the DB is properly attached via WithDB, the guard
+// constructor enforces the real query result.
+func TestRuntimeViaCheckerIsAuthoritative(t *testing.T) {
+	d, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+	if err := db.Seed(d); err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+
+	// Alice is a member of t-acme
+	principal, _ := makePrincipal(t, "u-alice")
+	tenantID := shenguard.NewTenantId("t-acme")
+
+	// Use the new WithDB path directly on the generated constructor
+	// (this is what the :runtime-via mechanism enables).
+	ctx := shenguard.WithDB(context.Background(), d)
+	access, err := shenguard.NewTenantAccess(ctx, principal, tenantID, false) // boolean ignored
+	if err != nil {
+		t.Fatalf("expected successful TenantAccess via checker, got %v", err)
+	}
+	if access.Tenant().Val() != "t-acme" {
+		t.Fatal("unexpected tenant")
+	}
+
+	// Globex should be rejected by the real query in the checker
+	globex := shenguard.NewTenantId("t-globex")
+	_, err = shenguard.NewTenantAccess(ctx, principal, globex, true) // even if caller claims true
+	if err == nil {
+		t.Fatal("expected checker to reject non-member even when boolean claims true")
 	}
 }

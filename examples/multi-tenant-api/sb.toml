@@ -47,10 +47,13 @@ run  = "./bin/shenguard-audit.sh"
 # Anchors the discharge report on the trivial `same-user?`
 # oracle (a one-line wrapper-unwrap predicate). Without this entry
 # `sb derive` has no rules to classify and produces an empty report.
-# The wider goal is to get every datatype in specs/core.shen
-# enumerated in transcript/discharge_report.json with its `static`
-# discharge classification — including the W2.1 cross-field premise
-# `(= User (head (head Jwt)))` inside `authenticated-user`.
+#
+# Post-2 note: The runtime-via work on `tenant-access` (and future
+# JWT premises) means some premises are now discharged via named
+# runtime checkers. The derive tooling (see shen-derive/report/classify.go)
+# already classifies them (profile A). Expanding the derive config
+# here to also cover datatype rules would let the discharge report
+# surface the full runtime-via picture.
 #
 # See specs/core.shen for the doc comment explaining why this is the
 # simplest possible derive anchor (shen-derive's sampler doesn't yet

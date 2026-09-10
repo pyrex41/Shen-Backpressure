@@ -32,6 +32,7 @@
 package verified
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
@@ -49,46 +50,34 @@ type TenantAccess = shenguard.TenantAccess
 // as TenantAccess.
 type ResourceAccess = shenguard.ResourceAccess
 
-// CheckTenantAccess derives the user-id from the principal (the W2.1
-// fix), runs a SQL membership query, and asks shenguard to construct
-// a TenantAccess. Returns an error if the principal is not a human
-// (services use a different membership path) or if the membership
-// row is missing.
+// CheckTenantAccess is a thin ergonomic wrapper (post-2).
 //
-// TCB: this function's correctness rests on (a) the SQL query
-// being exact, (b) `principal.Auth().User().Val()` returning the
-// user-id the spec calls `(sub Claims)` — which is structurally true
-// by the W2.1 cross-field premise inside `authenticated-user`. Read
-// both before trusting the chain.
+// It attaches the DB to the context (via shenguard.WithDB) and calls
+// the generated shenguard.NewTenantAccess. The actual membership
+// decision is performed by the spec-owned runtime checker
+// `checkTenantMembership` in shenguard/checkers.go.
 //
-// Compared to the pre-W2.1 version, this function NO LONGER takes a
-// `userID string` parameter. The pre-W2.1 signature was
-// `CheckTenantAccess(db, principal, userID string, tenantID)` and the
-// SQL query used the string parameter, not anything threaded from the
-// principal. That gap meant the type system did not enforce that the
-// queried user-id matched the authenticated user-id. With the string
-// parameter dropped and the user-id read directly from the principal,
-// the type system now enforces that the SQL query is keyed by the
-// authenticated user.
-func CheckTenantAccess(db *sql.DB, principal shenguard.AuthenticatedPrincipal, tenantID shenguard.TenantId) (TenantAccess, error) {
-	userID, ok := userIDFromPrincipal(principal)
-	if !ok {
-		return shenguard.TenantAccess{}, fmt.Errorf("service principals not supported by CheckTenantAccess")
-	}
+// TCB notes:
+// - The SQL query now lives in the checker (see checkers.go).
+// - The wrapper still derives the user-id directly from the
+//   principal (W2.1 structural guarantee).
+// - Callers should prefer this function for normal use; the
+//   guard constructor itself now enforces that a runtime check
+//   occurred.
+func CheckTenantAccess(ctx context.Context, db *sql.DB, principal shenguard.AuthenticatedPrincipal, tenantID shenguard.TenantId) (TenantAccess, error) {
+	// Post-2 evolution: attach the DB so the :runtime-via checker
+	// (checkTenantMembership in shenguard/checkers.go) can perform
+	// the authoritative membership query. The guard constructor now
+	// owns the decision.
+	ctx = shenguard.WithDB(ctx, db)
 
-	var exists int
-	err := db.QueryRow(
-		"SELECT COUNT(*) FROM tenant_memberships WHERE user_id = ? AND tenant_id = ?",
-		userID, tenantID.Val(),
-	).Scan(&exists)
+	// The 4th argument is kept only for signature compatibility with
+	// the current shengen output for this :runtime-via premise.
+	// The checker ignores it completely and performs the real query.
+	access, err := shenguard.NewTenantAccess(ctx, principal, tenantID, shenguard.IgnoredMembershipClaim)
 	if err != nil {
-		return shenguard.TenantAccess{}, fmt.Errorf("check tenant membership: %w", err)
-	}
-
-	isMember := exists > 0
-	access, err := shenguard.NewTenantAccess(principal, tenantID, isMember)
-	if err != nil {
-		return shenguard.TenantAccess{}, fmt.Errorf("tenant access denied: %s is not a member of tenant %s", userID, tenantID.Val())
+		userID, _ := userIDFromPrincipal(principal)
+		return shenguard.TenantAccess{}, fmt.Errorf("tenant access denied: %s is not a member of tenant %s (enforced by runtime-via checker)", userID, tenantID.Val())
 	}
 	return access, nil
 }
@@ -99,9 +88,11 @@ func CheckTenantAccess(db *sql.DB, principal shenguard.AuthenticatedPrincipal, t
 // it comes from the TenantAccess proof.
 //
 // TCB: the SQL query must be exact. Read it before trusting the chain.
-func CheckResourceAccess(db *sql.DB, access TenantAccess, resourceID shenguard.ResourceId) (ResourceAccess, error) {
+func CheckResourceAccess(ctx context.Context, db *sql.DB, access TenantAccess, resourceID shenguard.ResourceId) (ResourceAccess, error) {
+	// Resource ownership check is still direct for now (no :runtime-via
+	// annotation on that premise yet). We keep the query here.
 	var exists int
-	err := db.QueryRow(
+	err := db.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM resources WHERE id = ? AND tenant_id = ?",
 		resourceID.Val(), access.Tenant().Val(),
 	).Scan(&exists)

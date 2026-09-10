@@ -169,6 +169,13 @@ headline:
   with a real curl transcript and `go test -v` output captured under
   `demo.md` and `transcript/`.
 
+- **Emerging: Shen specs generating Cedar policies.**
+  Early scaffolding in `examples/cedar-policy-generation/`. The
+  working pattern (Shen computes role closures → emits validated
+  Cedar) is demonstrated in the sibling `shen-rust` repository.
+  This is one of the three runtime backpressure approaches being
+  developed for the post-2 write-up.
+
 The verification gates do not assume Ralph specifically. Any
 orchestrator that can run a shell command between LLM calls can use
 the gate exit codes; any CI pipeline can run `sb gates` as a single
@@ -280,7 +287,7 @@ shen-derive/             Go shen-derive module
 sb/                      Canonical SKM bundle (commands, skill, AGENT_PROMPT)
 cmd/sb/skilldata/        Build-time mirror of sb/, embedded into the binary
 docs/REFERENCE.md        Pattern catalog, side-by-sides, design-decision Q&A
-examples/                payment/, multi-tenant-api/, shen-web-tools/, .archive/
+examples/                payment/, multi-tenant-api/, shen-web-tools/, cedar-policy-generation/ (emerging), .archive/
 thoughts/                Research notes, reviews, handoffs (incl. tag-resolver
                          finish line + feature design prompts under
                          shared/research/2026-05-05-*)

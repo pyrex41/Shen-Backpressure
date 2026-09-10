@@ -152,7 +152,7 @@
   Principal : authenticated-principal;
   Tenant : tenant-id;
   IsMember : boolean;
-  (= IsMember true) : verified;
+  (= IsMember true) : verified; \* :runtime-via checkTenantMembership *\
   ================================
   [Principal Tenant IsMember] : tenant-access;)
 

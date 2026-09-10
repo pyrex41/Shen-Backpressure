@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -95,9 +96,9 @@ func (s *Server) handleListResources(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromHuman(r)
 
 	tenantID := shenguard.NewTenantId(r.PathValue("tid"))
-	// W2.1: CheckTenantAccess no longer takes a separate `userID string`
-	// parameter. The user-id comes from `principal` inside the wrapper.
-	access, err := verified.CheckTenantAccess(s.DB, principal, tenantID)
+	// W2.1 + post-2 runtime-via: CheckTenantAccess forwards ctx to the
+	// generated NewTenantAccess so the :runtime-via checker is consulted.
+	access, err := verified.CheckTenantAccess(context.Background(), s.DB, principal, tenantID)
 	if err != nil {
 		_ = auth.LogAccess(s.DB, userID, tenantID.Val(), "", "list_resources", false)
 		http.Error(w, err.Error(), http.StatusForbidden)
@@ -148,7 +149,7 @@ func (s *Server) handleGetResource(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromHuman(r)
 
 	tenantID := shenguard.NewTenantId(r.PathValue("tid"))
-	access, err := verified.CheckTenantAccess(s.DB, principal, tenantID)
+	access, err := verified.CheckTenantAccess(context.Background(), s.DB, principal, tenantID)
 	if err != nil {
 		_ = auth.LogAccess(s.DB, userID, tenantID.Val(), r.PathValue("rid"), "get_resource", false)
 		http.Error(w, err.Error(), http.StatusForbidden)
@@ -156,7 +157,7 @@ func (s *Server) handleGetResource(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resourceID := shenguard.NewResourceId(r.PathValue("rid"))
-	ra, err := verified.CheckResourceAccess(s.DB, access, resourceID)
+	ra, err := verified.CheckResourceAccess(context.Background(), s.DB, access, resourceID)
 	if err != nil {
 		_ = auth.LogAccess(s.DB, userID, access.Tenant().Val(), resourceID.Val(), "get_resource", false)
 		http.Error(w, err.Error(), http.StatusForbidden)
@@ -194,7 +195,7 @@ func (s *Server) handleCreateResource(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromHuman(r)
 
 	tenantID := shenguard.NewTenantId(r.PathValue("tid"))
-	access, err := verified.CheckTenantAccess(s.DB, principal, tenantID)
+	access, err := verified.CheckTenantAccess(context.Background(), s.DB, principal, tenantID)
 	if err != nil {
 		_ = auth.LogAccess(s.DB, userID, tenantID.Val(), "", "create_resource", false)
 		http.Error(w, err.Error(), http.StatusForbidden)

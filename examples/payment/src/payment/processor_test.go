@@ -42,7 +42,10 @@ func TestCreateAccount(t *testing.T) {
 func TestCreateAccountNegativeBalance(t *testing.T) {
 	p := NewProcessor()
 
-	// NewAmount rejects negative values — this is the guard type in action
+	// NewAmount rejects negative values — this is the guard type in action.
+	// Because of the :runtime-via :eval annotation in specs/core.shen,
+	// the check is performed by the embedded Shen evaluator at construction
+	// time (post-2 runtime backpressure pattern).
 	err := p.CreateAccount(context.Background(),"bob", -50)
 	if err == nil {
 		t.Fatal("expected error for negative balance, got nil")

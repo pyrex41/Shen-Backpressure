@@ -138,13 +138,13 @@ func applyVerifiedDischarge(prem *Premise, dtName string, v specfile.VerifiedPre
 			"%s is attested at runtime by the DB-backed checker %s; the constructor structurally requires a DB handle and the predicate %s holds for any constructed value.",
 			dtName, m.Checker, v.Raw,
 		)
-	default: // "A"
+	default: // "A" — named bespoke checker with compile-time witness (the current multi-tenant tenant-access case)
 		prem.Discharge = DischargeRuntimeAttested
 		prem.DischargeBasis = BasisRuntimeViaWitness
 		prem.RuntimeChecker = strPtr(m.Checker)
 		prem.Rationale = fmt.Sprintf(
-			"%s is checked at runtime by the bespoke checker %s; a compile-time witness makes the call non-skippable. The checker's correctness is part of the TCB (no sampled oracle).",
-			dtName, m.Checker,
+			"%s is checked at runtime by the bespoke checker %s (wired via :runtime-via in the spec). A compile-time witness (`var _ runtimeChecker = %s`) in the generated guards makes the call non-skippable — the constructor cannot succeed without consulting the checker. The checker's correctness (e.g. its SQL query) is part of the TCB; no sampled oracle or embedded evaluator is used.",
+			dtName, m.Checker, m.Checker,
 		)
 	}
 }

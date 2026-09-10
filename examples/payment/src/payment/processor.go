@@ -44,6 +44,11 @@ func NewProcessor() *Processor {
 // amount premise is discharged at runtime by the embedded Shen
 // evaluator (profile B, `:runtime-via :eval`), so the constructor —
 // and therefore this method — takes a context.Context.
+//
+// This is one of the concrete demonstrations of "compile-time guard +
+// runtime check from the same Shen spec line" used in the post-2
+// runtime backpressure write-up. The other major one is the evolving
+// tenant-access membership check in the multi-tenant-api example.
 func (p *Processor) CreateAccount(ctx context.Context, id string, initialBalance float64) error {
 	amt, err := shenguard.NewAmount(ctx, initialBalance)
 	if err != nil {

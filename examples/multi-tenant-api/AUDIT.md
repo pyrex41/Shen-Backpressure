@@ -121,9 +121,9 @@ of these files** — that is the audit.
 |---|---|---|
 | **JWT parser** | `internal/auth/jwt.go` (`Parse` function) | HMAC-SHA256 with `crypto/hmac.Equal` (constant-time). Verify the order: signature → JSON-decode → expiry. Look for short-circuits that decode before verifying. The test `TestParseTamperedPayload` is the obvious threat. Post-W2.1 the parser also returns the raw signature segment alongside the claims so the middleware can thread it into `shenguard.NewVerifiedJwt`. |
 | **Middleware** | `internal/auth/middleware.go` (`buildPrincipal`) | The proof-chain construction. Verify that every step uses values derived from the parsed JWT (no hard-coded strings other than the demo defaults for issuer/audience). The structural binding `(= User (head (head Jwt)))` is enforced inside `shenguard.NewAuthenticatedUser` — the middleware just threads the same `UserId` through both `NewParsedClaims` and `NewAuthenticatedUser`. |
-| **`verified.CheckTenantAccess`** | `internal/verified/access.go` | The SQL query is `SELECT COUNT(*) FROM tenant_memberships WHERE user_id = ? AND tenant_id = ?`. Read it twice. Schema changes that introduce `OR user_id IS NULL` (or similar) silently break the chain. Post-W2.1 the function **derives the `userID` from `principal.Auth().User().Val()`** — there is no separately-passed `userID string` parameter. |
+| **`verified.CheckTenantAccess`** | `internal/verified/access.go` | Thin ergonomic wrapper (post-2). It attaches the DB to context and calls the generated `NewTenantAccess`. The actual membership decision now lives in the spec-driven runtime checker (`checkTenantMembership` in `internal/shenguard/checkers.go`). The SQL query is still the authoritative one — review it in the checker. Post-W2.1 the wrapper **derives the `userID` from the principal**. |
 | **`verified.CheckResourceAccess`** | `internal/verified/access.go` | SQL: `SELECT COUNT(*) FROM resources WHERE id = ? AND tenant_id = ?`. The `tenant_id` comes from `access.Tenant().Val()` — i.e., the tenant dimension is structurally bound here. This is the link in the chain whose binding *is* type-enforced. |
-| **Generated guards** | `internal/shenguard/guards_gen.go` | Generated from the spec; `tcb-audit` catches drift. Spot-check that the lowering of `(= User (head (head Jwt))) : verified` inside `NewAuthenticatedUser` is `if !(user == jwt.claims.sub) { return ..., err }` and that of `(= IsMember true) : verified` inside `NewTenantAccess` is `if !(isMember == true) { return ..., err }`. |
+| **Generated guards** | `internal/shenguard/guards_gen.go` | Generated from the spec; `tcb-audit` catches drift. Post-2 runtime-via work: `NewTenantAccess` now takes `context.Context` and calls `checkTenantMembership` (enforced by a compile-time `var _ runtimeChecker = checkTenantMembership` witness). The old inline `if !(isMember == true)` has been replaced by the spec-owned checker. Review `checkers.go` for the real query. |
 | **Grep gate** | `bin/shenguard-audit.sh` step 2b | The script greps the source tree for `shenguard.NewTenantAccess` / `shenguard.NewResourceAccess` outside `internal/verified/access.go` and fails on any. This is the social half of the package-private discipline. |
 
 ### 5. Walk a request through the chain
@@ -136,9 +136,12 @@ A real request, from the curl transcript at `demo.md`:
    shenguard constructor chain (NewJwtIssuer → NewParsedClaims →
    NewVerifiedJwt → NewAuthenticatedUser).
 3. Handler calls `verified.CheckTenantAccess(db, principal,
-   tenantID)` — note: NO `userID string` parameter. The function
-   derives the user-id from the principal. → SQL lookup →
-   `shenguard.NewTenantAccess`.
+   tenantID)` — note: NO `userID string` parameter. The wrapper
+   attaches the DB to context and calls the generated
+   `NewTenantAccess(ctx, ...)`. The membership decision is now
+   performed inside the spec-owned `checkTenantMembership` checker
+   (see `internal/shenguard/checkers.go`). → Real query in checker →
+   `NewTenantAccess` (enforced by compile-time witness).
 4. Handler calls `verified.CheckResourceAccess(db, access,
    resourceID)` → SQL lookup → `shenguard.NewResourceAccess`.
 5. Handler reads the resource. The handler's signature demands a
@@ -215,3 +218,34 @@ For the full project-level trust model, see
   — the committed audit artifact (committed in parallel via the
   `claude/audit-artifacts` worktree)
 - `../../docs/TRUST-MODEL.md` — project-level trust model
+
+## What's new — runtime-via phase (post-2 work in progress)
+
+The membership premise for `tenant-access` was annotated in
+`specs/core.shen`:
+
+```shen
+(= IsMember true) : verified; \* :runtime-via checkTenantMembership *\
+```
+
+Effects:
+- `NewTenantAccess` in the generated guards now requires
+  `context.Context` and calls the named checker (enforced by a
+  compile-time witness declaration).
+- The real SQL query moved into `internal/shenguard/checkers.go`
+  (the checker receives the principal + tenant from the proof
+  values and performs the authoritative lookup).
+- `verified.CheckTenantAccess` is now a thin wrapper that attaches
+  the DB to context and calls the guard constructor.
+- This is the concrete demonstration that a single Shen rule can
+  drive both compile-time structural enforcement and a load-bearing
+  runtime decision procedure.
+
+Reviewers should pay special attention to `checkers.go` (the
+implementation of `checkTenantMembership` and the `WithDB` context
+helper) in addition to the classic TCB list above.
+
+This change is still evolving (more premises will be annotated,
+better DB wiring, possible `:requires-db` grammar extension). The
+current state is captured in the committed generated guards and
+`checkers.go`.

@@ -234,3 +234,28 @@ the recorded commit, and reading the named TCB (JWT parser,
 SQL queries, the `shengen.NewAuthenticatedUser` cross-field
 binding). The project-level trust model lives at
 [`../../docs/TRUST-MODEL.md`](../../docs/TRUST-MODEL.md).
+
+## Post-2 runtime-via evolution (work in progress)
+
+The `tenant-access` membership premise in `specs/core.shen` now
+carries a `:runtime-via checkTenantMembership` annotation.
+
+This makes the generated `NewTenantAccess` require a context and
+call a named checker (with a compile-time witness `var _ runtimeChecker =
+checkTenantMembership`). The real SQL membership query has been
+moved into `internal/shenguard/checkers.go`.
+
+See:
+- `specs/core.shen` (the annotated premise)
+- `internal/shenguard/checkers.go` (the implementation + WithDB helper)
+- `internal/verified/access_test.go` (TestRuntimeViaCheckerIsAuthoritative — explicit demonstration that the spec-owned checker is now authoritative)
+- The generated `NewTenantAccess` in `internal/shenguard/guards_gen.go`
+
+This is the concrete artifact for the "single spec, compile-time
+guard + runtime decision procedure" story in the runtime backpressure
+follow-up post. The `verified.CheckTenantAccess` wrapper is now a
+thin ergonomic layer that attaches the DB to context and calls the
+guard constructor.
+
+The ResourceAccess path and the JWT parsing steps are the natural
+next premises to annotate the same way.

@@ -6,6 +6,14 @@ example, read this one.
 For the project-level framing, see the [top-level
 README](../../README.md). This file walks the example end-to-end.
 
+This example (together with multi-tenant-api) supplies the main
+runnable artifacts for the "runtime backpressure" follow-up post:
+the existing `:runtime-via :eval` on the `amount` type (profile B,
+embedded evaluator) + the rich shen-derive oracle story for
+`processable`.
+
+See also `post2-runtime-eval-snippet.md` in this directory.
+
 ## What you'll see
 
 A payment processor with one inviolable rule: **a balance can never
