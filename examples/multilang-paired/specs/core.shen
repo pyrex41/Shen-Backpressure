@@ -113,16 +113,12 @@
    and reports the boolean in its JSON output row. The parity check
    asserts the four implementations agree on every fixture row.
 
-   NOTE on emitter parity: as of W2.2 the TS emitter parses the
-   Shen-canonical `pattern where (guard) -> result` placement while
-   Py/Rs/Go parse the alternate `pattern -> result where (guard)`
-   placement. Using `result where (guard)` here keeps Py/Rs/Go
-   emitting the helper; the TS CLI implements `hasBulkLine` directly
-   off the typed Items field as a small native helper so all four
-   CLIs share the same observable behavior even when one parser
-   syntactically loses the guard. The parity check is the contract;
-   the helper-or-inline distinction is an emitter-coverage gap, not
-   a behavioural one. *\
+   NOTE on emitter parity: every emitter (TS, Py, Rs, Go) parses the
+   `pattern -> result where (guard)` placement; the TS emitter also
+   accepts the Shen-canonical `pattern where (guard) -> result`. The
+   TS CLI still implements `hasBulkLine` inline off the typed Items
+   field so all four CLIs share the same observable behavior; the
+   parity check is the contract. *\
 
 (define has-bulk-line?
   {(list cart-item) --> boolean}

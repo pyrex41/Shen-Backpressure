@@ -612,10 +612,14 @@ function translateEq(
 
   let goL = lhs.code;
   let goR = rhs.code;
-  if (st.isWrapper(lhs.shenType) && isPrimitive(rhs.shenType))
-    goL = unwrap(st, lhs);
-  if (st.isWrapper(rhs.shenType) && isPrimitive(lhs.shenType))
-    goR = unwrap(st, rhs);
+  const lWrap = st.isWrapper(lhs.shenType);
+  const rWrap = st.isWrapper(rhs.shenType);
+  // Wrapper-vs-primitive: unwrap the wrapper side. Wrapper-vs-wrapper: unwrap
+  // BOTH sides so `===` compares payloads by value, matching the Go emitter
+  // (struct `==`). A class-instance `===` would be reference identity, which
+  // never holds for two separately-constructed wrappers (issue #28).
+  if (lWrap && (isPrimitive(rhs.shenType) || rWrap)) goL = unwrap(st, lhs);
+  if (rWrap && (isPrimitive(lhs.shenType) || lWrap)) goR = unwrap(st, rhs);
   return [`${goL} === ${goR}`, `${lhs.code} must equal ${rhs.code}`];
 }
 
@@ -805,8 +809,10 @@ export function structuralMatchFallback(
   const rhsTarget = inferTargetFields(expr.children[2], rhsInfo.fields);
 
   const emit = (lf: FieldInfo, rf: FieldInfo): [string, string] => {
-    const l = `${toCamelCase(lhsVar)}.${toCamelCase(lf.shenName)}()`;
-    const r = `${toCamelCase(rhsVar)}.${toCamelCase(rf.shenName)}()`;
+    // Wrapper-typed fields compare by payload (`.val()`), not by reference.
+    const proj = st.isWrapper(lf.shenType) ? ".val()" : "";
+    const l = `${toCamelCase(lhsVar)}.${toCamelCase(lf.shenName)}()${proj}`;
+    const r = `${toCamelCase(rhsVar)}.${toCamelCase(rf.shenName)}()${proj}`;
     return [
       `${l} === ${r}`,
       `${toCamelCase(lhsVar)}.${toCamelCase(lf.shenName)} must equal ${toCamelCase(rhsVar)}.${toCamelCase(rf.shenName)}`,
@@ -1064,6 +1070,48 @@ export function parseSignature(raw: string): string[] {
   return parts;
 }
 
+// peelDefineTerm splits one term off the front of a define segment and
+// returns [term, rest]. A term is a balanced `(…)` s-expression, a balanced
+// `[…]` list literal, a double-quoted string (spaces included), or a single
+// whitespace-delimited token. Parens/brackets inside string literals do not
+// affect nesting depth.
+export function peelDefineTerm(s: string): [string, string] {
+  const src = s.trim();
+  if (src.length === 0) return ["", ""];
+  const first = src[0];
+  if (first === "(" || first === "[") {
+    let depth = 0;
+    let inString = false;
+    for (let i = 0; i < src.length; i++) {
+      const ch = src[i];
+      if (inString) {
+        if (ch === "\\") i++;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === "(" || ch === "[") depth++;
+      else if (ch === ")" || ch === "]") {
+        depth--;
+        if (depth === 0) return [src.slice(0, i + 1), src.slice(i + 1)];
+      }
+    }
+    return [src, ""];
+  }
+  if (first === '"') {
+    for (let i = 1; i < src.length; i++) {
+      if (src[i] === "\\") i++;
+      else if (src[i] === '"') return [src.slice(0, i + 1), src.slice(i + 1)];
+    }
+    return [src, ""];
+  }
+  const m = src.match(/^(\S+)\s*([\s\S]*)$/);
+  if (!m) return [src, ""];
+  // A bare token that swallowed the define's trailing close-parens (legacy
+  // input where the block wasn't trimmed cleanly).
+  return [m[1].replace(/\)+$/, ""), m[2]];
+}
+
 // parseDefine ports cmd/shengen/main.go:1242-1330. Handles multi-clause
 // `(define name {sig} pat... -> result [where guard] pat... -> result ...)`
 // syntax with balanced-paren result expressions.
@@ -1100,58 +1148,47 @@ export function parseDefine(block: string): Define | null {
 
   const clauses: DefineClause[] = [];
   let currentPatterns = segments[0];
-  // The `where` token appearing in segment[i] binds to the NEXT clause's
-  // guard (built in iteration i+1), not the clause whose result is parsed
-  // out of segment[i]. Buffer it across iterations.
+  // A `where` guard can sit in either of two places:
+  //   patterns where (guard) -> result      (Shen-canonical, leading)
+  //   patterns -> result where (guard)      (trailing; what Go/Py/Rs parse)
+  // A leading guard appears in segment[i] AFTER the previous clause's result
+  // and belongs to the NEXT clause (built in iteration i+1), so it is
+  // buffered across iterations. A trailing guard appears right after the
+  // result and belongs to the clause being built in this iteration.
   let pendingGuard = "";
 
   for (let i = 1; i < segments.length; i++) {
-    let seg = segments[i].trim();
+    const seg = segments[i].trim();
 
-    // Step 1: peel the prev-clause's RESULT from the start of seg.
-    let result = "";
-    let remaining = "";
-    let resultCameFromBalancedParen = false;
+    // Step 1: peel the prev-clause's RESULT from the start of seg. Results
+    // may be a balanced s-expression, a balanced list literal (`[K | Rest]`),
+    // a quoted string (which may contain spaces), or a single bare token.
+    const [result, afterResult] = peelDefineTerm(seg);
+    let remaining = afterResult.trim();
 
-    if (seg.startsWith("(")) {
-      const [expr, endIdx] = extractBalancedParen(seg);
-      result = expr;
-      resultCameFromBalancedParen = true;
-      remaining = seg.slice(endIdx).trim();
-    } else {
-      const match = seg.match(/^(\S+)\s*(.*)$/);
-      if (match) {
-        result = match[1];
-        remaining = match[2].trim();
-      } else {
-        result = seg;
-      }
-    }
-    if (!resultCameFromBalancedParen) {
-      result = result.replace(/\)+$/, "").trim();
+    // Step 2: a trailing `where (…)` guard binds to the clause built now.
+    let trailingGuard = "";
+    if (remaining === "where" || remaining.startsWith("where ")) {
+      const [g, afterGuard] = peelDefineTerm(remaining.slice("where".length).trim());
+      trailingGuard = g;
+      remaining = afterGuard.trim();
     }
 
-    // Step 2: what remains is the NEXT clause's patterns, possibly followed
-    // by its `where (…)` guard. Split on the top-level ` where `.
+    // Step 3: what remains is the NEXT clause's patterns, possibly followed
+    // by its leading `where (…)` guard. Split on the top-level ` where `.
     let nextPatterns = remaining;
     let nextGuard = "";
     const whereIdx = remaining.indexOf(" where ");
     if (whereIdx !== -1) {
       nextPatterns = remaining.slice(0, whereIdx).trim();
       const afterWhere = remaining.slice(whereIdx + 7).trim();
-      if (afterWhere.startsWith("(")) {
-        const [g] = extractBalancedParen(afterWhere);
-        nextGuard = g;
-      } else {
-        nextGuard = afterWhere;
-      }
+      [nextGuard] = peelDefineTerm(afterWhere);
     }
 
-    // Step 3: build the CURRENT clause (patterns from currentPatterns, guard
-    // from whatever the previous segment buffered, result from this segment).
+    // Step 4: build the CURRENT clause.
     const patterns = splitPatterns(currentPatterns);
     if (patterns.length > 0) {
-      clauses.push({ patterns, result, guard: pendingGuard });
+      clauses.push({ patterns, result, guard: trailingGuard || pendingGuard });
     }
 
     currentPatterns = nextPatterns;
@@ -1886,7 +1923,9 @@ function translateDefineBodyRaw(
 ): string {
   const trimmed = raw.trim();
   // Raw atoms bypass parseSExpr so literal strings keep their quotes verbatim.
-  if (!trimmed.startsWith("(")) {
+  // List literals (`[K]`, `[X | Rest]`) are compound and go through the
+  // s-expression parser like paren forms do.
+  if (!trimmed.startsWith("(") && !(trimmed.startsWith("[") && trimmed !== "[]")) {
     return translateDefineAtom(trimmed, varMap, st);
   }
   const expr = parseSExpr(raw);

@@ -132,7 +132,9 @@ export function hasBulkLine(arg0: CartItem[]): boolean {
     const sku = __p0Head.sku();
     const qty = __p0Head.qty();
     const rest = arg0.slice(1);
-    return true;
+    if ((qty >= 5.0)) {
+      return true;
+    }
   }
   throw new Error("shengen-ts: no clause matched in has-bulk-line?");
 }

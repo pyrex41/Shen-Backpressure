@@ -4,15 +4,12 @@
 // shape as `go/main.go`, `py/main.py`, `rs/main.rs`. Run via
 // `npx tsx ts/main.ts < fixture-inputs.jsonl`.
 //
-// IMPORTANT: hasBulkLine is implemented inline below rather than
-// imported from `guards_gen.ts`. The TS emitter has a known parser
-// bug where the LAST clause's `where`-guard is dropped (see
-// `cmd/shengen-ts/shengen.ts:1129` — `remaining.indexOf(" where ")`
-// fails because `remaining` starts with the keyword and not a space).
-// The emitted `hasBulkLine` consequently returns true for any
-// non-empty list, ignoring the qty >= 5 guard. The inline version
-// here matches the Py / Rs generated `has_bulk_line(…)` exactly, so
-// the four CLIs agree on every fixture row.
+// NOTE: hasBulkLine is implemented inline below rather than imported
+// from `guards_gen.ts`. The TS emitter now parses the trailing
+// `pattern -> result where (guard)` placement (it previously dropped
+// the guard, see shengen-ts issue #27), but the inline version is kept
+// so the four CLIs share one hand-checked implementation of the
+// fixture contract. The parity check is the behavioural contract.
 
 import * as readline from "node:readline";
 import {

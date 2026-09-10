@@ -282,7 +282,7 @@ export class GroundedSource {
     this._hit = hit;
   }
   static createOrThrow(page: FetchedPage, hit: SearchHit): GroundedSource {
-    if (!(page.url() === hit.url())) throw new Error(`page.url() must equal hit.url()`);
+    if (!(page.url().val() === hit.url().val())) throw new Error(`page.url() must equal hit.url()`);
     return new GroundedSource(page, hit);
   }
   static tryCreate(page: FetchedPage, hit: SearchHit): GroundedSource | Error {

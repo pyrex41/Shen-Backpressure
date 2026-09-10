@@ -92,9 +92,17 @@ The behaviors below are deliberate deviations from `cmd/shengen`
   references it. The Go version skips defines that aren't referenced
   by a verified premise.
 - **Parser fix:** `where`-guarded clauses attach to the clause they
-  actually belong to, not the preceding clause. The Go parser has
-  a latent off-by-one here that doesn't surface in its tests because
-  no multi-clause guarded define is covered.
+  actually belong to, not the preceding clause. Both placements are
+  accepted: the Shen-canonical `pattern where (guard) -> result` and
+  the trailing `pattern -> result where (guard)` that Go/Py/Rs parse.
+  Results may be quoted strings with spaces or list literals such as
+  `[X | (f Rest)]`; each is peeled as one term so multi-rule defines
+  never concatenate parameter lists (issue #27).
+- **Wrapper equality:** `(= A B)` over two wrapper-typed values
+  compares the unwrapped payloads (`a.val() === b.val()`), matching
+  Go's struct `==` value semantics. Comparing class instances with
+  `===` would be reference identity and never hold for separately
+  constructed wrappers (issue #28).
 - **Defensive `val`:** define-body emissions route `(val X)` through
   a runtime `__val(x)` helper that is identity on primitives, so
   specs that apply `val` to an already-unwrapped accumulator (e.g.
