@@ -26,6 +26,7 @@ import {
   structuralMatchFallback,
   mergeDatatypeGroups,
   parseDefine,
+  peelDefineTerm,
   parseSignature,
   splitPatterns,
   type VerifiedPremise,
@@ -1860,4 +1861,129 @@ test("generateTs: wrapper-only spec has no constrained/guarded checks or imports
     !output.includes("throw new Error"),
     "wrapper-only spec should have no throw statements"
   );
+});
+
+// ============================================================================
+// Issue #27: multi-rule defines must not emit duplicate parameter names
+// ============================================================================
+
+test("parseDefine: trailing `result where (guard)` placement binds guard to its own clause", () => {
+  const def = parseDefine(`(define generation-verdict
+  {string --> string --> string}
+  "" _ -> "empty"
+  _ "" -> "empty"
+  A B -> "same match" where (= A B)
+  A B -> "different")`);
+  assert.ok(def);
+  assert.equal(def!.clauses.length, 4);
+  assert.deepEqual(def!.clauses.map((c) => c.patterns), [
+    ['""', "_"],
+    ["_", '""'],
+    ["A", "B"],
+    ["A", "B"],
+  ]);
+  assert.equal(def!.clauses[2].result, '"same match"');
+  assert.equal(def!.clauses[2].guard, "(= A B)");
+  assert.equal(def!.clauses[3].result, '"different"');
+  assert.equal(def!.clauses[3].guard, "");
+});
+
+test("parseDefine: list-literal results ([K], [X | Rest]) are peeled as one term", () => {
+  const def = parseDefine(`(define dedup-apply
+  {string --> (list string) --> (list string)}
+  K [] -> [K]
+  K [K2 | Rest] -> (dedup-apply K Rest) where (= K K2)
+  K [X | Rest] -> [X | (dedup-apply K Rest)])`);
+  assert.ok(def);
+  assert.equal(def!.clauses.length, 3);
+  for (const c of def!.clauses) assert.equal(c.patterns.length, 2);
+  assert.equal(def!.clauses[0].result, "[K]");
+  assert.equal(def!.clauses[1].guard, "(= K K2)");
+  assert.equal(def!.clauses[2].result, "[X | (dedup-apply K Rest)]");
+});
+
+test("peelDefineTerm: parens, brackets, quoted strings, bare tokens", () => {
+  assert.deepEqual(peelDefineTerm("(f a \"x)\") B C"), ['(f a "x)")', " B C"]);
+  assert.deepEqual(peelDefineTerm("[X | (g Y)] A"), ["[X | (g Y)]", " A"]);
+  assert.deepEqual(peelDefineTerm('"two words" A B'), ['"two words"', " A B"]);
+  assert.deepEqual(peelDefineTerm("true A B"), ["true", "A B"]);
+  assert.deepEqual(peelDefineTerm("[]"), ["[]", ""]);
+});
+
+test("generateTs: multi-rule define with trailing where + list results emits unified params (#27)", () => {
+  const src = `(define generation-verdict
+  {string --> string --> string}
+  "" _ -> "empty"
+  _ "" -> "empty"
+  A B -> "same match" where (= A B)
+  A B -> "different")
+
+(define dedup-apply
+  {string --> (list string) --> (list string)}
+  K [] -> [K]
+  K [K2 | Rest] -> (dedup-apply K Rest) where (= K K2)
+  K [X | Rest] -> [X | (dedup-apply K Rest)])`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  st.registerDefines(spec.defines);
+  const out = generateTs(spec.datatypes, st, "t.shen");
+  assert.ok(
+    out.includes("export function generationVerdict(a: string, b: string): string {"),
+    `expected two-param signature:\n${out}`
+  );
+  assert.ok(
+    out.includes("export function dedupApply(k: string, arg1: string[]): string[] {"),
+    `expected two-param signature:\n${out}`
+  );
+  assert.ok(out.includes('return "same match";'));
+  assert.ok(out.includes("return [k];"), `expected [K] result lowered:\n${out}`);
+  assert.ok(
+    out.includes("return [x, ...dedupApply(k, rest)];"),
+    `expected cons result lowered:\n${out}`
+  );
+  // No parameter name may appear twice in any signature.
+  for (const m of out.matchAll(/export function \w+\(([^)]*)\)/g)) {
+    const names = m[1].split(",").map((p) => p.split(":")[0].trim()).filter(Boolean);
+    assert.equal(new Set(names).size, names.length, `duplicate params in: ${m[0]}`);
+  }
+});
+
+// ============================================================================
+// Issue #28: wrapper-vs-wrapper equality compares by value, matching Go
+// ============================================================================
+
+test("generateTs: (= wrapper wrapper) premise unwraps both sides (#28)", () => {
+  const src = `(datatype injection-key
+  K : string;
+  ====================
+  K : injection-key;)
+
+(datatype keyed-injection
+  K : injection-key;
+  Body : string;
+  ====================
+  [K Body] : keyed-injection;)
+
+(datatype dedup-entry
+  K : injection-key;
+  Ts : number;
+  ====================
+  [K Ts] : dedup-entry;)
+
+(datatype applied
+  I : keyed-injection;
+  E : dedup-entry;
+  (= (head E) (head I)) : verified;
+  ====================
+  [I E] : applied;)`;
+  const spec = parseSpecString(src);
+  const st = new SymbolTable();
+  st.build(spec.datatypes);
+  const out = generateTs(spec.datatypes, st, "t.shen");
+  assert.ok(
+    out.includes("if (!(e.k().val() === i.k().val()))"),
+    `expected value comparison over unwrapped payloads:\n${out}`
+  );
+  assert.ok(!out.includes("if (!(e.k() === i.k()))"), "must not compare wrappers by reference");
 });
