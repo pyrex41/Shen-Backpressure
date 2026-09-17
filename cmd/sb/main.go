@@ -12,6 +12,7 @@
 //   derive    Run spec-equivalence verification
 //   policy    Run Cedar (shen-cedar) + Rego (shen-rego) runtime policy emitters + drift + real (cedar/opa) validate; --decidable for fragment tier sketch
 //   context   Emit project context from the manifest
+//   assess    Use a bounded JEV judgment to prioritize investigation
 //   audit-report  Long-form Markdown rendering of the latest discharge report
 //   loop      Launch a Ralph loop (headless LLM + gate verification)
 
@@ -43,6 +44,8 @@ func main() {
 		cmdPolicy(os.Args[2:])
 	case "context":
 		cmdContext(os.Args[2:])
+	case "assess":
+		cmdAssess(os.Args[2:])
 	case "audit-report":
 		cmdAuditReport(os.Args[2:])
 	case "loop":
@@ -70,6 +73,7 @@ Commands:
   derive    Run spec-equivalence verification
   policy    Run Cedar (shen-cedar) + Rego (shen-rego) runtime policy emitters + drift + opa/cedar validate; use --decidable for the Decidable-Shen-fragment (native terminating) tier
   context   Emit project context from the manifest (surfaces cedar/rego/decidable-shen policy tiers)
+  assess    Ask JEV to prioritize an investigation (advisory; never discharges evidence)
   audit-report  Long-form Markdown rendering of the latest discharge report
   loop      Launch a Ralph loop (headless LLM + gates)
   version   Print version

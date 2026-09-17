@@ -89,6 +89,30 @@ and time-stamped copies accumulate under `.sb/history/` so claims
 like "this invariant has been verified at every commit since X" have
 evidence on disk, not memory.
 
+### Advisory investigation routing with JEV
+
+`sb assess` can use [TypeSafe JEV](https://docs.typesafe.ai/introduction)
+to rank the current obligation frontier for investigation:
+
+```bash
+export JEV_API_KEY=...
+sb assess --diagnostic-file test-failure.log
+```
+
+The command batches three bounded judgments: which known obligation to
+investigate first, which failure category fits, and whether additional
+targeted investigation is useful. It records the complete request,
+distribution, model, token usage, spec hash, and artifact hash under
+`.sb/assessments/`. Identical requests replay from that cache; use
+`--replay <record>` for explicit offline replay or `--no-cache` for a fresh
+assessment.
+
+An assessment is deliberately **not evidence**. It can reorder investigation
+or suggest extra work, but it cannot suppress a mandatory gate, change a gate
+result, or discharge a premise in `.sb/discharge_report.json`. The API key is
+read from `JEV_API_KEY` (or the SDK-compatible `TYPESAFE_API_KEY` fallback) and
+is never written to the record.
+
 What this **does not** mean: not signed, not third-party verified,
 not SOC-2 certified. The artifact is the foundation that audit and
 compliance workflows can build on — not certification itself. The
@@ -186,10 +210,12 @@ step.
 Shen-Backpressure is layered so that each piece answers exactly one
 question:
 
-1. **Core engine (`sb`)** — deterministic gate runner. Reads the
+1. **Core engine (`sb`)** — deterministic gate runner with an optional,
+   explicitly advisory judge adapter. Reads the
    manifest, runs gates, diffs `shen-derive` output, emits structured
-   project context. Zero opinions about LLMs, prompts, or loops. One
-   static binary, stdlib only.
+   project context, and keeps model assessments outside the evidence report.
+   Gate and acceptance decisions remain deterministic. One static binary,
+   stdlib only.
 2. **Project manifest (`sb.toml`)** — declares the project's gate
    topology via `[[gates]]`, `[[derive.specs]]`, and `[engine]`. The
    engine reads this and does nothing more.
