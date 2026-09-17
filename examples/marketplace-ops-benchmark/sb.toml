@@ -1,0 +1,32 @@
+[project]
+lang = "go"
+pkg = "marketguard"
+
+[paths]
+spec = "specs/core.shen"
+output = "internal/marketguard/guards_gen.go"
+
+[[gates]]
+name = "shengen-drift"
+kind = "command"
+run = "./bin/shengen-drift.sh"
+
+[[gates]]
+name = "tenant-contracts"
+kind = "command"
+run = "go test ./internal/app -run 'Tenant|Support'"
+
+[[gates]]
+name = "commerce-contracts"
+kind = "command"
+run = "go test ./internal/app -run 'Inventory|Pricing|Promotion|Refund|Shipment'"
+
+[[gates]]
+name = "workflow-contracts"
+kind = "command"
+run = "go test ./internal/app -run 'Order|Risk|Idempotency'"
+
+[[gates]]
+name = "build"
+kind = "command"
+run = "go build ./..."

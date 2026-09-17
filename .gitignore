@@ -29,6 +29,7 @@ demo/*/plans/backpressure.log
 # .sb/discharge_report.json is rewritten on every gate run; .sb/history/
 # accumulates time-stamped copies. Both are per-clone state, not source.
 .sb/
+.experiments/
 
 # Allow-list: committed audit artifacts under each example's transcript/
 # directory. These are static snapshots a reader can inspect on GitHub
