@@ -7,6 +7,7 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 RUN_ROOT="$ROOT/.experiments/jev-ralph/$STAMP"
 BIN_DIR="$RUN_ROOT/bin"
 MAX_ITER="${MAX_ITER:-4}"
+FEEDBACK_MODE="${FEEDBACK_MODE:-full}"
 PI_PROVIDER="openai-codex"
 PI_MODEL="gpt-5.6-luna"
 PI_THINKING="low"
@@ -50,6 +51,9 @@ run_arm() {
     local assessment_file="$work/.experiment/assessment-$iteration.json"
     local projection_file="$work/.experiment/projection-$iteration.txt"
     local jev_latency=0 jev_input=0 jev_output=0
+    local first_failed selected_gate scheduler_fallback=false
+    first_failed="$(sed -n 's/^--- FAIL \[\([^]]*\)\] ---$/\1/p' "$gate_log" | head -1)"
+    selected_gate="$first_failed"
     if [ "$use_jev" = "yes" ]; then
       (
         cd "$work"
@@ -58,6 +62,16 @@ run_arm() {
       jev_latency="$(jq -r '.latency_ms' "$assessment_file")"
       jev_input="$(jq -r '.response.usage.input_tokens' "$assessment_file")"
       jev_output="$(jq -r '.response.usage.output_tokens' "$assessment_file")"
+      if [ "$FEEDBACK_MODE" = "staged" ]; then
+        local jev_choice
+        jev_choice="$(jq -r '.priority.choice' "$assessment_file")"
+        jev_choice="${jev_choice#gate:}"
+        if grep -q "^--- FAIL \[$jev_choice\] ---$" "$gate_log"; then
+          selected_gate="$jev_choice"
+        else
+          scheduler_fallback=true
+        fi
+      fi
       jq -r '
         "JEV advisory routing (not evidence):",
         "- investigate first: \(.priority.choice) (distribution confidence \(.priority.confidence))",
@@ -69,14 +83,28 @@ run_arm() {
       printf '%s\n' "No JEV routing is available. Use the deterministic failures directly." > "$projection_file"
     fi
 
+    local feedback_log="$gate_log"
+    if [ "$FEEDBACK_MODE" = "staged" ]; then
+      feedback_log="$work/.experiment/focused-gates-$iteration.log"
+      awk -v target="$selected_gate" '
+        $0 == "--- FAIL [" target "] ---" { show=1; print; next }
+        show && /^--- FAIL \[/ { exit }
+        show { print }
+      ' "$gate_log" > "$feedback_log"
+    fi
+
     local prompt_file="$work/.experiment/prompt-$iteration.md"
     {
       cat "$work/PROMPT.md"
       printf '\n\n## Experiment iteration\n\nIteration %s of %s.\n\n' "$iteration" "$MAX_ITER"
       printf '## Advisory routing\n\n'
       cat "$projection_file"
+      if [ "$FEEDBACK_MODE" = "staged" ]; then
+        printf '\n\n## Staged frontier constraint\n\n'
+        printf 'Repair the selected evidence domain `%s` in this turn. Do not proactively repair unrelated domains whose failures are not shown.\n' "$selected_gate"
+      fi
       printf '\n\n## Deterministic gate failures\n\n```text\n'
-      cat "$gate_log"
+      cat "$feedback_log"
       printf '\n```\n'
     } > "$prompt_file"
 
@@ -111,8 +139,9 @@ run_arm() {
       --arg arm "$arm" --argjson iteration "$iteration" --argjson gate_seconds "$((gate_ended-gate_started))" \
       --argjson pi_seconds "$((pi_ended-pi_started))" --argjson pi_exit "$pi_code" --arg integrity "$integrity" \
       --argjson jev_latency_ms "$jev_latency" --argjson jev_input_tokens "$jev_input" --argjson jev_output_tokens "$jev_output" \
+      --arg feedback_mode "$FEEDBACK_MODE" --arg selected_gate "$selected_gate" --argjson scheduler_fallback "$scheduler_fallback" \
       --slurpfile usage "$usage_file" \
-      '{event:"iteration",arm:$arm,iteration:$iteration,gate_seconds:$gate_seconds,pi_seconds:$pi_seconds,pi_exit:$pi_exit,integrity:$integrity,jev:{latency_ms:$jev_latency_ms,input_tokens:$jev_input_tokens,output_tokens:$jev_output_tokens},usage:$usage[0]}' \
+      '{event:"iteration",arm:$arm,iteration:$iteration,gate_seconds:$gate_seconds,pi_seconds:$pi_seconds,pi_exit:$pi_exit,integrity:$integrity,feedback_mode:$feedback_mode,selected_gate:$selected_gate,scheduler_fallback:$scheduler_fallback,jev:{latency_ms:$jev_latency_ms,input_tokens:$jev_input_tokens,output_tokens:$jev_output_tokens},usage:$usage[0]}' \
       >> "$work/.experiment/metrics.jsonl"
   done
 
@@ -150,6 +179,8 @@ jq -s '
       jev_latency_ms: ([$rows[] | select(.event == "iteration") | .jev.latency_ms] | add // 0),
       jev_input_tokens: ([$rows[] | select(.event == "iteration") | .jev.input_tokens] | add // 0),
       jev_output_tokens: ([$rows[] | select(.event == "iteration") | .jev.output_tokens] | add // 0),
+      selected_gates: [$rows[] | select(.event == "iteration") | .selected_gate],
+      scheduler_fallbacks: ([$rows[] | select(.event == "iteration" and .scheduler_fallback == true)] | length),
       integrity_violations: ([$rows[] | select(.event == "iteration" and .integrity != "pass")] | length)
     };
   [summary("control"), summary("jev")]

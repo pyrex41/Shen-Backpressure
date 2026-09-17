@@ -75,6 +75,7 @@ Environment:
 ```bash
 JEV_API_KEY=... experiments/jev-ralph/run.sh
 ARM_ORDER=jev-first MAX_ITER=4 experiments/jev-ralph/run.sh
+FEEDBACK_MODE=staged MAX_ITER=4 experiments/jev-ralph/run.sh
 ```
 
 The direct `openai` Pi provider requires a valid `OPENAI_API_KEY`. This runner
@@ -82,3 +83,5 @@ uses the authenticated `openai-codex` provider while preserving the exact
 requested model ID, `gpt-5.6-luna`.
 
 See [RESULTS.md](RESULTS.md) for the initial result and its limitations.
+The pre-registered staged follow-up is described in
+[STAGED-DESIGN.md](STAGED-DESIGN.md).
