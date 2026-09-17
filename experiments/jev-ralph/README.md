@@ -85,3 +85,5 @@ requested model ID, `gpt-5.6-luna`.
 See [RESULTS.md](RESULTS.md) for the initial result and its limitations.
 The pre-registered staged follow-up is described in
 [STAGED-DESIGN.md](STAGED-DESIGN.md).
+Its results, including invalidated pilots and corrected runs, are recorded in
+[STAGED-RESULTS.md](STAGED-RESULTS.md).

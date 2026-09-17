@@ -1,5 +1,13 @@
 # Initial paired results
 
+> **Invalidated on 2026-09-17:** the original manifest surrounded `go test
+> -run` regular expressions with shell quotes. `sb` executes manifest commands
+> directly rather than through a shell, so the quotes became literal regex
+> characters. Tests named by the first and last alternatives were silently
+> excluded. The observations below are retained as an audit trail, but they do
+> not establish full nine-defect acceptance. The manifest was corrected before
+> subsequent experiments.
+
 ## Test performed
 
 Date: 2026-09-17. Model: OpenAI `gpt-5.6-luna`, low reasoning, via Pi's
@@ -39,12 +47,9 @@ nine defects in its first turn in every run.
 
 ## Conclusion
 
-This is a **null result for repair success and iterations to acceptance**. The
-test demonstrates that the JEV integration works end to end, but it does not
-demonstrate that JEV improves convergence. The task exposed a broad but highly
-legible set of failures simultaneously, and Luna was capable of repairing the
-entire visible surface in one turn without routing assistance. The primary
-outcomes therefore hit a ceiling in both arms.
+Within the incomplete gate configuration, this was a **null result for repair
+success and iterations to acceptance**. Because acceptance omitted some
+contracts, it must not be interpreted as a result for the intended benchmark.
 
 The JEV arms used 80 combined Pi seconds versus 116 for control and had lower
 combined Pi-reported cost. That difference is exploratory only. With two pairs,
@@ -54,9 +59,9 @@ excluded from the Pi cost figures.
 
 The appropriate claim is:
 
-> JEV supplied stable, relevant routing while preserving deterministic
-> acceptance, but this initial benchmark was too easy for routing to affect the
-> measured repair outcome.
+> JEV supplied stable routing under the observed subset, but the run is
+> invalid for the intended full-contract comparison because acceptance coverage
+> was incomplete.
 
 It would be incorrect to claim that JEV made the loop faster or cheaper from
 these observations alone.

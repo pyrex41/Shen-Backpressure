@@ -14,17 +14,17 @@ run = "./bin/shengen-drift.sh"
 [[gates]]
 name = "tenant-contracts"
 kind = "command"
-run = "go test ./internal/app -run 'Tenant|Support'"
+run = "go test ./internal/app -run Tenant|Support"
 
 [[gates]]
 name = "commerce-contracts"
 kind = "command"
-run = "go test ./internal/app -run 'Inventory|Pricing|Promotion|Refund|Shipment'"
+run = "go test ./internal/app -run Inventory|Pricing|Promotion|Refund|Shipment"
 
 [[gates]]
 name = "workflow-contracts"
 kind = "command"
-run = "go test ./internal/app -run 'Order|Risk|Idempotency'"
+run = "go test ./internal/app -run Order|Risk|Idempotency"
 
 [[gates]]
 name = "build"
