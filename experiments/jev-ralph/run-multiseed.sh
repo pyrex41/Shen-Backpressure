@@ -39,7 +39,8 @@ prepare_seed() {
 }
 
 run_arm() {
-  local seed="$1" arm="$2" work="$RUN_ROOT/$seed-$arm"
+  local seed="$1" arm="$2"
+  local work="$RUN_ROOT/$seed-$arm"
   prepare_seed "$seed" "$work"
   mkdir -p "$work/.experiment"
   : > "$work/.experiment/metrics.jsonl"
