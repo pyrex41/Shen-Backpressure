@@ -89,3 +89,5 @@ Its results, including invalidated pilots and corrected runs, are recorded in
 [STAGED-RESULTS.md](STAGED-RESULTS.md).
 The multi-seed scheduler comparison is pre-registered in
 [MULTISEED-DESIGN.md](MULTISEED-DESIGN.md).
+Its results are recorded in
+[MULTISEED-RESULTS.md](MULTISEED-RESULTS.md).

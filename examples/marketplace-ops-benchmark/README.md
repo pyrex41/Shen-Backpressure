@@ -28,8 +28,10 @@ and application contracts covering:
 - bounded risk scoring; and
 - request idempotency.
 
-Nine defects are seeded in `internal/app/services.go`. The tests and Shen spec
-are treated as immutable acceptance contracts during an experiment.
+Nine defects are seeded across `internal/app/tenant.go`, `commerce.go`, and
+`workflow.go`; `services.go` contains shared domain types. The split permits
+experiments to enforce domain-scoped repair turns. The tests and Shen spec are
+treated as immutable acceptance contracts during an experiment.
 
 ## Verification topology
 
