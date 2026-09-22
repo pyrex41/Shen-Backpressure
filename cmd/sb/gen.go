@@ -12,6 +12,8 @@ func cmdGen(args []string) {
 	fs := flag.NewFlagSet("gen", flag.ExitOnError)
 	verbose := fs.Bool("verbose", false, "print the shengen command before running it")
 	dryRun := fs.Bool("dry-run", false, "print the shengen command without executing it")
+	brands := fs.Bool("brands", false, "emit GDP brand parameters and witness fields (overrides [project] brands)")
+	noBrands := fs.Bool("no-brands", false, "force the pre-brand output shape (overrides [project] brands)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `sb gen — Generate guard types from Shen specs
 
@@ -30,6 +32,12 @@ The Python and Rust emitters cover datatypes, sum types, (list X)
 parametric types, and a conservative subset of (define …) blocks.
 Unsupported constructs produce explicit "unsupported" comments rather
 than silently dropping behaviour.
+
+GDP brands (W1) are opt-in per project via a [project] brands = true
+line in sb.toml, or per invocation with --brands / --no-brands. Supported by
+the go and ts emitters. A project that opts in must also pass --brands
+to its TCB audit gate, or the drift check will compare branded output
+against an unbranded regeneration. See docs/TRUST-MODEL.md.
 
 Flags:
 `)
@@ -60,14 +68,23 @@ Flags:
 		os.Exit(1)
 	}
 
+	// --no-brands wins over --brands, and either overrides sb.toml.
+	useBrands := cfg.Brands
+	if *brands {
+		useBrands = true
+	}
+	if *noBrands {
+		useBrands = false
+	}
+
 	switch cfg.Lang {
 	case "go":
-		if err := runShengenGo(spec, cfg.Pkg, cfg.Output, cfg.DBWrap, *verbose, *dryRun); err != nil {
+		if err := runShengenGo(spec, cfg.Pkg, cfg.Output, cfg.DBWrap, useBrands, *verbose, *dryRun); err != nil {
 			fmt.Fprintf(os.Stderr, "sb gen: %v\n", err)
 			os.Exit(1)
 		}
 	case "ts":
-		if err := runShengenTS(spec, cfg.Output, *verbose, *dryRun); err != nil {
+		if err := runShengenTS(spec, cfg.Output, useBrands, *verbose, *dryRun); err != nil {
 			fmt.Fprintf(os.Stderr, "sb gen: %v\n", err)
 			os.Exit(1)
 		}
@@ -87,7 +104,7 @@ Flags:
 	}
 }
 
-func runShengenGo(spec, pkg, output, dbWrappers string, verbose, dryRun bool) error {
+func runShengenGo(spec, pkg, output, dbWrappers string, brands, verbose, dryRun bool) error {
 	shengen, err := FindShengen()
 	if err != nil {
 		return err
@@ -95,6 +112,9 @@ func runShengenGo(spec, pkg, output, dbWrappers string, verbose, dryRun bool) er
 
 	// Run shengen, capture stdout to output file
 	args := []string{"--spec", spec, "--pkg", pkg, "--out", output}
+	if brands {
+		args = append(args, "--brands")
+	}
 	if dbWrappers != "" {
 		args = append(args, "--db-wrappers", dbWrappers)
 	}
@@ -116,13 +136,16 @@ func runShengenGo(spec, pkg, output, dbWrappers string, verbose, dryRun bool) er
 	return nil
 }
 
-func runShengenTS(spec, output string, verbose, dryRun bool) error {
+func runShengenTS(spec, output string, brands, verbose, dryRun bool) error {
 	tsPath, err := FindShengenTS()
 	if err != nil {
 		return err
 	}
 
 	args := []string{"tsx", tsPath, spec, "--out", output}
+	if brands {
+		args = append(args, "--brands")
+	}
 	if verbose || dryRun {
 		printCommand("npx", args)
 	}

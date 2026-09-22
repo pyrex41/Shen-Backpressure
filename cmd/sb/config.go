@@ -28,11 +28,17 @@ type GateDef struct {
 
 // Config holds project configuration, loaded from sb.toml or detected by convention.
 type Config struct {
-	Lang    string // "go" or "ts"
-	Pkg     string // guard type package name
-	Spec    string // path to .shen spec file
-	Output  string // path to generated guard types
-	DBWrap  string // path to generated DB wrappers (optional)
+	Lang   string // "go" or "ts"
+	Pkg    string // guard type package name
+	Spec   string // path to .shen spec file
+	Output string // path to generated guard types
+	DBWrap string // path to generated DB wrappers (optional)
+	// Brands opts the project into GDP brands (W1): `sb gen` passes
+	// --brands to the emitter. Set with `[project] brands = true`. A
+	// project that sets it must also pass --brands to its TCB audit gate
+	// (bin/shenguard-audit.sh --brands), or the drift check regenerates
+	// unbranded output and fails. Opt-in; the default is off.
+	Brands  bool
 	Gen     string // shengen command (gate 1)
 	Build   string // build command (gate 3)
 	Test    string // test command (gate 2)
@@ -152,8 +158,9 @@ type tomlGateDef struct {
 // and engine settings live under [engine].
 type tomlConfigNew struct {
 	Project struct {
-		Lang string `toml:"lang"`
-		Pkg  string `toml:"pkg"`
+		Lang   string `toml:"lang"`
+		Pkg    string `toml:"pkg"`
+		Brands bool   `toml:"brands"`
 	} `toml:"project"`
 	Paths struct {
 		Spec       string `toml:"spec"`
@@ -201,8 +208,9 @@ type tomlConfigNew struct {
 // with a `relaxed` field.
 type tomlConfigLegacy struct {
 	Project struct {
-		Lang string `toml:"lang"`
-		Pkg  string `toml:"pkg"`
+		Lang   string `toml:"lang"`
+		Pkg    string `toml:"pkg"`
+		Brands bool   `toml:"brands"`
 	} `toml:"project"`
 	Paths struct {
 		Spec       string `toml:"spec"`
@@ -273,6 +281,7 @@ func LoadConfig() (*Config, error) {
 			applyCommands(cfg, tcNew.Commands.Gen, tcNew.Commands.Build,
 				tcNew.Commands.Test, tcNew.Commands.ShenCheck, tcNew.Commands.Audit)
 			cfg.Relaxed = tcNew.Engine.Relaxed
+			cfg.Brands = tcNew.Project.Brands
 
 			cfg.Gates = make([]GateDef, len(tcNew.Gates))
 			for i, g := range tcNew.Gates {
@@ -305,6 +314,7 @@ func LoadConfig() (*Config, error) {
 			applyCommands(cfg, tcLegacy.Commands.Gen, tcLegacy.Commands.Build,
 				tcLegacy.Commands.Test, tcLegacy.Commands.ShenCheck, tcLegacy.Commands.Audit)
 			cfg.Relaxed = tcLegacy.Gates.Relaxed
+			cfg.Brands = tcLegacy.Project.Brands
 
 			applyDerive(cfg, tcLegacy.Derive.Dir, tcLegacy.Derive.Specs)
 			applyCedar(cfg, tcLegacy.Cedar.SchemaOut, tcLegacy.Cedar.PoliciesOut, tcLegacy.Cedar.Targets)

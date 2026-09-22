@@ -1,6 +1,12 @@
 [project]
 lang = "go"
 pkg  = "shenguard"
+# GDP brands (W1): generated proof types carry a phantom brand parameter
+# binding each proof to the value it is about, plus an unexported witness
+# that makes an empty-literal forgery panic on first read. `sb gen` passes
+# --brands; the tcb-audit gate below passes it too (see
+# bin/shenguard-audit.sh), so the drift check compares like with like.
+brands = true
 
 [paths]
 spec   = "specs/core.shen"
