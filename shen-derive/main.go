@@ -83,6 +83,7 @@ The verify command:
     --max-cases N                      default: 24
     --path-cover                       add one sample per feasible spec path (needs z3 on PATH)
     --path-depth N                     list-unrolling depth for --path-cover (default 4)
+    --falsifier-samples FILE           add the falsifier's proposed inputs as samples
     --vacuity                          check datatypes for inhabitation (default true)
 `, version)
 }
@@ -223,6 +224,7 @@ func cmdVerify(args []string) {
 	pathDepth := fs.Int("path-depth", 0, "list-unrolling depth for --path-cover (default 4)")
 	pathMaxPaths := fs.Int("path-max-paths", 0, "cap on enumerated paths for --path-cover (default 64)")
 	pathTimeoutMS := fs.Int("path-timeout-ms", 0, "per-query solver timeout in milliseconds for --path-cover (default 5000)")
+	falsifierSamples := fs.String("falsifier-samples", "", "JSON file of inputs the falsifier proposed; each is re-evaluated against the spec and committed as a sample (see verify/falsifier.go)")
 	vacuity := fs.Bool("vacuity", true, "check every (datatype …) with verified premises for inhabitation; a vacuous datatype fails the gate")
 
 	fs.Usage = func() {
@@ -293,20 +295,21 @@ func cmdVerify(args []string) {
 	}
 
 	cfg := &verify.HarnessConfig{
-		Spec:         def,
-		TypeTable:    tt,
-		AllDefines:   allDefines,
-		ImplPkgPath:  *implPkgPath,
-		ImplPkgName:  *implPkgName,
-		ImplFunc:     *implFunc,
-		TestPkgName:  *testPkg,
-		MaxCases:     *maxCases,
-		Seed:         *seed,
-		RandomDraws:  *randomDraws,
-		PathCover:    *pathCover,
-		PathDepth:    *pathDepth,
-		PathMaxPaths: *pathMaxPaths,
-		PathTimeout:  time.Duration(*pathTimeoutMS) * time.Millisecond,
+		Spec:             def,
+		TypeTable:        tt,
+		AllDefines:       allDefines,
+		ImplPkgPath:      *implPkgPath,
+		ImplPkgName:      *implPkgName,
+		ImplFunc:         *implFunc,
+		TestPkgName:      *testPkg,
+		MaxCases:         *maxCases,
+		Seed:             *seed,
+		RandomDraws:      *randomDraws,
+		PathCover:        *pathCover,
+		PathDepth:        *pathDepth,
+		PathMaxPaths:     *pathMaxPaths,
+		PathTimeout:      time.Duration(*pathTimeoutMS) * time.Millisecond,
+		FalsifierSamples: *falsifierSamples,
 	}
 	h, err := verify.BuildHarness(cfg)
 	if err != nil {

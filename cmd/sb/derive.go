@@ -171,6 +171,18 @@ Flags:
 					runArgs = append(runArgs, "--path-depth", strconv.Itoa(spec.PathDepth))
 				}
 			}
+			// Fourth sample source: inputs `sb loop --falsify` found.
+			// shen-derive runs from its own module directory, so the
+			// path is absolutised here. A missing file contributes
+			// nothing, which is the common case, so this is safe to
+			// pass unconditionally — and passing it unconditionally is
+			// what makes a falsifier finding permanent without anyone
+			// having to remember a flag.
+			if abs, err := filepath.Abs(FalsifierSamplesPath); err == nil {
+				if _, statErr := os.Stat(abs); statErr == nil {
+					runArgs = append(runArgs, "--falsifier-samples", abs)
+				}
+			}
 			runDir = absDeriveDir
 			tempGlob = "shen-derive-*.go"
 		case "ts":
