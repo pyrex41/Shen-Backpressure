@@ -159,6 +159,35 @@ func applyVerifiedDischarge(prem *Premise, dtName string, v specfile.VerifiedPre
 // seed as a string otherwise. samplesFailed and counterExamples are
 // filled in by the consumer (sb derive) after `go test` runs.
 func ClassifyDefine(specPath string, def *specfile.Define, sampleCount int, seedLabel string, implFunc string) Rule {
+	return ClassifyDefineWithPaths(specPath, def, sampleCount, seedLabel, implFunc, nil)
+}
+
+// PathCoverInfo carries the outcome of a path-cover run for one
+// (define …). Passing it to ClassifyDefineWithPaths upgrades the
+// premise's discharge basis from `shen-derive-sampled` to
+// `prover-z3-path-cover` and records the three path counters.
+//
+// A run where no solver was available (SolverAvailable false) keeps the
+// sampled basis: paths were enumerated but nothing was proven about
+// which of them are reachable, so claiming prover evidence would
+// overstate what happened.
+type PathCoverInfo struct {
+	Total    int
+	Feasible int
+	Dead     int
+	// SolverName is the solver that answered, e.g. "z3".
+	SolverName string
+	// SolverAvailable reports whether the solver actually answered.
+	SolverAvailable bool
+	// Depth is the list-unroll bound used.
+	Depth int
+	// SamplesAdded is how many path witnesses became committed cases.
+	SamplesAdded int
+}
+
+// ClassifyDefineWithPaths is ClassifyDefine plus optional path-cover
+// evidence. paths may be nil, which reproduces ClassifyDefine exactly.
+func ClassifyDefineWithPaths(specPath string, def *specfile.Define, sampleCount int, seedLabel string, implFunc string, paths *PathCoverInfo) Rule {
 	rule := Rule{
 		Name:            def.Name,
 		Kind:            "define",
@@ -182,9 +211,63 @@ func ClassifyDefine(specPath string, def *specfile.Define, sampleCount int, seed
 		SamplesFailed: 0,
 		SampleSeed:    strPtr(seedLabel),
 	}
+	if paths != nil {
+		prem.PathsTotal = intPtr(paths.Total)
+		prem.PathsFeasible = intPtr(paths.Feasible)
+		prem.PathsDead = intPtr(paths.Dead)
+		if paths.SolverAvailable {
+			prem.DischargeBasis = BasisProverZ3PathCover
+			undecided := paths.Total - paths.Feasible - paths.Dead
+			prem.Rationale = fmt.Sprintf(
+				"shen-derive symbolically executed the spec (list unroll depth %d), enumerated %d path(s), "+
+					"and used %s to find a concrete witness for each of the %d feasible one(s) "+
+					"(%d dead, %d undecided). Those %d witness(es) plus the boundary pool make up the "+
+					"%d committed cases; the emitted Go test asserts impl returns the spec's value on each.",
+				paths.Depth, paths.Total, paths.SolverName, paths.Feasible,
+				paths.Dead, undecided, paths.SamplesAdded, sampleCount,
+			)
+		} else {
+			prem.Rationale = fmt.Sprintf(
+				"shen-derive enumerated %d spec path(s) at list unroll depth %d but no SMT solver was "+
+					"available, so path feasibility is unknown and no path witnesses were added. "+
+					"Evidence is the %d sampled case(s) (%s) only.",
+				paths.Total, paths.Depth, sampleCount, seedLabel,
+			)
+		}
+	}
 	rule.Premises = append(rule.Premises, prem)
 	return rule
 }
+
+// MarkVacuous flips the named rule to status "vacuous", records the
+// explanation, and rewrites its premises' basis. Reports the rule as
+// found so callers can warn about a finding with no matching rule.
+//
+// An uninhabited datatype is a spec bug, not an implementation bug:
+// the guard type has no values, so no program can construct one and
+// every claim that consumes it is empty. That is why it is a distinct
+// status and a gate failure rather than an "unproven".
+func MarkVacuous(rules []Rule, ruleName, message string) bool {
+	found := false
+	for i := range rules {
+		if rules[i].Name != ruleName {
+			continue
+		}
+		found = true
+		rules[i].Status = StatusVacuous
+		rules[i].VacuityMessage = message
+		for j := range rules[i].Premises {
+			p := &rules[i].Premises[j]
+			p.Discharge = DischargeUnproven
+			p.DischargeBasis = BasisVacuousDatatype
+			p.Rationale = "the rule's datatype is uninhabited, so this premise is discharged only " +
+				"vacuously — it holds of no value at all. " + message
+		}
+	}
+	return found
+}
+
+func intPtr(i int) *int { return &i }
 
 // classifyKind reports the rule's kind in the schema vocabulary
 // (mirrors specfile.TypeCategory plus "define").

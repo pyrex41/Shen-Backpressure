@@ -77,6 +77,10 @@ type Rule struct {
 	HumanDescriptionSource  string           `json:"human_description_source"`
 	Premises                []Premise        `json:"premises"`
 	Status                  string           `json:"status"`
+	// VacuityMessage explains a "vacuous" status in plain English:
+	// which datatype is uninhabited and which premises contradict.
+	// Additive (v1.x); omitted for every other status.
+	VacuityMessage          string           `json:"vacuity_message,omitempty"`
 	DischargedSinceCommit   *string          `json:"discharged_since_commit"`
 	CounterExamples         []CounterExample `json:"counter_examples"`
 }
@@ -86,6 +90,13 @@ const (
 	StatusDischarged = "discharged"
 	StatusViolated   = "violated"
 	StatusUnproven   = "unproven"
+
+	// StatusVacuous marks a rule whose datatype is uninhabited: the
+	// conjunction of its verified premises is unsatisfiable, so no
+	// value of the type can exist and every downstream claim resting
+	// on it is empty. A vacuous rule fails the gate — an uninhabited
+	// guard proves nothing. Additive (v1.x).
+	StatusVacuous = "vacuous"
 )
 
 // HumanDescriptionSource values.
@@ -112,6 +123,18 @@ type Premise struct {
 	SamplesPassed  int      `json:"samples_passed"`
 	SamplesFailed  int      `json:"samples_failed"`
 	SampleSeed     *string  `json:"sample_seed"`
+
+	// Path-cover counters (additive, v1.x). Populated only when
+	// shen-derive's path sampler ran for this premise: PathsTotal is
+	// every path the symbolic evaluator enumerated at the configured
+	// unroll depth, PathsFeasible those the solver produced a witness
+	// for (each one a committed test case), and PathsDead those whose
+	// path condition is unsatisfiable. Total minus feasible minus dead
+	// is the number the solver could not decide. Pointers so "zero
+	// paths" stays distinguishable from "path cover did not run".
+	PathsTotal    *int `json:"paths_total,omitempty"`
+	PathsFeasible *int `json:"paths_feasible,omitempty"`
+	PathsDead     *int `json:"paths_dead,omitempty"`
 
 	// RuntimeProfile is "A" | "B" | "C" | "D" for runtime-via premises,
 	// "" otherwise. Rendered in the audit report as the human-facing
@@ -150,6 +173,16 @@ const (
 	BasisGuardConstructorValidates = "guard-constructor-validates"
 	BasisShenDeriveSampled         = "shen-derive-sampled"
 	BasisNotDischarged             = "not-discharged"
+
+	// BasisProverZ3PathCover is emitted when shen-derive's path
+	// sampler ran with a solver: the evidence is one concrete case per
+	// feasible path of the spec, plus the boundary pool. The schema
+	// memo reserved the `prover-z3` family for exactly this.
+	BasisProverZ3PathCover = "prover-z3-path-cover"
+
+	// BasisVacuousDatatype is recorded on the premises of an
+	// uninhabited rule.
+	BasisVacuousDatatype = "vacuous-datatype"
 
 	// Runtime-via discharge bases (additive, v1).
 	BasisRuntimeViaWitness            = "runtime-via-witness"             // Profile A
@@ -196,6 +229,10 @@ type Summary struct {
 	RulesDischarged        int `json:"rules_discharged"`
 	RulesViolated          int `json:"rules_violated"`
 	RulesUnproven          int `json:"rules_unproven"`
+
+	// RulesVacuous counts uninhabited rules (additive, v1.x).
+	// omitempty keeps reports without vacuity byte-identical.
+	RulesVacuous int `json:"rules_vacuous,omitempty"`
 	PremisesTotal          int `json:"premises_total"`
 	PremisesStatic         int `json:"premises_static"`
 	PremisesRuntimeSampled int `json:"premises_runtime_sampled"`

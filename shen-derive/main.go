@@ -27,6 +27,7 @@ import (
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/core"
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/report"
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/specfile"
+	"github.com/pyrex41/Shen-Backpressure/shen-derive/symbolic"
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/verify"
 )
 
@@ -80,6 +81,9 @@ The verify command:
     --test-pkg NAME                    default: <impl-pkg-name>_test
     --out FILE                         default: stdout
     --max-cases N                      default: 24
+    --path-cover                       add one sample per feasible spec path (needs z3 on PATH)
+    --path-depth N                     list-unrolling depth for --path-cover (default 4)
+    --vacuity                          check datatypes for inhabitation (default true)
 `, version)
 }
 
@@ -215,6 +219,11 @@ func cmdVerify(args []string) {
 	randomDraws := fs.Int("random-draws", 0, "number of random primitive draws per type when --seed != 0 (default 8)")
 	reportOut := fs.String("report-out", "", "if non-empty, write a per-spec discharge report (JSON) to this path")
 	guardFile := fs.String("guard-file", "", "path to shengen-emitted guards file (used to populate code_references in the discharge report)")
+	pathCover := fs.Bool("path-cover", false, "add one concrete sample per feasible spec path (needs z3 on PATH; degrades to the sampler without it)")
+	pathDepth := fs.Int("path-depth", 0, "list-unrolling depth for --path-cover (default 4)")
+	pathMaxPaths := fs.Int("path-max-paths", 0, "cap on enumerated paths for --path-cover (default 64)")
+	pathTimeoutMS := fs.Int("path-timeout-ms", 0, "per-query solver timeout in milliseconds for --path-cover (default 5000)")
+	vacuity := fs.Bool("vacuity", true, "check every (datatype …) with verified premises for inhabitation; a vacuous datatype fails the gate")
 
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: shen-derive verify <spec.shen> [flags]")
@@ -257,22 +266,47 @@ func cmdVerify(args []string) {
 
 	tt := specfile.BuildTypeTable(sf.Datatypes, *importPath, *importAlias)
 
+	// Vacuity pass, at spec load. An uninhabited datatype makes every
+	// downstream claim empty, so it is worth knowing before a single
+	// sample is generated. Without a solver the check is silently
+	// skipped — the same clean degradation as path cover.
+	var vacuousFindings []symbolic.VacuityFinding
+	if *vacuity {
+		solver, solverErr := symbolic.FindSolver(time.Duration(*pathTimeoutMS) * time.Millisecond)
+		if solverErr == nil {
+			findings, err := symbolic.CheckVacuity(tt, solver)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: vacuity check: %v\n", err)
+			}
+			for _, f := range findings {
+				if f.Verdict == symbolic.VacuityVacuous {
+					vacuousFindings = append(vacuousFindings, f)
+					fmt.Fprintf(os.Stderr, "VACUOUS: %s\n", f.Message)
+				}
+			}
+		}
+	}
+
 	allDefines := make([]*specfile.Define, len(sf.Defines))
 	for i := range sf.Defines {
 		allDefines[i] = &sf.Defines[i]
 	}
 
 	cfg := &verify.HarnessConfig{
-		Spec:        def,
-		TypeTable:   tt,
-		AllDefines:  allDefines,
-		ImplPkgPath: *implPkgPath,
-		ImplPkgName: *implPkgName,
-		ImplFunc:    *implFunc,
-		TestPkgName: *testPkg,
-		MaxCases:    *maxCases,
-		Seed:        *seed,
-		RandomDraws: *randomDraws,
+		Spec:         def,
+		TypeTable:    tt,
+		AllDefines:   allDefines,
+		ImplPkgPath:  *implPkgPath,
+		ImplPkgName:  *implPkgName,
+		ImplFunc:     *implFunc,
+		TestPkgName:  *testPkg,
+		MaxCases:     *maxCases,
+		Seed:         *seed,
+		RandomDraws:  *randomDraws,
+		PathCover:    *pathCover,
+		PathDepth:    *pathDepth,
+		PathMaxPaths: *pathMaxPaths,
+		PathTimeout:  time.Duration(*pathTimeoutMS) * time.Millisecond,
 	}
 	h, err := verify.BuildHarness(cfg)
 	if err != nil {
@@ -295,6 +329,24 @@ func cmdVerify(args []string) {
 		fmt.Fprintf(os.Stderr, "wrote %s (%d cases)\n", *out, len(h.Cases))
 	}
 
+	if h.PathStats != nil {
+		ps := h.PathStats
+		solver := ps.SolverName
+		if !ps.SolverAvailable || solver == "" {
+			solver = "none"
+		}
+		fmt.Fprintf(os.Stderr,
+			"path cover: paths_total=%d paths_feasible=%d paths_dead=%d "+
+				"(solver: %s, depth %d, %d sample(s) added)\n",
+			ps.Total, ps.Feasible, ps.Dead, solver, ps.Depth, ps.SamplesAdded)
+		if ps.DegradedReason != "" {
+			fmt.Fprintf(os.Stderr, "path cover degraded: %s\n", ps.DegradedReason)
+		}
+		for _, w := range ps.Warnings {
+			fmt.Fprintf(os.Stderr, "path cover warning: %s\n", w)
+		}
+	}
+
 	if *reportOut != "" {
 		seedLabel := "deterministic-default"
 		if *seed != 0 {
@@ -305,9 +357,29 @@ func cmdVerify(args []string) {
 			fmt.Fprintf(os.Stderr, "discharge classify: %v\n", err)
 			os.Exit(1)
 		}
+		var pathInfo *report.PathCoverInfo
+		if h.PathStats != nil {
+			pathInfo = &report.PathCoverInfo{
+				Total:           h.PathStats.Total,
+				Feasible:        h.PathStats.Feasible,
+				Dead:            h.PathStats.Dead,
+				SolverName:      h.PathStats.SolverName,
+				SolverAvailable: h.PathStats.SolverAvailable,
+				Depth:           h.PathStats.Depth,
+				SamplesAdded:    h.PathStats.SamplesAdded,
+			}
+		}
 		dischargeRules = append(dischargeRules,
-			report.ClassifyDefine(specPath, def, len(h.Cases), seedLabel, *implFunc),
+			report.ClassifyDefineWithPaths(specPath, def, len(h.Cases), seedLabel, *implFunc, pathInfo),
 		)
+		// An uninhabited datatype flips its rule to "vacuous" in the
+		// report and fails the gate below.
+		for _, f := range vacuousFindings {
+			name := datatypeBlockFor(sf, f.Type)
+			if !report.MarkVacuous(dischargeRules, name, f.Message) {
+				fmt.Fprintf(os.Stderr, "warning: vacuous type %q has no matching report rule\n", f.Type)
+			}
+		}
 		rep, err := report.Build(report.BuildOptions{
 			SpecPath:          specPath,
 			Now:               time.Now().UTC(),
@@ -325,4 +397,35 @@ func cmdVerify(args []string) {
 		}
 		fmt.Fprintf(os.Stderr, "wrote discharge report %s\n", *reportOut)
 	}
+
+	// The gate fails on a vacuous datatype. This is deliberately the
+	// last thing the command does: the test file and the discharge
+	// report are written first, so the operator (and `sb derive`) can
+	// read the finding out of the artifact rather than only the log.
+	if len(vacuousFindings) > 0 {
+		fmt.Fprintf(os.Stderr,
+			"\nshen-derive: %d uninhabited datatype(s) — failing. "+
+				"An uninhabited guard type proves nothing: no program can construct a value of it, "+
+				"so every rule that consumes one is empty.\n", len(vacuousFindings))
+		os.Exit(1)
+	}
+}
+
+// datatypeBlockFor maps a Shen type name (a datatype's conclusion) back
+// to the name of the (datatype …) block that concludes it, which is the
+// name the discharge report uses for the rule. They differ whenever the
+// block is named for the invariant rather than for the type it builds
+// (payment's `balance-invariant` concludes `balance-checked`).
+func datatypeBlockFor(sf *specfile.SpecFile, typeName string) string {
+	for _, dt := range sf.Datatypes {
+		if dt.Name == typeName {
+			return dt.Name
+		}
+		for _, r := range dt.Rules {
+			if r.Conclusion.TypeName == typeName {
+				return dt.Name
+			}
+		}
+	}
+	return typeName
 }

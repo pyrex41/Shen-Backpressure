@@ -42,14 +42,14 @@ const DischargeHistoryRetention = 50
 // the schema doc; encoding/json preserves struct field order on
 // marshal.
 type DischargeReport struct {
-	SchemaVersion int                  `json:"schema_version"`
-	GeneratedAt   string               `json:"generated_at"`
-	Spec          DischargeSpec        `json:"spec"`
-	Impl          DischargeImpl        `json:"impl"`
-	Tools         DischargeTools       `json:"tools"`
-	Rules         []DischargeRule      `json:"rules"`
-	Summary       DischargeSummary     `json:"summary"`
-	Signature     *DischargeSignature  `json:"signature"`
+	SchemaVersion int                 `json:"schema_version"`
+	GeneratedAt   string              `json:"generated_at"`
+	Spec          DischargeSpec       `json:"spec"`
+	Impl          DischargeImpl       `json:"impl"`
+	Tools         DischargeTools      `json:"tools"`
+	Rules         []DischargeRule     `json:"rules"`
+	Summary       DischargeSummary    `json:"summary"`
+	Signature     *DischargeSignature `json:"signature"`
 }
 
 type DischargeSpec struct {
@@ -77,16 +77,20 @@ type DischargeTools struct {
 }
 
 type DischargeRule struct {
-	Name                   string                  `json:"name"`
-	Kind                   string                  `json:"kind"`
-	SpecFile               string                  `json:"spec_file"`
-	SpecExcerpt            string                  `json:"spec_excerpt"`
-	HumanDescription       string                  `json:"human_description"`
-	HumanDescriptionSource string                  `json:"human_description_source"`
-	Premises               []DischargePremise      `json:"premises"`
-	Status                 string                  `json:"status"`
-	DischargedSinceCommit  *string                 `json:"discharged_since_commit"`
-	CounterExamples        []DischargeCounter      `json:"counter_examples"`
+	Name                   string             `json:"name"`
+	Kind                   string             `json:"kind"`
+	SpecFile               string             `json:"spec_file"`
+	SpecExcerpt            string             `json:"spec_excerpt"`
+	HumanDescription       string             `json:"human_description"`
+	HumanDescriptionSource string             `json:"human_description_source"`
+	Premises               []DischargePremise `json:"premises"`
+	Status                 string             `json:"status"`
+	// VacuityMessage explains a "vacuous" status (mirrors
+	// shen-derive/report/schema.go). Additive; omitempty keeps
+	// reports without vacuity byte-identical.
+	VacuityMessage        string             `json:"vacuity_message,omitempty"`
+	DischargedSinceCommit *string            `json:"discharged_since_commit"`
+	CounterExamples       []DischargeCounter `json:"counter_examples"`
 }
 
 type DischargePremise struct {
@@ -99,6 +103,13 @@ type DischargePremise struct {
 	SamplesPassed  int      `json:"samples_passed"`
 	SamplesFailed  int      `json:"samples_failed"`
 	SampleSeed     *string  `json:"sample_seed"`
+
+	// Path-cover counters (mirror shen-derive/report/schema.go).
+	// Present only when shen-derive's path sampler ran; passed through
+	// verbatim from the per-spec report.
+	PathsTotal    *int `json:"paths_total,omitempty"`
+	PathsFeasible *int `json:"paths_feasible,omitempty"`
+	PathsDead     *int `json:"paths_dead,omitempty"`
 
 	// Runtime-via fields (mirror shen-derive/report/schema.go). Present
 	// only for :runtime-via premises; omitempty keeps pre-runtime-via
@@ -123,10 +134,14 @@ type DischargeCounter struct {
 }
 
 type DischargeSummary struct {
-	RuleCount              int `json:"rule_count"`
-	RulesDischarged        int `json:"rules_discharged"`
-	RulesViolated          int `json:"rules_violated"`
-	RulesUnproven          int `json:"rules_unproven"`
+	RuleCount       int `json:"rule_count"`
+	RulesDischarged int `json:"rules_discharged"`
+	RulesViolated   int `json:"rules_violated"`
+	RulesUnproven   int `json:"rules_unproven"`
+
+	// RulesVacuous counts uninhabited rules (mirrors
+	// shen-derive/report/schema.go).
+	RulesVacuous           int `json:"rules_vacuous,omitempty"`
 	PremisesTotal          int `json:"premises_total"`
 	PremisesStatic         int `json:"premises_static"`
 	PremisesRuntimeSampled int `json:"premises_runtime_sampled"`
@@ -150,6 +165,12 @@ const (
 	DischargeStatusDischarged = "discharged"
 	DischargeStatusViolated   = "violated"
 	DischargeStatusUnproven   = "unproven"
+
+	// DischargeStatusVacuous marks a rule whose datatype is
+	// uninhabited: no value can satisfy all of its verified premises,
+	// so the guard proves nothing and every rule consuming it is
+	// empty. The derive gate treats it as a failure.
+	DischargeStatusVacuous = "vacuous"
 
 	DischargeStatic         = "static"
 	DischargeRuntimeSampled = "runtime-sample"
@@ -273,6 +294,8 @@ func computeDischargeSummary(rules []DischargeRule) DischargeSummary {
 			s.RulesViolated++
 		case DischargeStatusUnproven:
 			s.RulesUnproven++
+		case DischargeStatusVacuous:
+			s.RulesVacuous++
 		}
 		for _, p := range r.Premises {
 			s.PremisesTotal++
@@ -332,8 +355,9 @@ func gitWorkingDirDirty() bool {
 // goTestFailureRE matches the format that shen-derive's emitted tests
 // use:  case_NN: spec says X, impl returned Y
 // The full lines from `go test` look like:
-//   --- FAIL: TestSpec_Processable/case_07 (0.00s)
-//       processable_spec_test.go:120: case_07: spec says true, impl returned false
+//
+//	--- FAIL: TestSpec_Processable/case_07 (0.00s)
+//	    processable_spec_test.go:120: case_07: spec says true, impl returned false
 var goTestFailureRE = regexp.MustCompile(`(case_\d+):\s+spec says\s+(.+?),\s+impl returned\s+(.+)$`)
 
 // goTestSubtestRunRE matches the test runner's "=== RUN
@@ -417,7 +441,11 @@ func downgradeRuntimeSampledToUnproven(r *DischargeReport, reason string) {
 			p.Rationale = reason
 			ruleHasUnproven = true
 		}
-		if ruleHasUnproven && r.Rules[i].Status != DischargeStatusViolated {
+		// "violated" and "vacuous" are both stronger verdicts than
+		// "unproven" and must survive the downgrade.
+		if ruleHasUnproven &&
+			r.Rules[i].Status != DischargeStatusViolated &&
+			r.Rules[i].Status != DischargeStatusVacuous {
 			r.Rules[i].Status = DischargeStatusUnproven
 		}
 	}
@@ -690,6 +718,23 @@ func loadDischargeHistory() []*DischargeReport {
 			continue
 		}
 		out = append(out, r)
+	}
+	return out
+}
+
+// vacuousRules returns the names of every uninhabited rule in the
+// report, in report order. The derive gate fails when this is
+// non-empty: an uninhabited guard type is a spec bug that silently
+// empties every claim downstream of it, so it must not pass quietly.
+func vacuousRules(r *DischargeReport) []string {
+	if r == nil {
+		return nil
+	}
+	var out []string
+	for _, rule := range r.Rules {
+		if rule.Status == DischargeStatusVacuous {
+			out = append(out, rule.Name)
+		}
 	}
 	return out
 }

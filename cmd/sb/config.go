@@ -83,6 +83,19 @@ type DeriveSpec struct {
 	GuardPkg string // Go import path (go) or relative TS module path (ts) of the shengen guard module
 	OutFile  string // path to the committed generated test file
 	Seed     int64  // optional RNG seed; 0 = deterministic
+
+	// PathCover turns on shen-derive's path-complete sample source:
+	// one concrete case per feasible path of the spec, found by
+	// symbolic execution plus an SMT solver, on top of the boundary
+	// pool. Requires a z3 binary on PATH; without one the feature
+	// degrades and only the pool supplies evidence. Set per spec with
+	// `path_cover = true` in [[derive.specs]], or for every spec at
+	// once with `path_cover = true` under [derive].
+	PathCover bool
+
+	// PathDepth is the list-unrolling bound for path enumeration.
+	// Zero leaves shen-derive's default (4).
+	PathDepth int
 }
 
 // CedarConfig configures the Cedar (SMT tier) runtime emitter.
@@ -130,14 +143,16 @@ type tomlCedar struct {
 
 // tomlDeriveSpec mirrors a [[derive.specs]] entry in sb.toml.
 type tomlDeriveSpec struct {
-	Lang     string `toml:"lang"`
-	Path     string `toml:"path"`
-	Func     string `toml:"func"`
-	ImplPkg  string `toml:"impl_pkg"`
-	ImplFunc string `toml:"impl_func"`
-	GuardPkg string `toml:"guard_pkg"`
-	OutFile  string `toml:"out_file"`
-	Seed     int64  `toml:"seed"`
+	Lang      string `toml:"lang"`
+	PathCover *bool  `toml:"path_cover"`
+	PathDepth int    `toml:"path_depth"`
+	Path      string `toml:"path"`
+	Func      string `toml:"func"`
+	ImplPkg   string `toml:"impl_pkg"`
+	ImplFunc  string `toml:"impl_func"`
+	GuardPkg  string `toml:"guard_pkg"`
+	OutFile   string `toml:"out_file"`
+	Seed      int64  `toml:"seed"`
 }
 
 // tomlGateDef mirrors a [[gates]] entry in the new sb.toml format.
@@ -172,8 +187,10 @@ type tomlConfigNew struct {
 	} `toml:"engine"`
 	Gates  []tomlGateDef `toml:"gates"`
 	Derive struct {
-		Dir   string           `toml:"dir"`
-		Specs []tomlDeriveSpec `toml:"specs"`
+		Dir       string           `toml:"dir"`
+		PathCover bool             `toml:"path_cover"`
+		PathDepth int              `toml:"path_depth"`
+		Specs     []tomlDeriveSpec `toml:"specs"`
 	} `toml:"derive"`
 	Cedar struct {
 		SchemaOut   string   `toml:"schema_out"`
@@ -220,8 +237,10 @@ type tomlConfigLegacy struct {
 		Relaxed bool `toml:"relaxed"`
 	} `toml:"gates"`
 	Derive struct {
-		Dir   string           `toml:"dir"`
-		Specs []tomlDeriveSpec `toml:"specs"`
+		Dir       string           `toml:"dir"`
+		PathCover bool             `toml:"path_cover"`
+		PathDepth int              `toml:"path_depth"`
+		Specs     []tomlDeriveSpec `toml:"specs"`
 	} `toml:"derive"`
 	Cedar struct {
 		SchemaOut   string   `toml:"schema_out"`
@@ -288,7 +307,7 @@ func LoadConfig() (*Config, error) {
 				}
 			}
 
-			applyDerive(cfg, tcNew.Derive.Dir, tcNew.Derive.Specs)
+			applyDerive(cfg, tcNew.Derive.Dir, tcNew.Derive.PathCover, tcNew.Derive.PathDepth, tcNew.Derive.Specs)
 			applyCedar(cfg, tcNew.Cedar.SchemaOut, tcNew.Cedar.PoliciesOut, tcNew.Cedar.Targets)
 			applyRego(cfg, tcNew.Rego.ModuleOut, tcNew.Rego.Targets, tcNew.Rego.Package)
 			applyDecidableShen(cfg, tcNew.DecidableShen.Targets)
@@ -306,7 +325,7 @@ func LoadConfig() (*Config, error) {
 				tcLegacy.Commands.Test, tcLegacy.Commands.ShenCheck, tcLegacy.Commands.Audit)
 			cfg.Relaxed = tcLegacy.Gates.Relaxed
 
-			applyDerive(cfg, tcLegacy.Derive.Dir, tcLegacy.Derive.Specs)
+			applyDerive(cfg, tcLegacy.Derive.Dir, tcLegacy.Derive.PathCover, tcLegacy.Derive.PathDepth, tcLegacy.Derive.Specs)
 			applyCedar(cfg, tcLegacy.Cedar.SchemaOut, tcLegacy.Cedar.PoliciesOut, tcLegacy.Cedar.Targets)
 			applyRego(cfg, tcLegacy.Rego.ModuleOut, tcLegacy.Rego.Targets, tcLegacy.Rego.Package)
 			applyDecidableShen(cfg, tcLegacy.DecidableShen.Targets)
@@ -415,7 +434,12 @@ func applyCommands(cfg *Config, gen, build, test, check, audit string) {
 }
 
 // applyDerive sets the derive config from TOML values.
-func applyDerive(cfg *Config, dir string, specs []tomlDeriveSpec) {
+//
+// pathCover and pathDepth come from the [derive] table and act as
+// defaults for every spec; a [[derive.specs]] entry overrides them
+// (path_cover is a *bool there so an explicit `false` can switch the
+// table-level default off for one spec).
+func applyDerive(cfg *Config, dir string, pathCover bool, pathDepth int, specs []tomlDeriveSpec) {
 	if dir != "" {
 		cfg.DeriveDir = dir
 	}
@@ -424,15 +448,25 @@ func applyDerive(cfg *Config, dir string, specs []tomlDeriveSpec) {
 		if lang == "" {
 			lang = "go"
 		}
+		cover := pathCover
+		if s.PathCover != nil {
+			cover = *s.PathCover
+		}
+		depth := pathDepth
+		if s.PathDepth != 0 {
+			depth = s.PathDepth
+		}
 		cfg.DeriveSpecs = append(cfg.DeriveSpecs, DeriveSpec{
-			Lang:     lang,
-			Path:     s.Path,
-			Func:     s.Func,
-			ImplPkg:  s.ImplPkg,
-			ImplFunc: s.ImplFunc,
-			GuardPkg: s.GuardPkg,
-			OutFile:  s.OutFile,
-			Seed:     s.Seed,
+			Lang:      lang,
+			Path:      s.Path,
+			Func:      s.Func,
+			ImplPkg:   s.ImplPkg,
+			ImplFunc:  s.ImplFunc,
+			GuardPkg:  s.GuardPkg,
+			OutFile:   s.OutFile,
+			Seed:      s.Seed,
+			PathCover: cover,
+			PathDepth: depth,
 		})
 	}
 }

@@ -22,6 +22,10 @@ SHEN_DERIVE_SPEC := $(CURDIR)/specs/core.shen
 SHEN_DERIVE_OUT  := $(CURDIR)/internal/derived/processable_spec_test.go
 SHEN_DERIVE_PKG  := ralph-shen-agent/internal/derived
 SHEN_DERIVE_GUARD := ralph-shen-agent/internal/shenguard
+# Path-complete sampling (W2). Must match `path_cover`/`path_depth`
+# under [derive] in sb.toml, or this target and `sb derive` disagree
+# about what the committed test file should contain.
+SHEN_DERIVE_FLAGS := --path-cover --path-depth 4
 
 shen-derive-verify:
 	@set -e; \
@@ -31,6 +35,7 @@ shen-derive-verify:
 	  --impl-pkg $(SHEN_DERIVE_PKG) \
 	  --impl-func Processable \
 	  --import $(SHEN_DERIVE_GUARD) \
+	  $(SHEN_DERIVE_FLAGS) \
 	  --out $$tmp); \
 	if ! diff -u $(SHEN_DERIVE_OUT) $$tmp >/dev/null; then \
 	  echo "DRIFT: processable_spec_test.go is stale."; \
@@ -48,6 +53,7 @@ shen-derive-regen:
 	  --impl-pkg $(SHEN_DERIVE_PKG) \
 	  --impl-func Processable \
 	  --import $(SHEN_DERIVE_GUARD) \
+	  $(SHEN_DERIVE_FLAGS) \
 	  --out $(SHEN_DERIVE_OUT)
 
 run: build

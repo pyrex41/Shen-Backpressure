@@ -112,6 +112,8 @@ func summarise(rules []Rule) Summary {
 			s.RulesViolated++
 		case StatusUnproven:
 			s.RulesUnproven++
+		case StatusVacuous:
+			s.RulesVacuous++
 		}
 		for _, p := range r.Premises {
 			s.PremisesTotal++

@@ -39,10 +39,13 @@ build time, not at runtime — but the two guarantees are different in
 kind. **Structural** guarantees (shen-guard) are compile-time: the
 target-language compiler rejects any `Amount` that wasn't built
 through `NewAmount`. **Behavioral** evidence (shen-derive) is
-sampled: a deterministic boundary pool plus optional seeded random
-draws asserts pointwise equality between the spec and the impl. The
-former is a proof-for-all-inputs; the latter is high-confidence
-evidence on a designed sample.
+sampled: a deterministic boundary pool, optional seeded random draws,
+and — with `path_cover = true` and a `z3` binary on `PATH` — one
+solver-produced input per feasible path of the spec, all asserting
+pointwise equality between the spec and the impl. The former is a
+proof-for-all-inputs; the latter is high-confidence evidence on a
+designed sample, and under path cover no path of the spec goes
+unexercised within the list-unrolling depth.
 
 ## The Five Gates
 
@@ -314,7 +317,7 @@ The project ships two complementary tools that share the same
 | Best for | Domain values that cross a boundary (I/O, mutation, glue) | Pure functions where the obvious spec is clear and the efficient impl isn't |
 | How it works | Shen spec → shengen → opaque guard types → constructor validation at compile time | `(define …)` block acts as the oracle; generated table-driven test asserts the impl matches on sampled inputs |
 | Artifact | Generated guard types committed to the repo | Generated test file committed to the repo, drift checked by a gate |
-| Proof method | Shen sequent calculus + target-language compiler — proves the rule for every well-typed value | Spec-vs-impl equivalence on a deterministic boundary pool plus optional seeded random draws; constrained types filter samples against their `verified` predicates — sampled, not for-all |
+| Proof method | Shen sequent calculus + target-language compiler — proves the rule for every well-typed value | Spec-vs-impl equivalence on a deterministic boundary pool plus optional seeded random draws; with `path_cover`, a symbolic evaluator plus Z3 adds one input per feasible spec path and reports dead branches; constrained types filter samples against their `verified` predicates — bounded, not for-all |
 
 `shen-derive` plugs into `sb` as Gate 6. Configure it via
 `[[derive.specs]]` in `sb.toml`; `sb gates` registers the gate
