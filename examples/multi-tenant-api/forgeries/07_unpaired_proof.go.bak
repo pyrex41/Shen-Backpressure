@@ -1,3 +1,5 @@
+// sb-forgery: expect compile-error
+//
 // Attempt #7: apply Alice's TenantAccess proof to Bob's resource —
 // an UNPAIRED proof.
 //

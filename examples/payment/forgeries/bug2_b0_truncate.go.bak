@@ -1,3 +1,6 @@
+// sb-forgery: expect derive-catch
+// sb-forgery-replaces: internal/derived/processable.go
+//
 // Bug 2: Silent truncation of the initial balance. The impl converts
 // `b0.Val()` (a float64) through an int64 round-trip before using it,
 // losing any fractional component. `go build` is happy — the
@@ -12,7 +15,7 @@ import (
 	"ralph-shen-agent/internal/shenguard"
 )
 
-func Processable(b0 shenguard.Amount, txs []shenguard.Transaction) bool {
+func Processable[B shenguard.Brand](b0 shenguard.Amount, txs []shenguard.Transaction[B]) bool {
 	balance := float64(int64(b0.Val())) // BUG: truncates fractional part
 	for _, tx := range txs {
 		balance -= tx.Amount().Val()

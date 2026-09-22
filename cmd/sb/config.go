@@ -21,7 +21,50 @@ const (
 	// command, used only when no SCIP indexer is on PATH; see
 	// docs/FLOW.md.
 	GateKindFlow GateKind = "flow"
+	// GateKindForgery runs the project's forgery corpus (W4). Every
+	// *.go.bak under the corpus directory declares the outcome it
+	// expects in a header line; the gate stages each one and fails if
+	// any outcome differs from its declaration. Its `run` field, when
+	// set, is the legacy regex gate that `grep-miss-flow-catch`
+	// forgeries must slip past; leave it empty to reuse the flow
+	// gate's. See docs/FORGERY.md.
+	GateKindForgery GateKind = "forgery"
 )
+
+// DefaultForgeryDir is where `sb forgery` looks for the corpus.
+const DefaultForgeryDir = "forgeries"
+
+// DefaultForgeryStage is the scratch package each forgery is staged
+// into. It lives inside the project module so the staged file can
+// import the project's own guard package, and it is removed after
+// every run. The name has no leading dot or underscore because the Go
+// toolchain skips those directories, and the gate needs the file
+// compiled.
+const DefaultForgeryStage = "internal/forgery_harness"
+
+// ForgeryConfig configures the forgery gate, from [forgery] in sb.toml.
+type ForgeryConfig struct {
+	Dir   string // corpus directory (default: forgeries)
+	Stage string // scratch package path (default: internal/forgery_harness)
+	Grep  string // legacy regex command for grep-miss-flow-catch forgeries
+}
+
+// MutationConfig configures `sb mutate`, from [derive.mutation] in
+// sb.toml.
+type MutationConfig struct {
+	// Equivalent lists mutant ids the author has judged equivalent to
+	// the original — a mutant no test could kill because it does not
+	// change behaviour. Each id is `operator:file:line:col`, which is
+	// stable across unrelated edits to the rest of the file. The
+	// justification belongs in a TOML comment on the same line, so it
+	// travels with the claim.
+	Equivalent []string
+
+	// Timeout bounds a single mutant's test run. A mutant that makes
+	// the implementation diverge is caught by the timeout, not missed
+	// by it. Empty means the built-in default.
+	Timeout string
+}
 
 // GateDef is a manifest-defined gate entry from [[gates]] in sb.toml.
 type GateDef struct {
@@ -58,6 +101,12 @@ type Config struct {
 	// Derive config (gate 6 — spec-equivalence verification)
 	DeriveDir   string       // path to shen-derive module (default ../../shen-derive)
 	DeriveSpecs []DeriveSpec // one entry per (define ...) to verify
+
+	// Mutation config (W4 — `sb mutate`), from [derive.mutation].
+	Mutation MutationConfig
+
+	// Forgery corpus config (W4 — gate kind "forgery"), from [forgery].
+	Forgery ForgeryConfig
 
 	// Cedar (SMT-strong tier) runtime policy emitter config.
 	// Populated from [cedar] in sb.toml.
@@ -166,6 +215,19 @@ type tomlDeriveSpec struct {
 	Seed      int64  `toml:"seed"`
 }
 
+// tomlMutation mirrors the [derive.mutation] table.
+type tomlMutation struct {
+	Equivalent []string `toml:"equivalent"`
+	Timeout    string   `toml:"timeout"`
+}
+
+// tomlForgery mirrors the [forgery] table.
+type tomlForgery struct {
+	Dir   string `toml:"dir"`
+	Stage string `toml:"stage"`
+	Grep  string `toml:"grep"`
+}
+
 // tomlGateDef mirrors a [[gates]] entry in the new sb.toml format.
 type tomlGateDef struct {
 	Name          string `toml:"name"`
@@ -203,8 +265,10 @@ type tomlConfigNew struct {
 		PathCover bool             `toml:"path_cover"`
 		PathDepth int              `toml:"path_depth"`
 		Specs     []tomlDeriveSpec `toml:"specs"`
+		Mutation  tomlMutation     `toml:"mutation"`
 	} `toml:"derive"`
-	Cedar struct {
+	Forgery tomlForgery `toml:"forgery"`
+	Cedar   struct {
 		SchemaOut   string   `toml:"schema_out"`
 		PoliciesOut string   `toml:"policies_out"`
 		Targets     []string `toml:"targets"`
@@ -254,8 +318,10 @@ type tomlConfigLegacy struct {
 		PathCover bool             `toml:"path_cover"`
 		PathDepth int              `toml:"path_depth"`
 		Specs     []tomlDeriveSpec `toml:"specs"`
+		Mutation  tomlMutation     `toml:"mutation"`
 	} `toml:"derive"`
-	Cedar struct {
+	Forgery tomlForgery `toml:"forgery"`
+	Cedar   struct {
 		SchemaOut   string   `toml:"schema_out"`
 		PoliciesOut string   `toml:"policies_out"`
 		Targets     []string `toml:"targets"`
@@ -322,6 +388,8 @@ func LoadConfig() (*Config, error) {
 			}
 
 			applyDerive(cfg, tcNew.Derive.Dir, tcNew.Derive.PathCover, tcNew.Derive.PathDepth, tcNew.Derive.Specs)
+			applyMutation(cfg, tcNew.Derive.Mutation)
+			applyForgery(cfg, tcNew.Forgery)
 			applyCedar(cfg, tcNew.Cedar.SchemaOut, tcNew.Cedar.PoliciesOut, tcNew.Cedar.Targets)
 			applyRego(cfg, tcNew.Rego.ModuleOut, tcNew.Rego.Targets, tcNew.Rego.Package)
 			applyDecidableShen(cfg, tcNew.DecidableShen.Targets)
@@ -341,6 +409,8 @@ func LoadConfig() (*Config, error) {
 			cfg.Brands = tcLegacy.Project.Brands
 
 			applyDerive(cfg, tcLegacy.Derive.Dir, tcLegacy.Derive.PathCover, tcLegacy.Derive.PathDepth, tcLegacy.Derive.Specs)
+			applyMutation(cfg, tcLegacy.Derive.Mutation)
+			applyForgery(cfg, tcLegacy.Forgery)
 			applyCedar(cfg, tcLegacy.Cedar.SchemaOut, tcLegacy.Cedar.PoliciesOut, tcLegacy.Cedar.Targets)
 			applyRego(cfg, tcLegacy.Rego.ModuleOut, tcLegacy.Rego.Targets, tcLegacy.Rego.Package)
 			applyDecidableShen(cfg, tcLegacy.DecidableShen.Targets)
@@ -483,6 +553,33 @@ func applyDerive(cfg *Config, dir string, pathCover bool, pathDepth int, specs [
 			PathCover: cover,
 			PathDepth: depth,
 		})
+	}
+}
+
+// applyMutation sets the `sb mutate` config from [derive.mutation].
+// The equivalent list is copied rather than aliased so a later decode
+// pass cannot mutate it underneath the caller.
+func applyMutation(cfg *Config, m tomlMutation) {
+	if len(m.Equivalent) > 0 {
+		cfg.Mutation.Equivalent = append([]string(nil), m.Equivalent...)
+	}
+	if m.Timeout != "" {
+		cfg.Mutation.Timeout = m.Timeout
+	}
+}
+
+// applyForgery sets the forgery-gate config from [forgery]. Every
+// field has a working default, so a project can turn the gate on with
+// a [[gates]] entry alone.
+func applyForgery(cfg *Config, f tomlForgery) {
+	if f.Dir != "" {
+		cfg.Forgery.Dir = f.Dir
+	}
+	if f.Stage != "" {
+		cfg.Forgery.Stage = f.Stage
+	}
+	if f.Grep != "" {
+		cfg.Forgery.Grep = f.Grep
 	}
 }
 

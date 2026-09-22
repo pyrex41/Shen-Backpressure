@@ -42,14 +42,46 @@ const DischargeHistoryRetention = 50
 // the schema doc; encoding/json preserves struct field order on
 // marshal.
 type DischargeReport struct {
-	SchemaVersion int                 `json:"schema_version"`
-	GeneratedAt   string              `json:"generated_at"`
-	Spec          DischargeSpec       `json:"spec"`
-	Impl          DischargeImpl       `json:"impl"`
-	Tools         DischargeTools      `json:"tools"`
-	Rules         []DischargeRule     `json:"rules"`
-	Summary       DischargeSummary    `json:"summary"`
-	Signature     *DischargeSignature `json:"signature"`
+	SchemaVersion int              `json:"schema_version"`
+	GeneratedAt   string           `json:"generated_at"`
+	Spec          DischargeSpec    `json:"spec"`
+	Impl          DischargeImpl    `json:"impl"`
+	Tools         DischargeTools   `json:"tools"`
+	Rules         []DischargeRule  `json:"rules"`
+	Summary       DischargeSummary `json:"summary"`
+
+	// Evidence carries measurements *about* the gates rather than
+	// results *from* them (W4). It is additive and omitempty, so a
+	// report from a project that has never run `sb mutate` is
+	// byte-identical to one from before this field existed, and
+	// schema_version does not move.
+	Evidence *DischargeEvidence `json:"evidence,omitempty"`
+
+	Signature *DischargeSignature `json:"signature"`
+}
+
+// DischargeEvidence holds gate-strength measurements. A discharge
+// says "the gate passed"; this says "and here is how much that is
+// worth".
+type DischargeEvidence struct {
+	// MutationScore is `sb mutate`'s kill rate over the committed
+	// spec test: the fraction of small, deliberate breaks to the
+	// implementation that the behavioral gate noticed.
+	MutationScore *MutationScore `json:"mutation_score,omitempty"`
+
+	// Forgery is `sb forgery`'s summary over the corpus of programs
+	// that try to obtain a guard value without the constructor.
+	Forgery *ForgeryEvidence `json:"forgery,omitempty"`
+}
+
+// ForgeryEvidence summarises one `sb forgery` run.
+type ForgeryEvidence struct {
+	Total      int      `json:"total"`
+	AsDeclared int      `json:"as_declared"`
+	Succeeding int      `json:"succeeding"`
+	MeasuredAt string   `json:"measured_at"`
+	Corpus     string   `json:"corpus"`
+	Mismatched []string `json:"mismatched,omitempty"`
 }
 
 type DischargeSpec struct {

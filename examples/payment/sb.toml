@@ -48,6 +48,29 @@ name = "tcb-audit"
 kind = "command"
 run  = "./bin/shenguard-audit.sh"
 
+# Gate 5+ — the forgery corpus (W4).
+#
+# Every *.go.bak under forgeries/ declares the outcome it expects in a
+# header line, and `sb forgery` runs the check that expectation names.
+# This example's corpus is three `derive-catch` forgeries: each one
+# stands in for internal/derived/processable.go and the gate asserts
+# that the committed spec test rejects it.
+#
+# They were the demo-shen-derive bug files, run by hand from
+# demo-shen-derive/run.sh. Standing them up as a gate is the point of
+# W4: a bug the behavioral gate is *claimed* to catch and a bug it is
+# *measured* to catch are different claims, and only the second one
+# survives a refactor. `sb mutate` measures the same gate over a
+# generated operator set; these three are the hand-picked cases whose
+# stories are worth telling in prose.
+[[gates]]
+name = "forgery"
+kind = "forgery"
+
+[forgery]
+dir   = "forgeries"
+stage = "internal/forgery_harness"
+
 # Gate 6 — spec-equivalence verification via shen-derive.
 #
 # For each [[derive.specs]] entry, `sb derive` regenerates the

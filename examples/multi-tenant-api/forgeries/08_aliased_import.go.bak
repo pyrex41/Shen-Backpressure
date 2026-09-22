@@ -1,3 +1,5 @@
+// sb-forgery: expect grep-miss-flow-catch
+//
 // Attempt #8: call the raw constructor through an aliased import, so
 // the package-qualified call text the grep gate looks for never
 // appears in the file.
@@ -57,13 +59,22 @@ import (
 	sg "multi-tenant-api/internal/shenguard"
 )
 
+// attemptBrand is this attempt's GDP brand. Each .go.bak is staged
+// alone, so every file that needs a brand declares its own. Naming a
+// brand is the W1 price of admission, not the bypass: the bypass is
+// the import alias below, and it is as effective against the grep with
+// brands on as it was without them.
+type attemptBrand struct{}
+
 // ForgeTenantAccessViaAlias builds a TenantAccess with isMember=true
 // for a tenant the principal was never checked against. No DB query
 // runs; the boolean is simply asserted.
-func ForgeTenantAccessViaAlias(principal sg.AuthenticatedPrincipal, tenant string) (sg.TenantAccess, error) {
+func ForgeTenantAccessViaAlias(principal sg.AuthenticatedPrincipal[attemptBrand], tenant string) (sg.TenantAccess[attemptBrand], error) {
 	tid := sg.NewTenantId(tenant)
 	// The grep gate looks for the literal package qualifier. This
 	// call uses the alias instead, and the compiler resolves it to
-	// the very same function.
-	return sg.NewTenantAccess(principal, tid, true)
+	// the very same function. The brand is instantiated explicitly
+	// because Go infers nothing from an interface-typed argument; that
+	// is a W1 note, not part of the evasion.
+	return sg.NewTenantAccess[attemptBrand](principal, tid, true)
 }

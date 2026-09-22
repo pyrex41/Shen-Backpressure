@@ -1,3 +1,5 @@
+// sb-forgery: expect compile-error
+//
 // Attempt #6: forge a TenantAccess with the EMPTY struct literal.
 //
 // Attempt #1 named the fields, and Go's visibility rules rejected it.

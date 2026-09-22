@@ -1,3 +1,6 @@
+// sb-forgery: expect succeeds (documented TCB limit)
+// sb-forgery-entry: ForgedTenantName
+//
 // Attempt #3: forge a TenantAccess via unsafe reflection.
 //
 // Outcome: the Go compiler accepts this, and at runtime the reflection
@@ -61,6 +64,17 @@ func ForgeViaReflect() shenguard.TenantAccess[attemptBrand] {
 	// crosses Go's normal visibility boundary on purpose; in a real
 	// code review the `unsafe.Pointer` call below is the obvious
 	// rejection signal.
+	// W1 NOTE (brands). The generated struct's first field is an
+	// unexported `valid witness`, and every accessor calls
+	// mustBeMinted, so a value no constructor produced panics the
+	// first time anything reads it. `unsafe` defeats that too:
+	// `witness` is `struct{ minted bool }`, so writing the bool at
+	// that field's address mints the forgery. This is the honest
+	// statement of the limit — the witness panic stops dropped errors
+	// and empty literals, not `unsafe`.
+	validField := v.FieldByName("valid")
+	*(*bool)(unsafe.Pointer(validField.UnsafeAddr())) = true
+
 	isMemberField := v.FieldByName("isMember")
 	*(*bool)(unsafe.Pointer(isMemberField.UnsafeAddr())) = true
 
@@ -69,4 +83,15 @@ func ForgeViaReflect() shenguard.TenantAccess[attemptBrand] {
 	*tenantPtr = shenguard.NewTenantId("t-acme")
 
 	return ta
+}
+
+// ForgedTenantName is the gate's entry point. It reads the forged
+// value through the generated accessor, which is where the W1 witness
+// would panic if the forgery had left it unminted. It does not panic,
+// and that is the finding: `unsafe` is outside what the type system
+// and the witness can reach, which is why this file declares
+// `succeeds (documented TCB limit)` rather than any of the outcomes
+// that mean "caught".
+func ForgedTenantName() string {
+	return ForgeViaReflect().Tenant().Val()
 }

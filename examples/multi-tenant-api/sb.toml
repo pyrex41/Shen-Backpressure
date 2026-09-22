@@ -70,6 +70,37 @@ name = "flow"
 kind = "flow"
 run  = "./bin/shenguard-audit.sh --grep-only"
 
+# Gate 5++ — the forgery corpus (W4).
+#
+# Kind "forgery" is served by `sb forgery`: every *.go.bak under
+# forgeries/ declares the outcome it expects in a header line
+# (`// sb-forgery: expect …`), and the gate stages it into a scratch
+# package inside this module and runs the check that expectation names
+# — `go build`, a generated driver that calls the file's entry point,
+# or `sb flow` over the staged tree. Any outcome that differs from its
+# declaration fails the gate, and a forgery that simply *succeeds* is
+# a failure unless it declares `succeeds (documented TCB limit)`.
+#
+# This is what the corpus was missing. The outcomes used to live in
+# each file's doc comment and were confirmed by hand, so W1's change to
+# the shape of every guard type could break two attempts for reasons
+# unrelated to what they demonstrate, and W3's claim that attempts 04
+# and 08 are caught by the flow gate was true but unchecked. Now both
+# are re-measured on every run.
+#
+# The `run` field is the legacy regex gate, which the
+# `grep-miss-flow-catch` forgery (attempt 08) must slip past: that
+# expectation asserts a *difference* between two gates, so the gate
+# refuses to record it unless the grep really does miss it.
+[[gates]]
+name = "forgery"
+kind = "forgery"
+run  = "./bin/shenguard-audit.sh --grep-only"
+
+[forgery]
+dir   = "forgeries"
+stage = "internal/forgery_harness"
+
 # Gate 6 — spec-equivalence verification via shen-derive.
 #
 # Anchors the discharge report on the trivial `same-user?`
