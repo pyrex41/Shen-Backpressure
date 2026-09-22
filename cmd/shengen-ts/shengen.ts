@@ -77,6 +77,17 @@ export interface Spec {
   defines: Define[];
 }
 
+import {
+  type BrandTable,
+  inferBrands,
+  listElem,
+  resolveAliases,
+  brandArgSuffix,
+  brandDeclSuffix,
+  hasWitness,
+  tsTypeWithBrands,
+} from "./brand_inference.ts";
+
 // ============================================================================
 // Symbol Table
 // ============================================================================
@@ -263,7 +274,7 @@ export function sexprToString(e: SExpr): string {
   return "(" + e.children!.map(sexprToString).join(" ") + ")";
 }
 
-function tokenize(s: string): string[] {
+export function tokenize(s: string): string[] {
   const tokens: string[] = [];
   let cur = "";
   let inString = false;
@@ -1346,7 +1357,52 @@ export interface GenerateOptions {
   // let the consumer fill in missing symbols" behavior. Opt-in when the
   // generated file is expected to pass `tsc --strict` on its own.
   filterUnreferencedDefines?: boolean;
+  // GDP brands (W1). When set, every generated class carries a phantom
+  // brand type parameter binding a proof to the value it is about, plus
+  // a witness property that makes a structurally forged object throw on
+  // first read. Opt-in: omitted, the output is byte-identical to the
+  // pre-brand emitter. Build one with `inferBrands(types, st)`.
+  brands?: BrandTable | null;
 }
+
+// brandPreamble is the fixed prologue emitted once per generated file
+// when brands are in effect.
+const BRAND_PREAMBLE: string[] = [
+  "// --- GDP brands ---",
+  "//",
+  "// Brand is the constraint for the phantom brand parameter that every",
+  "// proof class in this module carries. Any type may serve as a brand;",
+  "// the idiom is a `unique symbol` declared in the scope that mints the",
+  "// value, which no other scope can name:",
+  "//",
+  "//   declare const reqBrand: unique symbol;",
+  "//   const tx = Transaction.createOrThrow<typeof reqBrand>(amt, from, to);",
+  "//",
+  "// A proof about that transaction cannot then be handed a different one.",
+  "export type Brand = unknown;",
+  "",
+  "// The mint mark. A class's private constructor already stops `new`",
+  "// from outside this module, but it does not stop a structural forgery:",
+  "// `Object.create(TenantAccess.prototype)`, a JSON round-trip, or a",
+  "// cast through `unknown` all produce an object of the proof type that",
+  "// no constructor ever checked. Every accessor calls mustBeMinted, so",
+  "// such a value throws the first time anything reads it. The throw is a",
+  "// runtime member of the TCB; see docs/TRUST-MODEL.md.",
+  "const MINTED: unique symbol = Symbol(\"shenguard.minted\");",
+  "type Witness = typeof MINTED;",
+  "function mint(): Witness {",
+  "  return MINTED;",
+  "}",
+  "function mustBeMinted(w: Witness | undefined, typeName: string): void {",
+  "  if (w !== MINTED) {",
+  "    throw new Error(",
+  "      `shenguard: forged ${typeName} value: not produced by ${typeName}.createOrThrow ` +",
+  "        `(structural cast, Object.create, or a deserialized object)`",
+  "    );",
+  "  }",
+  "}",
+  "",
+];
 
 export function generateTs(
   types: Datatype[],
@@ -1411,15 +1467,23 @@ export function generateTs(
     lines.push("");
   }
 
+  const bt = options.brands ?? null;
+  if (bt) lines.push(...BRAND_PREAMBLE);
+
   // Generate sum type unions.
   const sumTypeVariants = new Set<string>();
   for (const [concType, variants] of st.sumTypes) {
     const tsIface = toPascalCase(concType);
-    const variantTypes = variants.map((v) => toPascalCase(v));
+    const declSuffix = bt ? brandDeclSuffix(bt.params(concType)) : "";
+    const variantTypes = variants.map(
+      (v) => toPascalCase(v) + (bt ? brandArgSuffix(bt.params(v)) : "")
+    );
     lines.push(`// --- ${tsIface} (sum type) ---`);
     lines.push(`// Multiple Shen datatype blocks produce this type.`);
     lines.push(`// Variants: ${variants.join(", ")}`);
-    lines.push(`export type ${tsIface} = ${variantTypes.join(" | ")};`);
+    lines.push(
+      `export type ${tsIface}${declSuffix} = ${variantTypes.join(" | ")};`
+    );
     lines.push("");
     for (const v of variants) sumTypeVariants.add(v);
   }
@@ -1430,19 +1494,19 @@ export function generateTs(
       lines.push(`// Shen: (datatype ${gt.name})`);
       switch (gt.category) {
         case "wrapper":
-          lines.push(...genWrapper(gt));
+          lines.push(...genWrapper(gt, bt));
           break;
         case "constrained":
-          lines.push(...genConstrained(gt, st));
+          lines.push(...genConstrained(gt, st, bt));
           break;
         case "composite":
-          lines.push(...genComposite(gt));
+          lines.push(...genComposite(gt, st, bt));
           break;
         case "guarded":
-          lines.push(...genGuarded(gt, st));
+          lines.push(...genGuarded(gt, st, bt));
           break;
         case "alias":
-          lines.push(...genAlias(gt));
+          lines.push(...genAlias(gt, st, bt));
           break;
       }
       lines.push("");
@@ -1493,11 +1557,108 @@ function mustName(shenName: string): string {
 
 // genTryCreateBody is the common factory-shape both tryCreate and createOrThrow
 // share: tryCreate is the error-returning variant, createOrThrow throws.
-function genTryCreate(className: string, paramsStr: string, argNames: string[]): string[] {
+// ---------------------------------------------------------------------------
+// Brand emission helpers (no-ops when bt is null, so the unbranded
+// output is byte-identical to the pre-brand emitter).
+// ---------------------------------------------------------------------------
+
+// selfType is the class's own name at its own brand parameters:
+// "BalanceChecked<B>". Used for field types, return types and `new`.
+function selfType(gt: GeneratedType, bt: BrandTable | null): string {
+  if (!bt) return gt.tsName;
+  return gt.tsName + brandArgSuffix(bt.params(gt.shenName));
+}
+
+// declType is the class's declaration head: "BalanceChecked<B extends Brand>".
+function declType(gt: GeneratedType, bt: BrandTable | null): string {
+  if (!bt) return gt.tsName;
+  const params = bt.params(gt.shenName);
+  if (params.length === 0) return gt.tsName;
+  return (
+    gt.tsName + "<" + params.map((x) => `${x} extends Brand`).join(", ") + ">"
+  );
+}
+
+// staticParams is the type-parameter list a static factory declares. A
+// minted type's brand appears only in the result, so callers name it
+// explicitly; an inheriting type's brand is inferred from its arguments.
+function staticParams(gt: GeneratedType, bt: BrandTable | null): string {
+  if (!bt) return "";
+  const params = bt.params(gt.shenName);
+  if (params.length === 0) return "";
+  return "<" + params.map((x) => `${x} extends Brand`).join(", ") + ">";
+}
+
+// witnessMembers is the mint mark plus the phantom brand marker. The
+// marker is `declare`d, so nothing is emitted for it at runtime; its
+// `(b: B) => B` shape makes B invariant, which is what stops
+// Transaction<A> from being assignable to Transaction<C>.
+function witnessMembers(gt: GeneratedType, bt: BrandTable | null): string[] {
+  if (!bt) return [];
+  const out = [`  private readonly _witness: Witness = mint();`];
+  for (const b of bt.params(gt.shenName)) {
+    out.push(
+      `  /** Phantom brand marker — never read; makes ${b} invariant. */`,
+      `  declare private readonly _brand${b}: (b: ${b}) => ${b};`
+    );
+  }
+  return out;
+}
+
+// accessorGuard is the mustBeMinted call every accessor opens with.
+function accessorGuard(gt: GeneratedType, bt: BrandTable | null): string {
+  if (!bt) return "";
+  return `mustBeMinted(this._witness, "${gt.tsName}"); `;
+}
+
+// premiseWitnessChecks are the checks a consuming factory runs on its
+// arguments, so a forged value cannot be laundered up the chain.
+function premiseWitnessChecks(
+  gt: GeneratedType,
+  st: SymbolTable,
+  bt: BrandTable | null
+): string[] {
+  if (!bt) return [];
+  const out: string[] = [];
+  for (const pr of gt.rule.premises) {
+    if (!hasWitness(st, pr.typeName)) continue;
+    const name = toCamelCase(pr.varName);
+    out.push(
+      `    mustBeMinted((${name} as unknown as { _witness?: Witness })._witness, "${shenTypeToTs(pr.typeName)}");`
+    );
+  }
+  return out;
+}
+
+// premiseTsType renders premise i at the brand the inference unified it into.
+function premiseTsType(
+  gt: GeneratedType,
+  st: SymbolTable,
+  bt: BrandTable | null,
+  i: number
+): string {
+  const pr = gt.rule.premises[i];
+  if (!bt) return shenTypeToTs(pr.typeName);
+  const info = bt.lookup(gt.shenName);
+  const args = info && i < info.premiseArgs.length ? info.premiseArgs[i] : [];
+  return tsTypeWithBrands(st, bt, pr.typeName, args, shenTypeToTs);
+}
+
+function genTryCreate(
+  className: string,
+  paramsStr: string,
+  argNames: string[],
+  typeParams: string = ""
+): string[] {
   const argList = argNames.join(", ");
+  // The delegation re-states the brand arguments: a static method cannot
+  // see the class's own type parameters, so the factory declares its own
+  // and passes them on.
+  const bare = className.replace(/<.*>$/, "");
+  const argsSuffix = className === bare ? "" : className.slice(bare.length);
   return [
-    `  static tryCreate(${paramsStr}): ${className} | Error {`,
-    `    try { return ${className}.createOrThrow(${argList}); }`,
+    `  static tryCreate${typeParams}(${paramsStr}): ${className} | Error {`,
+    `    try { return ${bare}.createOrThrow${argsSuffix}(${argList}); }`,
     `    catch (e) { return e instanceof Error ? e : new Error(String(e)); }`,
     `  }`,
   ];
@@ -1509,12 +1670,15 @@ function genMust(
   shenName: string,
   className: string,
   paramsStr: string,
-  argNames: string[]
+  argNames: string[],
+  typeParams: string = ""
 ): string[] {
   const argList = argNames.join(", ");
+  const bare = className.replace(/<.*>$/, "");
+  const argsSuffix = className === bare ? "" : className.slice(bare.length);
   return [
-    `export function ${mustName(shenName)}(${paramsStr}): ${className} {`,
-    `  return ${className}.createOrThrow(${argList});`,
+    `export function ${mustName(shenName)}${typeParams}(${paramsStr}): ${className} {`,
+    `  return ${bare}.createOrThrow${argsSuffix}(${argList});`,
     `}`,
   ];
 }
@@ -1527,7 +1691,7 @@ function collectRuntimeCheckerNames(types: Datatype[]): string[] {
   for (const dt of types) {
     for (const r of dt.rules) {
       for (const v of r.verified) {
-        if (v.runtimeVia) seen.add(v.runtimeVia);
+        if (isBoundRuntimeVia(v.runtimeVia)) seen.add(v.runtimeVia!);
       }
     }
   }
@@ -1537,7 +1701,24 @@ function collectRuntimeCheckerNames(types: Datatype[]): string[] {
 // ruleHasRuntimeVia reports whether any verified premise on `rule`
 // uses a `:runtime-via <name>` annotation.
 function ruleHasRuntimeVia(rule: Rule): boolean {
-  return rule.verified.some((v) => !!v.runtimeVia);
+  return rule.verified.some((v) => isBoundRuntimeVia(v.runtimeVia));
+}
+
+// isBoundRuntimeVia reports whether a `:runtime-via` marker names a
+// checker function this emitter can call.
+//
+// A marker whose first field starts with ":" selects an evaluator-hosted
+// profile — `:runtime-via :eval` (profile B in docs/RUNTIME-VIA.md),
+// where the Go emitter calls the embedded Shen evaluator host. There is
+// no such host on the TypeScript side yet, so those premises fall back
+// to the inlined predicate: the same proposition, discharged by
+// generated code rather than by the evaluator. Treating ":eval" as a
+// checker name would emit `import { :eval }`, which is not valid
+// TypeScript.
+function isBoundRuntimeVia(marker: string | null | undefined): boolean {
+  if (!marker) return false;
+  const first = marker.trim().split(/\s+/)[0] ?? "";
+  return first.length > 0 && !first.startsWith(":");
 }
 
 // emitRuntimeViaCheckTs emits one gate-site for a `:runtime-via <name>`
@@ -1556,23 +1737,27 @@ function emitRuntimeViaCheckTs(
   ];
 }
 
-function genWrapper(gt: GeneratedType): string[] {
+function genWrapper(gt: GeneratedType, bt: BrandTable | null): string[] {
   const tsType = shenTypeToTs(gt.rule.premises[0].typeName);
   const paramsStr = `x: ${tsType}`;
+  const guard = accessorGuard(gt, bt);
   return [
-    `export class ${gt.tsName} {`,
+    `export class ${declType(gt, bt)} {`,
+    ...witnessMembers(gt, bt),
     `  private readonly _v: ${tsType};`,
     `  private constructor(v: ${tsType}) { this._v = v; }`,
     `  static createOrThrow(x: ${tsType}): ${gt.tsName} { return new ${gt.tsName}(x); }`,
     ...genTryCreate(gt.tsName, paramsStr, ["x"]),
-    `  val(): ${tsType} { return this._v; }`,
-    ...(tsType === "string" ? [`  toString(): string { return this._v; }`] : []),
+    `  val(): ${tsType} { ${guard}return this._v; }`,
+    ...(tsType === "string"
+      ? [`  toString(): string { ${guard}return this._v; }`]
+      : []),
     `}`,
     ...genMust(gt.shenName, gt.tsName, paramsStr, ["x"]),
   ];
 }
 
-function genConstrained(gt: GeneratedType, st: SymbolTable): string[] {
+function genConstrained(gt: GeneratedType, st: SymbolTable, bt: BrandTable | null): string[] {
   const tsType = shenTypeToTs(gt.rule.premises[0].typeName);
   const varMap = new Map(gt.rule.premises.map((p) => [p.varName, p.typeName]));
   const premiseVar = gt.rule.premises[0].varName;
@@ -1594,7 +1779,7 @@ function genConstrained(gt: GeneratedType, st: SymbolTable): string[] {
     const checks: string[] = [];
     if (needsAlias) checks.push(`    const ${premiseCamel} = x;`);
     for (const v of gt.rule.verified) {
-      if (v.runtimeVia) {
+      if (isBoundRuntimeVia(v.runtimeVia)) {
         checks.push(...emitRuntimeViaCheckTs(v, gt.name, ["x"]));
         continue;
       }
@@ -1602,7 +1787,8 @@ function genConstrained(gt: GeneratedType, st: SymbolTable): string[] {
       checks.push(`    if (${negateTsExpr(code)}) throw new Error(\`${msg.replace(/`/g, "\\`")}: \${x}\`);`);
     }
     return [
-      `export class ${gt.tsName} {`,
+      `export class ${declType(gt, bt)} {`,
+      ...witnessMembers(gt, bt),
       `  private readonly _v: ${tsType};`,
       `  private constructor(v: ${tsType}) { this._v = v; }`,
       `  static async createOrThrow(${paramsStr}): Promise<${gt.tsName}> {`,
@@ -1613,7 +1799,7 @@ function genConstrained(gt: GeneratedType, st: SymbolTable): string[] {
       `    try { return await ${gt.tsName}.createOrThrow(ctx, x); }`,
       `    catch (e) { return e instanceof Error ? e : new Error(String(e)); }`,
       `  }`,
-      `  val(): ${tsType} { return this._v; }`,
+      `  val(): ${tsType} { ${accessorGuard(gt, bt)}return this._v; }`,
       `}`,
       `export async function must${toPascalCase(gt.shenName)}(${paramsStr}): Promise<${gt.tsName}> {`,
       `  return await ${gt.tsName}.createOrThrow(ctx, x);`,
@@ -1631,7 +1817,8 @@ function genConstrained(gt: GeneratedType, st: SymbolTable): string[] {
   }
   const paramsStr = `x: ${tsType}`;
   return [
-    `export class ${gt.tsName} {`,
+    `export class ${declType(gt, bt)} {`,
+    ...witnessMembers(gt, bt),
     `  private readonly _v: ${tsType};`,
     `  private constructor(v: ${tsType}) { this._v = v; }`,
     `  static createOrThrow(x: ${tsType}): ${gt.tsName} {`,
@@ -1639,51 +1826,65 @@ function genConstrained(gt: GeneratedType, st: SymbolTable): string[] {
     `    return new ${gt.tsName}(x);`,
     `  }`,
     ...genTryCreate(gt.tsName, paramsStr, ["x"]),
-    `  val(): ${tsType} { return this._v; }`,
+    `  val(): ${tsType} { ${accessorGuard(gt, bt)}return this._v; }`,
     `}`,
     ...genMust(gt.shenName, gt.tsName, paramsStr, ["x"]),
   ];
 }
 
-function genComposite(gt: GeneratedType): string[] {
-  const fields = gt.rule.premises.map((p) => ({
+function genComposite(
+  gt: GeneratedType,
+  st: SymbolTable,
+  bt: BrandTable | null
+): string[] {
+  const fields = gt.rule.premises.map((p, i) => ({
     name: toCamelCase(p.varName),
-    type: shenTypeToTs(p.typeName),
+    type: premiseTsType(gt, st, bt, i),
   }));
   const params = fields.map((f) => `${f.name}: ${f.type}`).join(", ");
   const argNames = fields.map((f) => f.name);
   const assigns = fields.map((f) => `    this._${f.name} = ${f.name};`);
+  const guard = accessorGuard(gt, bt);
   const accessors = fields.map(
-    (f) => `  ${f.name}(): ${f.type} { return this._${f.name}; }`
+    (f) => `  ${f.name}(): ${f.type} { ${guard}return this._${f.name}; }`
   );
+  const self = selfType(gt, bt);
   return [
-    `export class ${gt.tsName} {`,
+    `export class ${declType(gt, bt)} {`,
+    ...witnessMembers(gt, bt),
     ...fields.map((f) => `  private readonly _${f.name}: ${f.type};`),
     `  private constructor(${params}) {`,
     ...assigns,
     `  }`,
-    `  static createOrThrow(${params}): ${gt.tsName} {`,
-    `    return new ${gt.tsName}(${argNames.join(", ")});`,
+    `  static createOrThrow${staticParams(gt, bt)}(${params}): ${self} {`,
+    ...premiseWitnessChecks(gt, st, bt),
+    `    return new ${self}(${argNames.join(", ")});`,
     `  }`,
-    ...genTryCreate(gt.tsName, params, argNames),
+    ...genTryCreate(self, params, argNames, staticParams(gt, bt)),
     ...accessors,
     `}`,
-    ...genMust(gt.shenName, gt.tsName, params, argNames),
+    ...genMust(gt.shenName, self, params, argNames, staticParams(gt, bt)),
   ];
 }
 
-function genGuarded(gt: GeneratedType, st: SymbolTable): string[] {
-  const fields = gt.rule.premises.map((p) => ({
+function genGuarded(
+  gt: GeneratedType,
+  st: SymbolTable,
+  bt: BrandTable | null
+): string[] {
+  const fields = gt.rule.premises.map((p, i) => ({
     name: toCamelCase(p.varName),
-    type: shenTypeToTs(p.typeName),
+    type: premiseTsType(gt, st, bt, i),
     shenType: p.typeName,
   }));
   const params = fields.map((f) => `${f.name}: ${f.type}`).join(", ");
   const argNames = fields.map((f) => f.name);
   const assigns = fields.map((f) => `    this._${f.name} = ${f.name};`);
+  const guard = accessorGuard(gt, bt);
   const accessors = fields.map(
-    (f) => `  ${f.name}(): ${f.type} { return this._${f.name}; }`
+    (f) => `  ${f.name}(): ${f.type} { ${guard}return this._${f.name}; }`
   );
+  const self = selfType(gt, bt);
   const varMap = new Map(gt.rule.premises.map((p) => [p.varName, p.typeName]));
   const hasRuntime = ruleHasRuntimeVia(gt.rule);
 
@@ -1691,31 +1892,34 @@ function genGuarded(gt: GeneratedType, st: SymbolTable): string[] {
     const ctxParams = `ctx: RuntimeCheckCtx, ${params}`;
     const checks: string[] = [];
     for (const v of gt.rule.verified) {
-      if (v.runtimeVia) {
+      if (isBoundRuntimeVia(v.runtimeVia)) {
         checks.push(...emitRuntimeViaCheckTs(v, gt.name, argNames));
         continue;
       }
       const [code, msg] = verifiedToTs(st, v, varMap);
       checks.push(`    if (${negateTsExpr(code)}) throw new Error(\`${msg.replace(/`/g, "\\`")}\`);`);
     }
+    const sp = staticParams(gt, bt);
     return [
-      `export class ${gt.tsName} {`,
+      `export class ${declType(gt, bt)} {`,
+      ...witnessMembers(gt, bt),
       ...fields.map((f) => `  private readonly _${f.name}: ${f.type};`),
       `  private constructor(${params}) {`,
       ...assigns,
       `  }`,
-      `  static async createOrThrow(${ctxParams}): Promise<${gt.tsName}> {`,
+      `  static async createOrThrow${sp}(${ctxParams}): Promise<${self}> {`,
+      ...premiseWitnessChecks(gt, st, bt),
       ...checks,
-      `    return new ${gt.tsName}(${argNames.join(", ")});`,
+      `    return new ${self}(${argNames.join(", ")});`,
       `  }`,
-      `  static async tryCreate(${ctxParams}): Promise<${gt.tsName} | Error> {`,
-      `    try { return await ${gt.tsName}.createOrThrow(ctx, ${argNames.join(", ")}); }`,
+      `  static async tryCreate${sp}(${ctxParams}): Promise<${self} | Error> {`,
+      `    try { return await ${gt.tsName}.createOrThrow${bt ? `<${bt.params(gt.shenName).join(", ")}>` : ""}(ctx, ${argNames.join(", ")}); }`,
       `    catch (e) { return e instanceof Error ? e : new Error(String(e)); }`,
       `  }`,
       ...accessors,
       `}`,
-      `export async function must${toPascalCase(gt.shenName)}(${ctxParams}): Promise<${gt.tsName}> {`,
-      `  return await ${gt.tsName}.createOrThrow(ctx, ${argNames.join(", ")});`,
+      `export async function must${toPascalCase(gt.shenName)}${sp}(${ctxParams}): Promise<${self}> {`,
+      `  return await ${gt.tsName}.createOrThrow${bt ? `<${bt.params(gt.shenName).join(", ")}>` : ""}(ctx, ${argNames.join(", ")});`,
       `}`,
     ];
   }
@@ -1726,25 +1930,37 @@ function genGuarded(gt: GeneratedType, st: SymbolTable): string[] {
     checks.push(`    if (${negateTsExpr(code)}) throw new Error(\`${msg.replace(/`/g, "\\`")}\`);`);
   }
   return [
-    `export class ${gt.tsName} {`,
+    `export class ${declType(gt, bt)} {`,
+    ...witnessMembers(gt, bt),
     ...fields.map((f) => `  private readonly _${f.name}: ${f.type};`),
     `  private constructor(${params}) {`,
     ...assigns,
     `  }`,
-    `  static createOrThrow(${params}): ${gt.tsName} {`,
+    `  static createOrThrow${staticParams(gt, bt)}(${params}): ${self} {`,
+    ...premiseWitnessChecks(gt, st, bt),
     ...checks,
-    `    return new ${gt.tsName}(${argNames.join(", ")});`,
+    `    return new ${self}(${argNames.join(", ")});`,
     `  }`,
-    ...genTryCreate(gt.tsName, params, argNames),
+    ...genTryCreate(self, params, argNames, staticParams(gt, bt)),
     ...accessors,
     `}`,
-    ...genMust(gt.shenName, gt.tsName, params, argNames),
+    ...genMust(gt.shenName, self, params, argNames, staticParams(gt, bt)),
   ];
 }
 
-function genAlias(gt: GeneratedType): string[] {
+function genAlias(
+  gt: GeneratedType,
+  st: SymbolTable,
+  bt: BrandTable | null
+): string[] {
+  if (!bt) {
+    return [
+      `export type ${gt.tsName} = ${shenTypeToTs(gt.rule.premises[0].typeName)};`,
+    ];
+  }
+  const params = bt.params(gt.shenName);
   return [
-    `export type ${gt.tsName} = ${shenTypeToTs(gt.rule.premises[0].typeName)};`,
+    `export type ${declType(gt, bt)} = ${tsTypeWithBrands(st, bt, gt.rule.premises[0].typeName, params, shenTypeToTs)};`,
   ];
 }
 
@@ -2441,7 +2657,7 @@ function generateDefineHelpers(
 
   for (const [name, def] of st.defines) {
     if (reached && !reached.has(name)) continue;
-    const emitted = generateOneDefine(def, st);
+    const emitted = generateOneDefine(def, st, options.brands ?? null);
     if (emitted.usesScanl) needsScanl = true;
     if (emitted.usesVal) needsVal = true;
     bodies.push(...emitted.lines);
@@ -2556,7 +2772,11 @@ function detectLinearRecursion(def: Define): LinearRecPattern | null {
   return { v, bcRaw, brRaw, hbody, step: recArgs[0] };
 }
 
-function generateOneDefine(def: Define, st: SymbolTable): DefineEmission {
+function generateOneDefine(
+  def: Define,
+  st: SymbolTable,
+  bt: BrandTable | null
+): DefineEmission {
   const lines: string[] = [];
   const tsName = definePascalName(def.name);
 
@@ -2589,12 +2809,37 @@ function generateOneDefine(def: Define, st: SymbolTable): DefineEmission {
     paramNames.push(chosen ? toCamelCase(chosen) : `arg${i}`);
   }
 
+  // With brands on, a helper over branded types is declared generic
+  // over exactly the brands its parameters need, so it holds for values
+  // from any one minting scope without mixing two.
+  const renderParamType = (shenType: string | undefined): string => {
+    if (!shenType) return "any";
+    if (!bt) return shenTypeToTs(shenType);
+    return tsTypeWithBrands(st, bt, shenType, [], shenTypeToTs);
+  };
+  const defineBrandParams: string[] = [];
+  if (bt) {
+    for (const shenType of sigParams) {
+      if (!shenType) continue;
+      const target = listElem(shenType) ?? shenType;
+      for (const b of bt.params(resolveAliases(st, target))) {
+        if (!defineBrandParams.includes(b)) defineBrandParams.push(b);
+      }
+    }
+  }
+  const defineTypeParams =
+    defineBrandParams.length === 0
+      ? ""
+      : "<" + defineBrandParams.map((b) => `${b} extends Brand`).join(", ") + ">";
+
   const paramSig = paramNames
-    .map((p, i) => `${p}: ${sigParams[i] ? shenTypeToTs(sigParams[i]) : "any"}`)
+    .map((p, i) => `${p}: ${renderParamType(sigParams[i])}`)
     .join(", ");
 
   lines.push(`// ${tsName} is generated from Shen define ${def.name}`);
-  lines.push(`export function ${tsName}(${paramSig}): ${returnTs} {`);
+  lines.push(
+    `export function ${tsName}${defineTypeParams}(${paramSig}): ${returnTs} {`
+  );
 
   // Linear-recursion → while-loop rewrite. Recognised shape is documented on
   // LinearRecPattern. Eligibility requires a single positional arg whose
@@ -2803,6 +3048,7 @@ function main(): void {
   let dryRun = false;
   let pkg: string | undefined;
   let filterUnreferencedDefines = false;
+  let brands = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--spec" && i + 1 < args.length) {
@@ -2815,6 +3061,11 @@ function main(): void {
       dryRun = true;
     } else if (args[i] === "--filter-unreferenced-defines") {
       filterUnreferencedDefines = true;
+    } else if (args[i] === "--brands") {
+      // GDP brands (W1). Opt-in; see brand_inference.ts.
+      brands = true;
+    } else if (args[i] === "--no-brands") {
+      brands = false;
     } else if (!args[i].startsWith("--")) {
       specPaths.push(args[i]);
     }
@@ -2834,10 +3085,20 @@ function main(): void {
   const originLabel = specPaths.length === 1 ? specPaths[0] : specPaths.join(", ");
   printSymbolTable(types, st, originLabel);
 
+  const brandTable = brands ? inferBrands(types, st) : null;
+  if (brandTable) {
+    process.stderr.write("Brand table (GDP proof binding):\n");
+    for (const line of brandTable.toString().split("\n")) {
+      if (line) process.stderr.write("  " + line + "\n");
+    }
+    process.stderr.write("\n");
+  }
+
   if (!dryRun) {
     const output = generateTs(types, st, originLabel, {
       pkg,
       filterUnreferencedDefines,
+      brands: brandTable,
     });
     if (outFile) {
       writeFileSync(outFile, output);

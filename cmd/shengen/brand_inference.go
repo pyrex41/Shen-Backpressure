@@ -263,7 +263,7 @@ func inferRuleBrands(bt *BrandTable, st *SymbolTable, shenName string, r Rule, i
 	var slots []slot
 	premSlots := make([][]int, len(r.Premises))
 	for i, p := range r.Premises {
-		target := resolveAliases(st, p.TypeName)
+		target := resolveAliases(st, premiseElemType(p.TypeName))
 		n := len(bt.Params(target))
 		for j := 0; j < n; j++ {
 			premSlots[i] = append(premSlots[i], len(slots))
@@ -338,8 +338,8 @@ func inferRuleBrands(bt *BrandTable, st *SymbolTable, shenName string, r Rule, i
 
 // premisesRelated implements rule 2's two relations.
 func premisesRelated(st *SymbolTable, r Rule, a, b Premise) bool {
-	at := resolveAliases(st, a.TypeName)
-	btName := resolveAliases(st, b.TypeName)
+	at := resolveAliases(st, premiseElemType(a.TypeName))
+	btName := resolveAliases(st, premiseElemType(b.TypeName))
 	if typeContains(st, at, btName) || typeContains(st, btName, at) {
 		return true
 	}
@@ -379,7 +379,7 @@ func typeContains(st *SymbolTable, outer, inner string) bool {
 			}
 		}
 		for _, f := range info.Fields {
-			ft := resolveAliases(st, f.ShenType)
+			ft := resolveAliases(st, premiseElemType(f.ShenType))
 			if ft == inner {
 				return true
 			}
@@ -415,7 +415,7 @@ func consumedTypes(types []Datatype, st *SymbolTable) map[string]bool {
 	for _, dt := range types {
 		for _, r := range dt.Rules {
 			for _, p := range r.Premises {
-				target := resolveAliases(st, p.TypeName)
+				target := resolveAliases(st, premiseElemType(p.TypeName))
 				if brandableCategory(categoryOf(st, target)) {
 					out[target] = true
 					// Consuming a sum type consumes its variants: they
@@ -482,6 +482,17 @@ func (bt *BrandTable) String() string {
 // ============================================================================
 // Small helpers
 // ============================================================================
+
+// premiseElemType unwraps `(list X)` to X. A premise of list type is a
+// premise about X's, so the brand travels with the element: a
+// `(list cart-item)` field makes `cart-item` a consumed type and its
+// brand one of the conclusion's.
+func premiseElemType(shenType string) string {
+	if elem := listElemType(shenType); elem != "" {
+		return elem
+	}
+	return shenType
+}
 
 func brandParamNames(n int) []string {
 	if n <= 0 {
