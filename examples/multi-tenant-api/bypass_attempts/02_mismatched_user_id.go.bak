@@ -22,7 +22,12 @@
 //	go run bypass_attempts/02_mismatched_user_id.go.bak  # (after rename)
 //
 // bin/show-bypass-attempts.sh captures the compile output and the
-// runtime error from this file.
+// runtime error from this file.//
+// W1 NOTE (brands). The guard types now carry a phantom brand
+// parameter, so this attempt names one — `attemptBrand`, declared
+// below — to keep demonstrating its own mechanism rather than failing
+// at "cannot infer B". Naming a brand is not itself the bypass; it is
+// the price of admission that W1 introduced.
 package bypass_attempts_demo
 
 import (
@@ -30,6 +35,10 @@ import (
 
 	"multi-tenant-api/internal/shenguard"
 )
+
+// attemptBrand is this attempt's GDP brand. Each .go.bak is staged
+// alone, so every file that needs a brand declares its own.
+type attemptBrand struct{}
 
 // ForgeMismatchedAuth tries to pair Alice's signed JWT with Bob's
 // UserId. Returns the error the constructor produces.
@@ -41,7 +50,7 @@ func ForgeMismatchedAuth() error {
 	aud, _ := shenguard.NewJwtAudience("users")
 
 	// Alice's parsed claims (sub = u-alice).
-	claims, err := shenguard.NewParsedClaims(aliceID, 9999999999, iss, aud)
+	claims, err := shenguard.NewParsedClaims[attemptBrand](aliceID, 9999999999, iss, aud)
 	if err != nil {
 		return fmt.Errorf("setup: %w", err)
 	}

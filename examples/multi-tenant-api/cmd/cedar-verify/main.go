@@ -61,6 +61,7 @@ import (
 
 	ps "github.com/pyrex41/Shen-Backpressure/policyspec"
 
+	"multi-tenant-api/internal/apibrand"
 	"multi-tenant-api/internal/shenguard"
 )
 
@@ -741,7 +742,7 @@ func genAccessSamples(maxSamples int) []accessSample {
 // makeDummyPrincipal builds a valid AuthenticatedPrincipal (HumanPrincipal)
 // using only the exported ctors. All inner guards succeed for these values;
 // the only thing that can cause New*Access to fail is the boolean flags.
-func makeDummyPrincipal(userID string) shenguard.AuthenticatedPrincipal {
+func makeDummyPrincipal(userID string) shenguard.AuthenticatedPrincipal[apibrand.API] {
 	uid := shenguard.NewUserId(userID)
 	iss, err := shenguard.NewJwtIssuer("shen-backpressure")
 	if err != nil {
@@ -753,7 +754,7 @@ func makeDummyPrincipal(userID string) shenguard.AuthenticatedPrincipal {
 	}
 	// exp > 0 (parsed-claims), sig non-empty (verified-jwt), and AuthenticatedUser
 	// binds user == claims.sub (the W2.1 cross-field premise verified upstream).
-	claims, err := shenguard.NewParsedClaims(uid, 9999999999, iss, aud)
+	claims, err := shenguard.NewParsedClaims[apibrand.API](uid, 9999999999, iss, aud)
 	if err != nil {
 		panic("NewParsedClaims dummy: " + err.Error())
 	}
@@ -775,12 +776,12 @@ func computeGuardAllow(s accessSample) bool {
 	tid := shenguard.NewTenantId(s.TenantID)
 
 	if s.Level == "tenant" {
-		_, err := shenguard.NewTenantAccess(prin, tid, s.IsMember)
+		_, err := shenguard.NewTenantAccess[apibrand.API](prin, tid, s.IsMember)
 		return err == nil
 	}
 
 	// resource level: must be able to build the inner TenantAccess first.
-	ta, err := shenguard.NewTenantAccess(prin, tid, s.IsMember)
+	ta, err := shenguard.NewTenantAccess[apibrand.API](prin, tid, s.IsMember)
 	if err != nil {
 		return false
 	}

@@ -30,6 +30,12 @@
 // bin/show-bypass-attempts.sh runs this file and reports that it
 // *compiles and runs* but generates an "unsafe.Pointer" line that the
 // audit grep would flag.
+//
+// W1 NOTE (brands). Brands do not help here, and neither does the
+// witness: `unsafe` can set the `valid` field as easily as `isMember`,
+// so this attempt still compiles and still succeeds. It names a brand
+// only to keep compiling. The honest statement is unchanged — the
+// defence against `unsafe` is review and grep, not the type system.
 package bypass_attempts_demo
 
 import (
@@ -39,12 +45,16 @@ import (
 	"multi-tenant-api/internal/shenguard"
 )
 
+// attemptBrand is this attempt's GDP brand. Each .go.bak is staged
+// alone, so every file that needs a brand declares its own.
+type attemptBrand struct{}
+
 // ForgeViaReflect builds a TenantAccess by writing directly to the
 // unexported fields of an existing zero-valued instance via unsafe
 // pointers. This is the literal "type system bypass" — and it is
 // also the kind of code that any reviewer would reject on sight.
-func ForgeViaReflect() shenguard.TenantAccess {
-	var ta shenguard.TenantAccess
+func ForgeViaReflect() shenguard.TenantAccess[attemptBrand] {
+	var ta shenguard.TenantAccess[attemptBrand]
 	v := reflect.ValueOf(&ta).Elem()
 
 	// Set isMember = true via unsafe pointer arithmetic. Each line

@@ -43,5 +43,9 @@ if [ ! -f "$SPEC" ]; then
 fi
 
 mkdir -p "$(dirname "$OUT")"
-"$SHENGEN" "$SPEC" "$PKG" > "$OUT" 2>/dev/null
+# This example opts into GDP brands (W1): generated proof types carry a
+# phantom brand parameter binding each proof to the value it is about,
+# plus an unexported witness field that makes an empty-literal forgery
+# panic on first use. The TCB audit gate passes --brands to match.
+"$SHENGEN" --brands "$SPEC" "$PKG" > "$OUT" 2>/dev/null
 echo "Generated $OUT from $SPEC (package $PKG)"

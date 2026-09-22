@@ -104,6 +104,64 @@ The LLM cannot bypass this:
 - `SafeTransfer` requires a `BalanceChecked` proof that can only come
   from `NewBalanceChecked`.
 
+Two things it still could do, and the flag that closes them:
+
+- `BalanceChecked{}` — the *empty* literal names no field, so Go
+  always allowed it, from any package.
+- `NewSafeTransfer(tx2, checkForTx1)` — the pre-brand constructor
+  never checked that the proof is about that transaction.
+
+### `--brands` (opt-in): proof binding and the witness
+
+`shengen --brands` (and `shengen-ts --brands`) emits GDP brands: each
+proof type gets a phantom brand parameter, inferred from the spec's
+existing sharing structure, plus an unexported witness field.
+
+```go
+type BalanceChecked[B Brand] struct {
+    valid witness
+    bal   float64
+    tx    Transaction[B]
+}
+
+func NewBalanceChecked[B Brand](bal float64, tx Transaction[B]) (BalanceChecked[B], error) {
+    tx.valid.mustBeMinted("Transaction")
+    if !(bal >= tx.amount.Val()) {
+        return BalanceChecked[B]{}, fmt.Errorf("bal must be >= tx.amount")
+    }
+    return BalanceChecked[B]{valid: mint(), bal: bal, tx: tx}, nil
+}
+
+func NewSafeTransfer[B Brand](tx Transaction[B], check BalanceChecked[B]) SafeTransfer[B]
+```
+
+- The brand makes an unpaired proof a **compile error**: a
+  `BalanceChecked` minted for another transaction is a different type.
+- The witness makes the empty literal **loud**: its zero value is not
+  minted, and every accessor and consuming constructor panics on it.
+  A failing constructor returns that unminted zero value, so a dropped
+  `err` panics at first read instead of forging a proof.
+
+Flags:
+
+| Flag | Emitter | Effect |
+|------|---------|--------|
+| `--brands` | `shengen`, `shengen-ts` | Emit brand parameters + witness. Prints the inferred brand table to stderr. |
+| `--no-brands` | `shengen`, `shengen-ts` | Explicit spelling of the default; output is byte-identical to the pre-brand emitter. |
+| `SHENGEN_BRANDS=1` | `bin/shengen-codegen.sh` | Passes `--brands` through. |
+| `--brands` | `bin/shenguard-audit.sh` | Regenerates with `--brands` and fails if any wrapper type in the committed file lacks its witness field. |
+
+A project that opts in must pass the flag to **both** its codegen and
+its TCB audit gate, or the drift check compares branded output against
+an unbranded regeneration and fails. `examples/payment` and
+`examples/multi-tenant-api` are wired that way; see their
+`bin/shengen-codegen.sh` and `bin/shenguard-audit.sh`.
+
+Brands are opt-in by design, and what they do and do not guarantee —
+including the caller's role in brand freshness, and the witness panic's
+membership in the TCB — is in
+[TRUST-MODEL.md](TRUST-MODEL.md#proof-binding-gdp-brands).
+
 The TypeScript output via `cmd/shengen-ts/` mirrors this with
 `#`-prefixed private fields and equivalent factory functions; the
 Python and Rust reference emitters under `cmd/shengen-py/` and

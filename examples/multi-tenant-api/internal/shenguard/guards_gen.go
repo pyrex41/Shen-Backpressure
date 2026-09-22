@@ -10,88 +10,140 @@ import (
 	"fmt"
 )
 
+// --- GDP brands ---
+//
+// Brand is the constraint for the phantom brand parameter that every
+// proof type in this package carries. Any type may serve as a brand,
+// including a type declared inside the function that mints the value:
+//
+//	type reqBrand struct{}
+//	tx := NewTransaction[reqBrand](amt, from, to)
+//
+// A brand declared that way cannot be named by any other scope, so a
+// proof about this transaction cannot be handed a different one.
+type Brand interface{}
+
+// witness is the mint mark every generated value carries. Its zero
+// value is NOT minted, which is what makes the empty literal
+// `T{}` — legal Go from any package, since it names no field —
+// detectable. Every accessor and every consuming constructor calls
+// mustBeMinted, so a forged or dropped-error value panics the first
+// time anything reads it. The panic is a runtime member of the TCB;
+// see docs/TRUST-MODEL.md.
+type witness struct{ minted bool }
+
+// mint marks a value as having come out of its own constructor.
+func mint() witness { return witness{minted: true} }
+
+// mustBeMinted panics unless this value came from a constructor.
+func (w witness) mustBeMinted(typeName string) {
+	if !w.minted {
+		panic("shenguard: forged " + typeName + " value: not produced by New" + typeName + " (zero value, empty literal, or a dropped constructor error)")
+	}
+}
+
 // --- AuthenticatedPrincipal (sum type) ---
 // Multiple Shen datatype blocks produce this type.
 // Variants: human-principal, service-principal
-type AuthenticatedPrincipal interface {
+type AuthenticatedPrincipal[B Brand] interface {
 	isAuthenticatedPrincipal()
 }
 
 // --- UserId ---
 // Shen: (datatype user-id)
-type UserId struct{ v string }
+type UserId struct {
+	valid witness
+	v string
+}
 
-func NewUserId(x string) UserId { return UserId{v: x} }
+func NewUserId(x string) UserId { return UserId{valid: mint(), v: x} }
 
-func (t UserId) Val() string { return t.v }
+func (t UserId) Val() string { t.valid.mustBeMinted("UserId"); return t.v }
 
-func (t UserId) String() string { return t.v }
+func (t UserId) String() string { t.valid.mustBeMinted("UserId"); return t.v }
 
 
 // --- TenantId ---
 // Shen: (datatype tenant-id)
-type TenantId struct{ v string }
+type TenantId struct {
+	valid witness
+	v string
+}
 
-func NewTenantId(x string) TenantId { return TenantId{v: x} }
+func NewTenantId(x string) TenantId { return TenantId{valid: mint(), v: x} }
 
-func (t TenantId) Val() string { return t.v }
+func (t TenantId) Val() string { t.valid.mustBeMinted("TenantId"); return t.v }
 
-func (t TenantId) String() string { return t.v }
+func (t TenantId) String() string { t.valid.mustBeMinted("TenantId"); return t.v }
 
 
 // --- ResourceId ---
 // Shen: (datatype resource-id)
-type ResourceId struct{ v string }
+type ResourceId struct {
+	valid witness
+	v string
+}
 
-func NewResourceId(x string) ResourceId { return ResourceId{v: x} }
+func NewResourceId(x string) ResourceId { return ResourceId{valid: mint(), v: x} }
 
-func (t ResourceId) Val() string { return t.v }
+func (t ResourceId) Val() string { t.valid.mustBeMinted("ResourceId"); return t.v }
 
-func (t ResourceId) String() string { return t.v }
+func (t ResourceId) String() string { t.valid.mustBeMinted("ResourceId"); return t.v }
 
 
 // --- JwtIssuer ---
 // Shen: (datatype jwt-issuer)
-type JwtIssuer struct{ v string }
+type JwtIssuer struct {
+	valid witness
+	v string
+}
 
 func NewJwtIssuer(x string) (JwtIssuer, error) {
 	if (x == "") {
 		return JwtIssuer{}, fmt.Errorf("x must not be empty: %v", x)
 	}
-	return JwtIssuer{v: x}, nil
+	return JwtIssuer{valid: mint(), v: x}, nil
 }
 
-func (t JwtIssuer) Val() string { return t.v }
+func (t JwtIssuer) Val() string { t.valid.mustBeMinted("JwtIssuer"); return t.v }
 
 
 // --- JwtAudience ---
 // Shen: (datatype jwt-audience)
-type JwtAudience struct{ v string }
+type JwtAudience struct {
+	valid witness
+	v string
+}
 
 func NewJwtAudience(x string) (JwtAudience, error) {
 	if (x == "") {
 		return JwtAudience{}, fmt.Errorf("x must not be empty: %v", x)
 	}
-	return JwtAudience{v: x}, nil
+	return JwtAudience{valid: mint(), v: x}, nil
 }
 
-func (t JwtAudience) Val() string { return t.v }
+func (t JwtAudience) Val() string { t.valid.mustBeMinted("JwtAudience"); return t.v }
 
 
 // --- ParsedClaims ---
 // Shen: (datatype parsed-claims)
-type ParsedClaims struct {
+type ParsedClaims[B Brand] struct {
+	valid witness
 	sub UserId
 	exp float64
 	iss JwtIssuer
 	aud JwtAudience
 }
 
-func NewParsedClaims(sub UserId, exp float64, iss JwtIssuer, aud JwtAudience) (ParsedClaims, error) {
+func NewParsedClaims[B Brand](sub UserId, exp float64, iss JwtIssuer, aud JwtAudience) (ParsedClaims[B], error) {
+	sub.valid.mustBeMinted("UserId")
+	iss.valid.mustBeMinted("JwtIssuer")
+	aud.valid.mustBeMinted("JwtAudience")
 	if !(exp > 0) {
-		return ParsedClaims{}, fmt.Errorf("exp must be > 0")
+		return ParsedClaims[B]{}, fmt.Errorf("exp must be > 0")
 	}
-	return ParsedClaims{
+	return ParsedClaims[B]{
+		valid: mint(),
 		sub: sub,
 		exp: exp,
 		iss: iss,
@@ -99,175 +151,201 @@ func NewParsedClaims(sub UserId, exp float64, iss JwtIssuer, aud JwtAudience) (P
 	}, nil
 }
 
-func (t ParsedClaims) Sub() UserId { return t.sub }
+func (t ParsedClaims[B]) Sub() UserId { t.valid.mustBeMinted("ParsedClaims"); return t.sub }
 
-func (t ParsedClaims) Exp() float64 { return t.exp }
+func (t ParsedClaims[B]) Exp() float64 { t.valid.mustBeMinted("ParsedClaims"); return t.exp }
 
-func (t ParsedClaims) Iss() JwtIssuer { return t.iss }
+func (t ParsedClaims[B]) Iss() JwtIssuer { t.valid.mustBeMinted("ParsedClaims"); return t.iss }
 
-func (t ParsedClaims) Aud() JwtAudience { return t.aud }
+func (t ParsedClaims[B]) Aud() JwtAudience { t.valid.mustBeMinted("ParsedClaims"); return t.aud }
 
 
 // --- VerifiedJwt ---
 // Shen: (datatype verified-jwt)
-type VerifiedJwt struct {
-	claims ParsedClaims
+type VerifiedJwt[B Brand] struct {
+	valid witness
+	claims ParsedClaims[B]
 	sig string
 }
 
-func NewVerifiedJwt(claims ParsedClaims, sig string) (VerifiedJwt, error) {
+func NewVerifiedJwt[B Brand](claims ParsedClaims[B], sig string) (VerifiedJwt[B], error) {
+	claims.valid.mustBeMinted("ParsedClaims")
 	if (sig == "") {
-		return VerifiedJwt{}, fmt.Errorf("sig must not be empty")
+		return VerifiedJwt[B]{}, fmt.Errorf("sig must not be empty")
 	}
-	return VerifiedJwt{
+	return VerifiedJwt[B]{
+		valid: mint(),
 		claims: claims,
 		sig: sig,
 	}, nil
 }
 
-func (t VerifiedJwt) Claims() ParsedClaims { return t.claims }
+func (t VerifiedJwt[B]) Claims() ParsedClaims[B] { t.valid.mustBeMinted("VerifiedJwt"); return t.claims }
 
-func (t VerifiedJwt) Sig() string { return t.sig }
+func (t VerifiedJwt[B]) Sig() string { t.valid.mustBeMinted("VerifiedJwt"); return t.sig }
 
 
 // --- AuthenticatedUser ---
 // Shen: (datatype authenticated-user)
-type AuthenticatedUser struct {
-	jwt VerifiedJwt
+type AuthenticatedUser[B Brand] struct {
+	valid witness
+	jwt VerifiedJwt[B]
 	user UserId
 }
 
-func NewAuthenticatedUser(jwt VerifiedJwt, user UserId) (AuthenticatedUser, error) {
+func NewAuthenticatedUser[B Brand](jwt VerifiedJwt[B], user UserId) (AuthenticatedUser[B], error) {
+	jwt.valid.mustBeMinted("VerifiedJwt")
+	user.valid.mustBeMinted("UserId")
 	if !(user == jwt.claims.sub) {
-		return AuthenticatedUser{}, fmt.Errorf("user must equal jwt.claims.sub")
+		return AuthenticatedUser[B]{}, fmt.Errorf("user must equal jwt.claims.sub")
 	}
-	return AuthenticatedUser{
+	return AuthenticatedUser[B]{
+		valid: mint(),
 		jwt: jwt,
 		user: user,
 	}, nil
 }
 
-func (t AuthenticatedUser) Jwt() VerifiedJwt { return t.jwt }
+func (t AuthenticatedUser[B]) Jwt() VerifiedJwt[B] { t.valid.mustBeMinted("AuthenticatedUser"); return t.jwt }
 
-func (t AuthenticatedUser) User() UserId { return t.user }
+func (t AuthenticatedUser[B]) User() UserId { t.valid.mustBeMinted("AuthenticatedUser"); return t.user }
 
 
 // --- ServiceId ---
 // Shen: (datatype service-id)
-type ServiceId struct{ v string }
+type ServiceId struct {
+	valid witness
+	v string
+}
 
-func NewServiceId(x string) ServiceId { return ServiceId{v: x} }
+func NewServiceId(x string) ServiceId { return ServiceId{valid: mint(), v: x} }
 
-func (t ServiceId) Val() string { return t.v }
+func (t ServiceId) Val() string { t.valid.mustBeMinted("ServiceId"); return t.v }
 
-func (t ServiceId) String() string { return t.v }
+func (t ServiceId) String() string { t.valid.mustBeMinted("ServiceId"); return t.v }
 
 
 // --- ServiceCredential ---
 // Shen: (datatype service-credential)
-type ServiceCredential struct {
+type ServiceCredential[B Brand] struct {
+	valid witness
 	service ServiceId
 	secret string
 }
 
-func NewServiceCredential(service ServiceId, secret string) (ServiceCredential, error) {
+func NewServiceCredential[B Brand](service ServiceId, secret string) (ServiceCredential[B], error) {
+	service.valid.mustBeMinted("ServiceId")
 	if (secret == "") {
-		return ServiceCredential{}, fmt.Errorf("secret must not be empty")
+		return ServiceCredential[B]{}, fmt.Errorf("secret must not be empty")
 	}
-	return ServiceCredential{
+	return ServiceCredential[B]{
+		valid: mint(),
 		service: service,
 		secret: secret,
 	}, nil
 }
 
-func (t ServiceCredential) Service() ServiceId { return t.service }
+func (t ServiceCredential[B]) Service() ServiceId { t.valid.mustBeMinted("ServiceCredential"); return t.service }
 
-func (t ServiceCredential) Secret() string { return t.secret }
+func (t ServiceCredential[B]) Secret() string { t.valid.mustBeMinted("ServiceCredential"); return t.secret }
 
 
 // --- HumanPrincipal ---
 // Shen: (datatype human-principal)
-type HumanPrincipal struct {
-	auth AuthenticatedUser
+type HumanPrincipal[B Brand] struct {
+	valid witness
+	auth AuthenticatedUser[B]
 }
 
-func NewHumanPrincipal(auth AuthenticatedUser) HumanPrincipal {
-	return HumanPrincipal{
+func NewHumanPrincipal[B Brand](auth AuthenticatedUser[B]) HumanPrincipal[B] {
+	auth.valid.mustBeMinted("AuthenticatedUser")
+	return HumanPrincipal[B]{
+		valid: mint(),
 		auth: auth,
 	}
 }
 
-func (t HumanPrincipal) Auth() AuthenticatedUser { return t.auth }
+func (t HumanPrincipal[B]) Auth() AuthenticatedUser[B] { t.valid.mustBeMinted("HumanPrincipal"); return t.auth }
 
-func (t HumanPrincipal) isAuthenticatedPrincipal() {}
+func (t HumanPrincipal[B]) isAuthenticatedPrincipal() {}
 
 
 // --- ServicePrincipal ---
 // Shen: (datatype service-principal)
-type ServicePrincipal struct {
-	cred ServiceCredential
+type ServicePrincipal[B Brand] struct {
+	valid witness
+	cred ServiceCredential[B]
 }
 
-func NewServicePrincipal(cred ServiceCredential) ServicePrincipal {
-	return ServicePrincipal{
+func NewServicePrincipal[B Brand](cred ServiceCredential[B]) ServicePrincipal[B] {
+	cred.valid.mustBeMinted("ServiceCredential")
+	return ServicePrincipal[B]{
+		valid: mint(),
 		cred: cred,
 	}
 }
 
-func (t ServicePrincipal) Cred() ServiceCredential { return t.cred }
+func (t ServicePrincipal[B]) Cred() ServiceCredential[B] { t.valid.mustBeMinted("ServicePrincipal"); return t.cred }
 
-func (t ServicePrincipal) isAuthenticatedPrincipal() {}
+func (t ServicePrincipal[B]) isAuthenticatedPrincipal() {}
 
 
 // --- TenantAccess ---
 // Shen: (datatype tenant-access)
-type TenantAccess struct {
-	principal AuthenticatedPrincipal
+type TenantAccess[B Brand] struct {
+	valid witness
+	principal AuthenticatedPrincipal[B]
 	tenant TenantId
 	isMember bool
 }
 
-func NewTenantAccess(principal AuthenticatedPrincipal, tenant TenantId, isMember bool) (TenantAccess, error) {
+func NewTenantAccess[B Brand](principal AuthenticatedPrincipal[B], tenant TenantId, isMember bool) (TenantAccess[B], error) {
+	tenant.valid.mustBeMinted("TenantId")
 	if !(isMember == true) {
-		return TenantAccess{}, fmt.Errorf("isMember must equal true")
+		return TenantAccess[B]{}, fmt.Errorf("isMember must equal true")
 	}
-	return TenantAccess{
+	return TenantAccess[B]{
+		valid: mint(),
 		principal: principal,
 		tenant: tenant,
 		isMember: isMember,
 	}, nil
 }
 
-func (t TenantAccess) Principal() AuthenticatedPrincipal { return t.principal }
+func (t TenantAccess[B]) Principal() AuthenticatedPrincipal[B] { t.valid.mustBeMinted("TenantAccess"); return t.principal }
 
-func (t TenantAccess) Tenant() TenantId { return t.tenant }
+func (t TenantAccess[B]) Tenant() TenantId { t.valid.mustBeMinted("TenantAccess"); return t.tenant }
 
-func (t TenantAccess) IsMember() bool { return t.isMember }
+func (t TenantAccess[B]) IsMember() bool { t.valid.mustBeMinted("TenantAccess"); return t.isMember }
 
 
 // --- ResourceAccess ---
 // Shen: (datatype resource-access)
-type ResourceAccess struct {
-	access TenantAccess
+type ResourceAccess[B Brand] struct {
+	valid witness
+	access TenantAccess[B]
 	resource ResourceId
 	isOwned bool
 }
 
-func NewResourceAccess(access TenantAccess, resource ResourceId, isOwned bool) (ResourceAccess, error) {
+func NewResourceAccess[B Brand](access TenantAccess[B], resource ResourceId, isOwned bool) (ResourceAccess[B], error) {
+	access.valid.mustBeMinted("TenantAccess")
+	resource.valid.mustBeMinted("ResourceId")
 	if !(isOwned == true) {
-		return ResourceAccess{}, fmt.Errorf("isOwned must equal true")
+		return ResourceAccess[B]{}, fmt.Errorf("isOwned must equal true")
 	}
-	return ResourceAccess{
+	return ResourceAccess[B]{
+		valid: mint(),
 		access: access,
 		resource: resource,
 		isOwned: isOwned,
 	}, nil
 }
 
-func (t ResourceAccess) Access() TenantAccess { return t.access }
+func (t ResourceAccess[B]) Access() TenantAccess[B] { t.valid.mustBeMinted("ResourceAccess"); return t.access }
 
-func (t ResourceAccess) Resource() ResourceId { return t.resource }
+func (t ResourceAccess[B]) Resource() ResourceId { t.valid.mustBeMinted("ResourceAccess"); return t.resource }
 
-func (t ResourceAccess) IsOwned() bool { return t.isOwned }
+func (t ResourceAccess[B]) IsOwned() bool { t.valid.mustBeMinted("ResourceAccess"); return t.isOwned }
 
 

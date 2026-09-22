@@ -18,4 +18,7 @@ if [ ! -x "$ROOT_SCRIPT" ]; then
     exit 1
 fi
 
-exec "$ROOT_SCRIPT" --lang go "$@"
+# --brands: this example opts into GDP brands, so the audit regenerates
+# with --brands and additionally requires the witness field on every
+# wrapper type in the committed guards file.
+exec "$ROOT_SCRIPT" --lang go --brands "$@"

@@ -21,7 +21,7 @@ SHEN_DERIVE_DIR  := ../../shen-derive
 SHEN_DERIVE_SPEC := $(CURDIR)/specs/core.shen
 SHEN_DERIVE_OUT  := $(CURDIR)/internal/derived/processable_spec_test.go
 SHEN_DERIVE_PKG  := ralph-shen-agent/internal/derived
-SHEN_DERIVE_GUARD := ralph-shen-agent/internal/shenguard
+SHEN_DERIVE_GUARD := ralph-shen-agent/internal/guardcompat
 # Path-complete sampling (W2). Must match `path_cover`/`path_depth`
 # under [derive] in sb.toml, or this target and `sb derive` disagree
 # about what the committed test file should contain.

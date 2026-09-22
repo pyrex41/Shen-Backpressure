@@ -22,7 +22,14 @@ import (
 // `NewAuthenticatedUser(jwt, NewUserId(userID))`, the constructor
 // would return an error. That's the spec premise
 // `(= User (head (head Jwt))) : verified` in action.
-func makePrincipal(t *testing.T, userID string) (shenguard.HumanPrincipal, string) {
+// testBrand is this test package's GDP brand (W1): a type declared
+// here and nowhere else, so every proof minted below is evidence about
+// a chain that starts in this file. Handing one of these proofs to
+// code expecting another brand — say the server's apibrand.API — does
+// not compile, which is the property bypass_attempts/07 demonstrates.
+type testBrand struct{}
+
+func makePrincipal(t *testing.T, userID string) (shenguard.HumanPrincipal[testBrand], string) {
 	t.Helper()
 	iss, err := shenguard.NewJwtIssuer("multi-tenant-api")
 	if err != nil {
@@ -33,7 +40,7 @@ func makePrincipal(t *testing.T, userID string) (shenguard.HumanPrincipal, strin
 		t.Fatalf("NewJwtAudience: %v", err)
 	}
 	uid := shenguard.NewUserId(userID)
-	claims, err := shenguard.NewParsedClaims(uid, 9999999999, iss, aud)
+	claims, err := shenguard.NewParsedClaims[testBrand](uid, 9999999999, iss, aud)
 	if err != nil {
 		t.Fatalf("NewParsedClaims: %v", err)
 	}
@@ -61,7 +68,7 @@ func TestCheckTenantAccessGranted(t *testing.T) {
 	principal, _ := makePrincipal(t, "u-alice")
 	tenantID := shenguard.NewTenantId("t-acme")
 
-	access, err := CheckTenantAccess(d, principal, tenantID)
+	access, err := CheckTenantAccess[testBrand](d, principal, tenantID)
 	if err != nil {
 		t.Fatalf("CheckTenantAccess: %v", err)
 	}
@@ -85,7 +92,7 @@ func TestCheckTenantAccessDenied(t *testing.T) {
 	principal, _ := makePrincipal(t, "u-bob")
 	tenantID := shenguard.NewTenantId("t-acme")
 
-	_, err = CheckTenantAccess(d, principal, tenantID)
+	_, err = CheckTenantAccess[testBrand](d, principal, tenantID)
 	if err == nil {
 		t.Fatal("expected error for non-member access, got nil")
 	}
@@ -104,7 +111,7 @@ func TestCheckTenantAccessNonexistentUser(t *testing.T) {
 	principal, _ := makePrincipal(t, "u-nobody")
 	tenantID := shenguard.NewTenantId("t-acme")
 
-	_, err = CheckTenantAccess(d, principal, tenantID)
+	_, err = CheckTenantAccess[testBrand](d, principal, tenantID)
 	if err == nil {
 		t.Fatal("expected error for nonexistent user, got nil")
 	}
@@ -128,7 +135,7 @@ func TestCrossFieldBindingRejectsMismatch(t *testing.T) {
 	aliceID := shenguard.NewUserId("u-alice")
 	bobID := shenguard.NewUserId("u-bob")
 
-	claims, err := shenguard.NewParsedClaims(aliceID, 9999999999, iss, aud)
+	claims, err := shenguard.NewParsedClaims[testBrand](aliceID, 9999999999, iss, aud)
 	if err != nil {
 		t.Fatalf("NewParsedClaims: %v", err)
 	}
@@ -150,11 +157,11 @@ func TestCrossFieldBindingRejectsMismatch(t *testing.T) {
 	}
 }
 
-func makeTenantAccess(t *testing.T, d *sql.DB, userID, tenantID string) shenguard.TenantAccess {
+func makeTenantAccess(t *testing.T, d *sql.DB, userID, tenantID string) shenguard.TenantAccess[testBrand] {
 	t.Helper()
 	principal, _ := makePrincipal(t, userID)
 	tid := shenguard.NewTenantId(tenantID)
-	access, err := CheckTenantAccess(d, principal, tid)
+	access, err := CheckTenantAccess[testBrand](d, principal, tid)
 	if err != nil {
 		t.Fatalf("CheckTenantAccess: %v", err)
 	}

@@ -41,6 +41,14 @@ Each row below tries to forge or skip a step in the proof chain
 last column records what the Go toolchain (or runtime) does when
 the attempt is rotated into the package and built.
 
+This example is generated with `--brands` (W1), so the guard types
+carry a phantom brand parameter and an unexported witness field.
+Attempts #1, #2, #3 and #5 name a brand — the price of admission,
+not a bypass — so each keeps demonstrating its own original
+mechanism. Attempts #6 and #7 are written the way they were before
+W1, deliberately: they compiled then, and the compiler rejects them
+now.
+
 HEADER
 
 printf '| # | File | Technique | Outcome |\n'
@@ -81,6 +89,8 @@ for src in $ATTEMPTS; do
                 04_*)  echo "the \`flow\` gate's \`must-pass-through\` premise (it reaches the DB sink with no proof on the path)" ;;
                 05_*)  echo "the raw-constructor discipline: \`flow\` gate \`constructor-only\`, grep fallback in \`bin/shenguard-audit.sh\`" ;;
                 08_*)  echo "the \`flow\` gate's \`constructor-only\` premise — and NOT by the grep, which the alias evades" ;;
+                06_*)  echo "the W1 witness panic (\`mustBeMinted\`)" ;;
+                07_*)  echo "nothing — this is a real forgery, and the reason W1 exists" ;;
                 *) echo "downstream review" ;;
               esac)"
     else
@@ -131,4 +141,27 @@ described in `../../docs/TRUST-MODEL.md`:
 The structural guarantee from W2.1 is attempt #2's failure: pairing
 token-A with user-B is now structurally rejected, where pre-W2.1
 the constructor was infallible.
+
+The structural guarantees from W1 are attempts #6 and #7:
+
+- Attempt #6 (empty literal) compiled and succeeded before W1:
+  `shenguard.TenantAccess{}` names no field, so Go's visibility
+  rules never objected, and the result was a proof no constructor
+  had checked. It now fails to compile, because the type needs a
+  brand argument; and if an attacker supplies one, the value panics
+  on first read — the generated struct's first field is an
+  unexported `valid witness` and every accessor calls
+  `mustBeMinted`.
+- Attempt #7 (unpaired proof) compiled and succeeded before W1:
+  two honest chains, crossed, with no premise relating them. It now
+  fails to compile. The brand inference read the pairing out of the
+  spec's existing sharing structure — nobody wrote a new premise.
+
+What W1 does not do: brands are named by the caller, so building
+both chains at one brand gets a pair the compiler accepts again.
+Brands make keeping chains apart the default and crossing them an
+explicit, greppable act. Go has no existential types, so a
+constructor cannot mint a brand its caller is unable to name. The
+witness panic is a runtime member of the TCB. Both limits are
+stated in `../../docs/TRUST-MODEL.md`.
 FOOTER
