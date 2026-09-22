@@ -391,6 +391,11 @@ func finalizeDischargeReport(parts []*DischargeReport, cfg *Config, failures []p
 	// `sb verify-report` can say whether it re-derived with the same
 	// tools or merely with compatible ones.
 	r.Toolchain = DetectToolchain(cfg, "")
+	if r.Tools.ShengenVersion == "" && r.Toolchain != nil {
+		// shen-derive does not run the emitter, so it cannot know
+		// which one produced the guards it read. sb does.
+		r.Tools.ShengenVersion = r.Toolchain.ShengenVersion
+	}
 	if !testsRan {
 		downgradeRuntimeSampledToUnproven(r, skipReason)
 	}

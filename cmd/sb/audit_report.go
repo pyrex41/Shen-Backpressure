@@ -136,6 +136,12 @@ func renderAuditMarkdown(r *DischargeReport, sourcePath string) string {
 		fmt.Fprintf(&b, "| shen runtime | not detected |\n")
 	}
 
+	// Toolchain (W5.1) — which binaries produced this document.
+	renderToolchainSection(&b, r)
+
+	// Signature status (W5.3).
+	renderSignatureSection(&b, r)
+
 	// Summary.
 	b.WriteString("\n## Summary\n\n")
 	s := r.Summary
@@ -154,6 +160,14 @@ func renderAuditMarkdown(r *DischargeReport, sourcePath string) string {
 			s.PremisesTotal, s.PremisesStatic, s.PremisesRuntimeSampled, s.PremisesUnproven)
 	}
 
+	if weakest := weakestPrecision(r); weakest != "" {
+		fmt.Fprintf(&b, "- **Weakest evidence anywhere in this report:** %s\n", weakest)
+	}
+
+	if line := blameSummaryLine(r); line != "" {
+		fmt.Fprintf(&b, "\n> :rotating_light: **%s**\n", line)
+	}
+
 	if s.RulesViolated > 0 {
 		b.WriteString("\n> :warning: **At least one rule is currently violated.** See per-rule sections below for counter-examples.\n")
 	}
@@ -170,11 +184,101 @@ func renderAuditMarkdown(r *DischargeReport, sourcePath string) string {
 		renderRuleSection(&b, rule)
 	}
 
+	// How to verify (W5.5) — literally the command.
+	renderVerificationRecipe(&b, r, sourcePath)
+
 	// Appendix.
 	b.WriteString("\n## How to Read This Report\n\n")
 	b.WriteString(auditAppendix)
 
 	return b.String()
+}
+
+// renderToolchainSection prints the binaries that produced the report.
+// The shengen hash is the load-bearing row: `sb gen` is a pure
+// function of the spec bytes and that binary, so the hash pins the
+// function a reader would have to re-run to check the static claims.
+func renderToolchainSection(b *strings.Builder, r *DischargeReport) {
+	b.WriteString("\n## Toolchain\n\n")
+	if r.Toolchain == nil {
+		b.WriteString("This report records no toolchain block — it was produced before " +
+			"reproducible builds were wired in (W5). The static claims below can still be " +
+			"re-derived, but not pinned to a specific emitter binary.\n")
+		return
+	}
+	tc := r.Toolchain
+	b.WriteString("| Component | Version |\n|---|---|\n")
+	row := func(name, value string) {
+		if value == "" {
+			return
+		}
+		fmt.Fprintf(b, "| %s | `%s` |\n", name, value)
+	}
+	row("Go", tc.Go)
+	row("platform", strings.TrimSuffix(tc.GOOS+"/"+tc.GOARCH, "/"))
+	row("shengen", tc.ShengenVersion)
+	row("shengen sha256", tc.ShengenSHA256)
+	row("shengen-ts", tc.ShengenTSVersion)
+	row("z3", tc.Z3Version)
+	for _, ix := range tc.Indexers {
+		row(ix.Name, ix.Version)
+	}
+	b.WriteString("\nThe shengen hash matters because the guard types are a pure function of the " +
+		"spec bytes and that binary. Re-run the same emitter on the same spec and you get the " +
+		"same guards file, byte for byte, from any directory.\n")
+}
+
+// renderSignatureSection states, in one line, whether anyone has
+// vouched for this document and what that vouching does and does not
+// mean.
+func renderSignatureSection(b *strings.Builder, r *DischargeReport) {
+	b.WriteString("\n## Signature\n\n")
+	if r.Signature == nil {
+		b.WriteString("**Unsigned.** The `signature` field is null. Nobody has attested that this " +
+			"document came out of the pipeline it describes. The claims can still be re-derived " +
+			"(see below) — a signature says who produced a report, not whether it is true.\n")
+		return
+	}
+	sig := r.Signature
+	fmt.Fprintf(b, "**Signed** with `%s`", sig.Algorithm)
+	if sig.Mode != "" {
+		fmt.Fprintf(b, " (%s)", sig.Mode)
+	}
+	if sig.SignedAt != "" {
+		fmt.Fprintf(b, " at %s", sig.SignedAt)
+	}
+	b.WriteString(".\n\n")
+	fmt.Fprintf(b, "- Signer: `%s`\n", sig.KeyID)
+	if sig.Canonicalization != "" {
+		fmt.Fprintf(b, "- Canonicalization: `%s` — the document with its own `signature` member "+
+			"removed, keys sorted, no insignificant whitespace. Re-indenting this file does not "+
+			"break the signature; changing a single claim does.\n", sig.Canonicalization)
+	}
+	b.WriteString("\nA valid signature means the holder of that key asserts this report came out " +
+		"of their pipeline. It is not evidence that the claims hold — that is what verification " +
+		"re-derives, independently.\n")
+}
+
+// renderVerificationRecipe is literally the command. Anything less
+// than a copy-pasteable line asks the reader to trust the report about
+// how to check the report.
+func renderVerificationRecipe(b *strings.Builder, r *DischargeReport, sourcePath string) {
+	b.WriteString("\n## How to Verify This Report\n\n")
+	b.WriteString("Run this in the project directory. It needs no model, no network, and no " +
+		"credentials — only the committed artifacts:\n\n```sh\n")
+	fmt.Fprintf(b, "sb verify-report --in %s\n", sourcePath)
+	b.WriteString("```\n\n")
+	if r.Signature != nil {
+		b.WriteString("To require the signature as well:\n\n```sh\n")
+		fmt.Fprintf(b, "sb verify-report --in %s --require-sig\n", sourcePath)
+		b.WriteString("```\n\n")
+	}
+	b.WriteString("It re-hashes every spec, re-runs shengen and diffs the result against the " +
+		"committed guards file, resolves every code reference, re-runs the committed sample " +
+		"tests, re-checks the path counters when z3 is present, and re-evaluates the flow " +
+		"premises from a freshly built index. A check it cannot re-derive is reported " +
+		"UNVERIFIED rather than passed — add `--strict` to treat that as a failure. When a " +
+		"check fails, it names the premises that lost their basis.\n")
 }
 
 func renderRuleSection(b *strings.Builder, rule DischargeRule) {
@@ -210,12 +314,13 @@ func renderRuleSection(b *strings.Builder, rule DischargeRule) {
 	}
 	if len(rule.Premises) > 0 {
 		b.WriteString("**Premises**\n\n")
-		b.WriteString("| ID | Expression | Discharge | Basis | Rationale |\n")
-		b.WriteString("|---|---|---|---|---|\n")
+		b.WriteString("| ID | Expression | Precision | Discharge | Basis | Rationale |\n")
+		b.WriteString("|---|---|---|---|---|---|\n")
 		for _, p := range rule.Premises {
 			rationale := strings.ReplaceAll(p.Rationale, "|", "\\|")
-			fmt.Fprintf(b, "| `%s` | `%s` | %s | %s | %s |\n",
+			fmt.Fprintf(b, "| `%s` | `%s` | **%s** | %s | %s | %s |\n",
 				p.ID, escapeMarkdownInline(p.Expression),
+				emptyDash(p.Precision),
 				p.Discharge, p.DischargeBasis, rationale)
 		}
 		b.WriteString("\n")
@@ -250,6 +355,13 @@ func renderRuleSection(b *strings.Builder, rule DischargeRule) {
 						"  A dead path is a branch of the spec no input can reach — worth a look from the spec author.\n")
 				}
 			}
+			if p.BrandSignature != "" {
+				fmt.Fprintf(b,
+					"- `%s`: proof binding — the constructor's signature is `%s`, so the brand parameter "+
+						"forces this premise to be evidence about the *same subject* as the conclusion. "+
+						"A proof of the right type about the wrong value does not compile.\n",
+					p.ID, p.BrandSignature)
+			}
 			if len(p.CodeReferences) > 0 {
 				fmt.Fprintf(b, "- `%s` code references: %s\n",
 					p.ID, "`"+strings.Join(p.CodeReferences, "`, `")+"`")
@@ -282,6 +394,21 @@ func renderRuleSection(b *strings.Builder, rule DischargeRule) {
 // for the design motivation.
 func renderCounterExample(b *strings.Builder, ce DischargeCounter) {
 	fmt.Fprintf(b, "#### Case `%s`\n\n", ce.CaseID)
+
+	// W5.5 — blame first. A counter-example without a responsible
+	// party makes every reader derive the same answer by hand.
+	if ce.Blame != "" {
+		fmt.Fprintf(b, "**Blame: %s**", BlameLabel(ce.Blame))
+		if ce.BlameBasis != "" {
+			fmt.Fprintf(b, " *(basis: `%s`)*", ce.BlameBasis)
+		}
+		b.WriteString("\n\n")
+		if ce.BlameBasis == BlameBasisEvaluatorOnly {
+			b.WriteString("> No Shen host was available, so the spec's meaning came from its Go " +
+				"evaluator alone. A bug in that lowering would produce exactly this evidence, " +
+				"which is why the basis is recorded rather than the blame simply asserted.\n\n")
+		}
+	}
 
 	// Input as a multi-line code block — one key=value per line.
 	// Sorted keys so identical input renders byte-identical across
@@ -398,6 +525,24 @@ it was discharged in the implementation under verification.
   fails the gate, because an uninhabited guard proves nothing while
   looking like it proves everything.
 
+- **Precision** — each premise also carries a ` + "`precision`" + ` on a
+  total order: ` + "`static`" + ` (the compiler refuses a violating
+  program) is strongest, then ` + "`path-cover`" + ` (a solver found a
+  witness for every feasible spec path), then ` + "`sampled`" + `
+  (agreement on a pool of inputs), then ` + "`runtime`" + ` (checked in
+  production, on the value in hand, and silent about every value the
+  program never sees), then ` + "`unproven`" + `. A report is only as
+  strong as its weakest premise, which is why the Summary states it.
+
+- **Blame** — each counter-example names one responsible party:
+  ` + "`spec`" + ` (the Shen rule is wrong or uninhabited), ` + "`impl`" + `
+  (the implementation disagrees with a spec both oracles read the same
+  way), ` + "`wrapper`" + ` (a ` + "`:runtime-via`" + ` checker), or
+  ` + "`lowering`" + ` (the spec's two evaluators disagree about what it
+  means). The ` + "`blame_basis`" + ` says how the assignment was
+  reached; ` + "`evaluator-only`" + ` means no Shen host was available to
+  offer a second reading, so a lowering bug would look identical.
+
 - **Unproven** — the tool could not confidently classify the premise
   in this release. Treat the premise as outside the verified
   boundary until a future version of the tool can address it.
@@ -407,9 +552,13 @@ it was discharged in the implementation under verification.
 - It is not a SOC-2, ISO-27001, or any other compliance certification.
   It is a verification artifact that compliance and audit workflows
   may reference as evidence.
-- It is not signed or attested. The ` + "`signature`" + ` field in the JSON is
-  reserved for a future signing integration; in this release it is
-  always null.
+- It is not third-party attested. The ` + "`signature`" + ` field, when
+  present, says which key vouched that this document came out of this
+  pipeline. It is not a claim that the pipeline's conclusions are
+  correct — for that, re-derive them with ` + "`sb verify-report`" + `,
+  which needs neither the key nor the network. See the Signature
+  section above, and docs/TRUST-MODEL.md for what signing does and
+  does not move inside the trust boundary.
 - It is not third-party verified. The classifications and rationales
   come from this tool's own analysis of the spec and the
   implementation.

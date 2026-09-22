@@ -40,6 +40,20 @@ type DischargeContextInfo struct {
 	PremisesRuntimeSampled int                     `json:"premises_runtime_sampled"`
 	PremisesUnproven       int                     `json:"premises_unproven"`
 	Violations             []DischargeViolationCtx `json:"violations,omitempty"`
+
+	// ---- W5 certificate block (additive) -------------------------
+	// BlameSummary is the one line the section leads with when
+	// anything is broken: the responsible party, and the basis on
+	// which it was assigned. Empty when nothing is violated. It comes
+	// first because it is the single most useful bit for the next
+	// prompt — an agent that knows the impl is at fault does not
+	// re-read the spec.
+	BlameSummary string `json:"blame_summary,omitempty"`
+	// WeakestPrecision is the weakest evidence anywhere in the report,
+	// which is the report's real headline: a chain is only as strong
+	// as its weakest link.
+	WeakestPrecision string `json:"weakest_precision,omitempty"`
+	// --------------------------------------------------------------
 }
 
 // DischargeViolationCtx summarises one violated rule for the context
@@ -56,6 +70,11 @@ type DischargeViolationCtx struct {
 	ImplFunction string            `json:"impl_function,omitempty"`
 	ImplFile     string            `json:"impl_file,omitempty"`
 	Rationale    string            `json:"rationale,omitempty"`
+
+	// ---- W5 certificate block (additive) -------------------------
+	Blame      string `json:"blame,omitempty"`
+	BlameBasis string `json:"blame_basis,omitempty"`
+	// --------------------------------------------------------------
 }
 
 // ProjectInfo holds the project-level manifest fields.
@@ -243,6 +262,8 @@ func readDischargeContext(path string) *DischargeContextInfo {
 		PremisesStatic:         r.Summary.PremisesStatic,
 		PremisesRuntimeSampled: r.Summary.PremisesRuntimeSampled,
 		PremisesUnproven:       r.Summary.PremisesUnproven,
+		BlameSummary:           blameSummaryLine(r),
+		WeakestPrecision:       weakestPrecision(r),
 	}
 	for _, rule := range r.Rules {
 		if rule.Status != DischargeStatusViolated {
@@ -269,6 +290,8 @@ func readDischargeContext(path string) *DischargeContextInfo {
 			ImplFunction: ce.ImplFunction,
 			ImplFile:     ce.ImplFile,
 			Rationale:    ce.Rationale,
+			Blame:        ce.Blame,
+			BlameBasis:   ce.BlameBasis,
 		})
 	}
 	return out
@@ -528,6 +551,12 @@ func roundDuration(d time.Duration) string {
 // `sb audit-report` (human).
 func renderDischargeSection(b *strings.Builder, di *DischargeContextInfo) {
 	b.WriteString("\n### Discharge Report\n\n")
+	// W5.5 — lead with the blamed party. Everything below is context
+	// for the one line an agent acts on.
+	if di.BlameSummary != "" {
+		b.WriteString(di.BlameSummary)
+		b.WriteString("\n\n")
+	}
 	fmt.Fprintf(b, "%d premises proven statically (via guard types)\n", di.PremisesStatic)
 	fmt.Fprintf(b, "%d premises sampled clean (deterministic seed)\n", di.PremisesRuntimeSampled-violatedSampledCount(di))
 	if di.PremisesUnproven > 0 {
@@ -546,6 +575,12 @@ func renderDischargeSection(b *strings.Builder, di *DischargeContextInfo) {
 			fmt.Fprintf(b, ".%s", v.PremiseID)
 		}
 		b.WriteString(":\n")
+		if v.Blame != "" {
+			fmt.Fprintf(b, "  Blame:       %s\n", BlameLabel(v.Blame))
+			if v.BlameBasis != "" {
+				fmt.Fprintf(b, "  Blame basis: %s\n", v.BlameBasis)
+			}
+		}
 		fmt.Fprintf(b, "  Case:        %s\n", v.CaseID)
 		if v.SpecOutput != "" {
 			fmt.Fprintf(b, "  Spec says:   %s\n", v.SpecOutput)
@@ -559,6 +594,9 @@ func renderDischargeSection(b *strings.Builder, di *DischargeContextInfo) {
 		if v.ImplFunction != "" {
 			fmt.Fprintf(b, "  Reproduce:   go test -run TestSpec_%s/%s\n", v.ImplFunction, v.CaseID)
 		}
+	}
+	if di.WeakestPrecision != "" {
+		fmt.Fprintf(b, "\nWeakest evidence anywhere in this report: %s.\n", di.WeakestPrecision)
 	}
 	fmt.Fprintf(b, "\nLatest report: %s (full JSON for tooling)\n", di.ReportPath)
 }
