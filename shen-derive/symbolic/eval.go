@@ -38,11 +38,11 @@ func (v *SDefineV) String() string {
 // that decision flipped. That covers the whole decision tree without
 // needing continuations inside a recursive Go evaluator.
 type symExec struct {
-	decisions []bool
-	k         int    // index of the next decision point
-	taken     []bool // the full decision sequence this run produced
-	pc        []Term // accumulated path condition
-	callDepth int
+	decisions    []bool
+	k            int    // index of the next decision point
+	taken        []bool // the full decision sequence this run produced
+	pc           []Term // accumulated path condition
+	callDepth    int
 	maxCallDepth int
 	// base is the environment clause patterns bind on top of: `val`,
 	// the field accessors, and the sibling define references.
