@@ -1,0 +1,68 @@
+{
+  "mutation_score": {
+    "score": 1,
+    "caught": 2,
+    "survived": 0,
+    "equivalent": 0,
+    "invalid": 0,
+    "total": 2,
+    "timeout": "1m0s",
+    "measured_at": "2026-09-22T05:03:08Z",
+    "operators": [
+      {
+        "operator": "cmp-flip",
+        "caught": 1,
+        "survived": 0,
+        "equivalent": 0,
+        "invalid": 0
+      },
+      {
+        "operator": "zero-return",
+        "caught": 1,
+        "survived": 0,
+        "equivalent": 0,
+        "invalid": 0
+      }
+    ],
+    "specs": [
+      {
+        "spec": "same-user?",
+        "impl_func": "SameUser",
+        "test": "TestSpec_SameUser",
+        "score": 1,
+        "caught": 2,
+        "survived": 0,
+        "equivalent": 0,
+        "invalid": 0
+      }
+    ]
+  },
+  "mutants": [
+    {
+      "id": "zero-return:internal/derived/same_user.go:28:43",
+      "operator": "zero-return",
+      "file": "internal/derived/same_user.go",
+      "line": 28,
+      "col": 43,
+      "before": "func SameUser body",
+      "after": "return false",
+      "outcome": "caught",
+      "detail": "--- FAIL: TestSpec_SameUser (0.00s)\n          --- FAIL: TestSpec_SameUser/case_00 (0.00s)\n              same_user_spec_test.go:83: case_00: spec says true, impl returned false\n          --- FAIL: TestSpec_SameUser/case_04 (0.00s)\n      …",
+      "spec": "same-user?",
+      "impl_func": "SameUser"
+    },
+    {
+      "id": "cmp-flip:internal/derived/same_user.go:29:11",
+      "operator": "cmp-flip",
+      "file": "internal/derived/same_user.go",
+      "line": 29,
+      "col": 11,
+      "before": "==",
+      "after": "!=",
+      "outcome": "caught",
+      "detail": "--- FAIL: TestSpec_SameUser (0.00s)\n          --- FAIL: TestSpec_SameUser/case_00 (0.00s)\n              same_user_spec_test.go:83: case_00: spec says true, impl returned false\n          --- FAIL: TestSpec_SameUser/case_01 (0.00s)\n      …",
+      "spec": "same-user?",
+      "impl_func": "SameUser"
+    }
+  ]
+}

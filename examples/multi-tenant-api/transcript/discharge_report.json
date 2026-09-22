@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T04:53:15Z",
+  "generated_at": "2026-09-22T05:03:06Z",
   "spec": {
     "files": [
       {
         "path": "specs/core.shen",
-        "sha256": "e58f2ba7e92e94b8df7f234f6fd346faa8d05b0f175b09ea44c757690e676f56"
+        "sha256": "ec68bf74989603b2d40a55e86a120618ab89cdb79508e019c8adb60d0590c77a"
       }
     ],
     "rule_count": 17
   },
   "impl": {
-    "git_commit": "db919d64e3aa7d9c1afb8993149390868602eeef",
+    "git_commit": "ca43ead79fc8c6dc5708b9325bdb786b281a6320",
     "git_dirty": true,
     "target_languages": [
       "go"
@@ -79,7 +79,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -108,7 +108,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -149,7 +149,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -190,7 +190,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -273,7 +273,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -344,7 +344,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -368,7 +368,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -395,7 +395,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -419,7 +419,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -474,7 +474,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -501,7 +501,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -530,7 +530,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -601,7 +601,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -636,7 +636,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+      "discharged_since_commit": "ca43ead79fc8c6dc5708b9325bdb786b281a6320",
       "counter_examples": []
     },
     {
@@ -663,7 +663,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -690,7 +690,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -747,7 +747,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     }
   ],
@@ -777,6 +777,53 @@
         "version": "0.4.0"
       }
     ]
+  },
+  "evidence": {
+    "mutation_score": {
+      "score": 1,
+      "caught": 2,
+      "survived": 0,
+      "equivalent": 0,
+      "invalid": 0,
+      "total": 2,
+      "timeout": "1m0s",
+      "measured_at": "2026-09-22T05:03:08Z",
+      "operators": [
+        {
+          "operator": "cmp-flip",
+          "caught": 1,
+          "survived": 0,
+          "equivalent": 0,
+          "invalid": 0
+        },
+        {
+          "operator": "zero-return",
+          "caught": 1,
+          "survived": 0,
+          "equivalent": 0,
+          "invalid": 0
+        }
+      ],
+      "specs": [
+        {
+          "spec": "same-user?",
+          "impl_func": "SameUser",
+          "test": "TestSpec_SameUser",
+          "score": 1,
+          "caught": 2,
+          "survived": 0,
+          "equivalent": 0,
+          "invalid": 0
+        }
+      ]
+    },
+    "forgery": {
+      "total": 9,
+      "as_declared": 9,
+      "succeeding": 1,
+      "measured_at": "2026-09-22T05:03:10Z",
+      "corpus": "forgeries"
+    }
   },
   "signature": null
 }

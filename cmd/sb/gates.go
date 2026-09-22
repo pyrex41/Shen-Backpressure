@@ -118,6 +118,22 @@ func buildGateList(cfg *Config) []gate {
 		// Manifest-defined gates: convert each GateDef to a gate.
 		for _, gd := range cfg.Gates {
 			bin, args := SplitCommand(gd.Run)
+			if gd.Kind == GateKindForgery {
+				// A forgery gate is served by `sb forgery`. Its `run`
+				// field, when set, is the legacy regex gate that a
+				// grep-miss-flow-catch forgery must slip past; with it
+				// empty the gate reuses the flow gate's.
+				self, err := os.Executable()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "sb gates: cannot locate self for forgery gate %q: %v\n", gd.Name, err)
+					continue
+				}
+				bin = self
+				args = []string{"forgery"}
+				if gd.Run != "" {
+					args = append(args, "-grep", gd.Run)
+				}
+			}
 			if gd.Kind == GateKindFlow {
 				// A flow gate is served by `sb flow`, and its `run`
 				// field carries the legacy grep command to fall back

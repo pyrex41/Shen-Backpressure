@@ -1,12 +1,12 @@
 # Discharge Report — Audit Rendering
 
-Generated 2026-09-22T04:53:15Z. Source artifact: `transcript/discharge_report.json` (schema_version=1).
+Generated 2026-09-22T05:03:06Z. Source artifact: `transcript/discharge_report.json` (schema_version=1).
 
-**Implementation commit:** `db919d64e3aa7d9c1afb8993149390868602eeef` (working tree dirty)
+**Implementation commit:** `ca43ead79fc8c6dc5708b9325bdb786b281a6320` (working tree dirty)
 
 **Spec files:**
 
-- `specs/core.shen` (sha256 `e58f2ba7e92e94b8df7f234f6fd346faa8d05b0f175b09ea44c757690e676f56`)
+- `specs/core.shen` (sha256 `ec68bf74989603b2d40a55e86a120618ab89cdb79508e019c8adb60d0590c77a`)
 
 **Target languages:** go
 
@@ -42,6 +42,37 @@ The shengen hash matters because the guard types are a pure function of the spec
 - **Premises:** 36 total — 35 static, 1 runtime-sampled, 0 unproven
 - **Weakest evidence anywhere in this report:** sampled
 
+## Gate Strength
+
+A discharge says a gate passed. This section says how much that is worth, by breaking the software on purpose and counting what the gates noticed.
+
+### Mutation score — 100.0%
+
+`sb mutate` applied a fixed operator set to each implementation package and ran **only** the committed spec test against every mutant. 2 of 2 live mutants were caught, with 0 marked equivalent by the author and 0 excluded as invalid (the mutated package did not compile, which is evidence about Go and not about the test).
+
+Measured 2026-09-22T05:03:08Z; per-mutant timeout 1m0s. A mutant that times out counts as caught: the gate's verdict on it was still "not this implementation".
+
+| Spec | Impl | Test | Score | Caught | Survived | Equivalent | Invalid |
+|---|---|---|---:|---:|---:|---:|---:|
+| `same-user?` | `SameUser` | `TestSpec_SameUser` | 100.0% | 2 | 0 | 0 | 0 |
+
+**Per operator.** A column of survivors under one operator names the shape of the blind spot, not just its size.
+
+| Operator | Caught | Survived | Equivalent | Invalid |
+|---|---:|---:|---:|---:|
+| `cmp-flip` | 1 | 0 | 0 | 0 |
+| `zero-return` | 1 | 0 | 0 | 0 |
+
+No survivors: every mutant this operator set produced was either caught by the spec test or marked equivalent.
+
+
+### Forgery corpus
+
+`sb forgery` staged 9 program(s) from `forgeries` and ran the check each one's header declares. 9 produced their declared outcome. 1 succeeded — that is, obtained or used a guard value the proof chain never justified.
+
+A succeeding forgery is not necessarily a defect: the corpus deliberately carries the ones that document a limit of the trust model, so that a **new** success shows up as a gate failure rather than as prose nobody re-reads. See `docs/TRUST-MODEL.md`.
+
+
 ## Rules
 
 ### `authenticated-user` — guarded (✅ Discharged)
@@ -59,7 +90,7 @@ Spec:
   [Jwt User] : authenticated-user;)
 ```
 
-Continuously discharged since commit `65a24daad14dd78f13886c4a6f376aeef1febc25`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -87,7 +118,7 @@ Spec:
   Auth : authenticated-principal;)
 ```
 
-Continuously discharged since commit `65a24daad14dd78f13886c4a6f376aeef1febc25`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -112,7 +143,7 @@ Spec:
   X : jwt-audience;)
 ```
 
-Continuously discharged since commit `65a24daad14dd78f13886c4a6f376aeef1febc25`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -138,7 +169,7 @@ Spec:
   X : jwt-issuer;)
 ```
 
-Continuously discharged since commit `65a24daad14dd78f13886c4a6f376aeef1febc25`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -167,7 +198,7 @@ Spec:
   [Sub Exp Iss Aud] : parsed-claims;)
 ```
 
-Continuously discharged since commit `65a24daad14dd78f13886c4a6f376aeef1febc25`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -201,7 +232,7 @@ Spec:
   [Access Resource IsOwned] : resource-access;)
 ```
 
-Continuously discharged since commit `65a24daad14dd78f13886c4a6f376aeef1febc25`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -231,7 +262,7 @@ Spec:
                     cmd/cedar-verify/computeGuardAllow))
 ```
 
-Continuously discharged since commit `65a24daad14dd78f13886c4a6f376aeef1febc25`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -253,7 +284,7 @@ Spec:
   X : resource-id;)
 ```
 
-Continuously discharged since commit `65a24daad14dd78f13886c4a6f376aeef1febc25`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -275,7 +306,7 @@ Spec:
   A B -> ...)
 ```
 
-Continuously discharged since commit `65a24daad14dd78f13886c4a6f376aeef1febc25`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -301,7 +332,7 @@ Spec:
   [Service Secret] : service-credential;)
 ```
 
-Continuously discharged since commit `65a24daad14dd78f13886c4a6f376aeef1febc25`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -328,7 +359,7 @@ Spec:
   X : service-id;)
 ```
 
-Continuously discharged since commit `65a24daad14dd78f13886c4a6f376aeef1febc25`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -351,7 +382,7 @@ Spec:
   Cred : authenticated-principal;)
 ```
 
-Continuously discharged since commit `65a24daad14dd78f13886c4a6f376aeef1febc25`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -378,7 +409,7 @@ Spec:
   [Principal Tenant IsMember] : tenant-access;)
 ```
 
-Continuously discharged since commit `65a24daad14dd78f13886c4a6f376aeef1febc25`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -411,7 +442,7 @@ Spec:
                      DB#Query*))
 ```
 
-Continuously discharged since commit `65a24daad14dd78f13886c4a6f376aeef1febc25`.
+Continuously discharged since commit `ca43ead79fc8c6dc5708b9325bdb786b281a6320`.
 
 **Premises**
 
@@ -434,7 +465,7 @@ Spec:
   X : tenant-id;)
 ```
 
-Continuously discharged since commit `65a24daad14dd78f13886c4a6f376aeef1febc25`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -457,7 +488,7 @@ Spec:
   X : user-id;)
 ```
 
-Continuously discharged since commit `65a24daad14dd78f13886c4a6f376aeef1febc25`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -482,7 +513,7 @@ Spec:
   [Claims Sig] : verified-jwt;)
 ```
 
-Continuously discharged since commit `65a24daad14dd78f13886c4a6f376aeef1febc25`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math/rand"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -73,6 +74,17 @@ type HarnessConfig struct {
 	// degrades: paths are still enumerated, feasibility is unknown, and
 	// the harness proceeds with the boundary pool alone.
 	PathSolver symbolic.Solver
+
+	// FalsifierSamples is the path to a JSON file of inputs the
+	// falsifier proposed (see falsifier.go). Empty, or a file that does
+	// not exist, means the source contributes nothing — which is the
+	// common case, since most falsifier runs find nothing.
+	//
+	// The samples are claims, not evidence: each one is re-evaluated
+	// against the spec here, exactly like every other source, so a
+	// wrong claim becomes an ordinary passing case rather than a false
+	// counterexample.
+	FalsifierSamples string
 }
 
 // Harness is the prepared-but-not-yet-emitted verification bundle.
@@ -84,6 +96,16 @@ type Harness struct {
 	// path counters even when the solver was absent, so the generated
 	// file and the discharge report can be honest about what ran.
 	PathStats *PathStats
+
+	// FalsifierSamplesAdded is how many of the falsifier's proposed
+	// inputs became test cases.
+	FalsifierSamplesAdded int
+
+	// FalsifierWarnings records entries that did not decode. They are
+	// warnings rather than errors: one malformed entry from a model
+	// must not take the whole gate down, but the operator has to be
+	// told which entry it was.
+	FalsifierWarnings []string
 }
 
 // Case is one (input, expected output) pair.
@@ -95,8 +117,13 @@ type Case struct {
 
 	// Provenance names the sample source. Empty for the deterministic
 	// boundary pool and its seeded random draws (so default output is
-	// unchanged); "path:<n>" for a witness of the spec's nth path.
+	// unchanged); "path:<n>" for a witness of the spec's nth path;
+	// "falsify:<n>" for an input the falsifier proposed.
 	Provenance string
+
+	// Note is the falsifier's rationale for this case, emitted beside
+	// the provenance comment. Empty for every other source.
+	Note string
 }
 
 // BuildHarness evaluates the spec on sampled inputs and records the
@@ -205,6 +232,42 @@ func BuildHarness(cfg *HarnessConfig) (*Harness, error) {
 				ExpectedGo: goLit,
 				Provenance: row[0].Provenance,
 			})
+		}
+	}
+
+	// Fourth sample source: inputs the falsifier proposed. Appended
+	// last and, like path cover, not subject to MaxCases — a sample
+	// that exists because something survived is never the one to drop
+	// for budget.
+	if cfg.FalsifierSamples != "" {
+		rows, warnings, err := LoadFalsifierSamples(
+			cfg.FalsifierSamples, cfg.Spec.Name, cfg.Spec.TypeSig.ParamTypes, cfg.TypeTable)
+		if err != nil {
+			return nil, fmt.Errorf("falsifier samples: %w", err)
+		}
+		h.FalsifierWarnings = warnings
+		for _, row := range rows {
+			val, err := evalSpec(cfg.Spec, row, base)
+			if err != nil {
+				h.FalsifierWarnings = append(h.FalsifierWarnings,
+					fmt.Sprintf("%s: eval spec on falsifier input: %v", row[0].Provenance, err))
+				continue
+			}
+			goLit, err := goLiteralFor(val, cfg.Spec.TypeSig.ReturnType, cfg.TypeTable)
+			if err != nil {
+				h.FalsifierWarnings = append(h.FalsifierWarnings,
+					fmt.Sprintf("%s: literal: %v", row[0].Provenance, err))
+				continue
+			}
+			h.Cases = append(h.Cases, Case{
+				Name:       strings.ReplaceAll(row[0].Provenance, ":", "_"),
+				Args:       row,
+				Expected:   val,
+				ExpectedGo: goLit,
+				Provenance: row[0].Provenance,
+				Note:       row[0].Note,
+			})
+			h.FalsifierSamplesAdded++
 		}
 	}
 	return h, nil
@@ -487,6 +550,15 @@ func (h *Harness) Emit() (string, error) {
 			fmt.Fprintf(&b, "// Path cover degraded: %s\n", ps.DegradedReason)
 		}
 	}
+	if h.FalsifierSamplesAdded > 0 {
+		// Only the file's base name goes in the header. shen-derive
+		// runs from its own module directory, so callers pass an
+		// absolute path — and an absolute path baked into a committed
+		// file makes the drift check machine-dependent, which would
+		// turn a green gate into a function of whose laptop ran it.
+		fmt.Fprintf(&b, "// Falsifier: %d sample(s) from %s\n",
+			h.FalsifierSamplesAdded, filepath.Base(cfg.FalsifierSamples))
+	}
 	b.WriteString("//\n")
 	b.WriteString("// This file checks that " + cfg.ImplFunc + " matches the Shen spec\n")
 	b.WriteString("// by evaluating the spec on sampled inputs and comparing outputs.\n\n")
@@ -559,6 +631,11 @@ func (h *Harness) Emit() (string, error) {
 			// Provenance is emitted only for non-pool cases, so a run
 			// with path cover off is byte-identical to before.
 			fmt.Fprintf(&b, "\t\t\t// provenance: %s\n", c.Provenance)
+		}
+		if c.Note != "" {
+			// The falsifier's rationale travels with the case, so a
+			// later reader knows what deleting it would give up.
+			fmt.Fprintf(&b, "\t\t\t// %s\n", strings.ReplaceAll(c.Note, "\n", " "))
 		}
 		fmt.Fprintf(&b, "\t\t\tname: %q,\n", c.Name)
 		for i, pname := range cfg.Spec.ParamNames {

@@ -26,7 +26,7 @@ import (
 // here and nowhere else, so every proof minted below is evidence about
 // a chain that starts in this file. Handing one of these proofs to
 // code expecting another brand — say the server's apibrand.API — does
-// not compile, which is the property bypass_attempts/07 demonstrates.
+// not compile, which is the property forgeries/07 demonstrates.
 type testBrand struct{}
 
 func makePrincipal(t *testing.T, userID string) (shenguard.HumanPrincipal[testBrand], string) {

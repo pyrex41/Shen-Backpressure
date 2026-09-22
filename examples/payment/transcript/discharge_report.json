@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T04:53:12Z",
+  "generated_at": "2026-09-22T05:01:42Z",
   "spec": {
     "files": [
       {
@@ -11,7 +11,7 @@
     "rule_count": 7
   },
   "impl": {
-    "git_commit": "db919d64e3aa7d9c1afb8993149390868602eeef",
+    "git_commit": "ca43ead79fc8c6dc5708b9325bdb786b281a6320",
     "git_dirty": true,
     "target_languages": [
       "go"
@@ -49,7 +49,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -90,7 +90,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -132,7 +132,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -189,7 +189,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -216,7 +216,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -261,7 +261,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     },
     {
@@ -316,7 +316,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
+      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
       "counter_examples": []
     }
   ],
@@ -338,6 +338,60 @@
     "shengen_version": "shengen 0.3.0",
     "shengen_sha256": "4a7d38acf282002e50cc85431a73e838edb0e659514e6a26943b85858b106088",
     "z3_version": "Z3 version 5.1.0 - 64 bit"
+  },
+  "evidence": {
+    "mutation_score": {
+      "score": 1,
+      "caught": 3,
+      "survived": 0,
+      "equivalent": 0,
+      "invalid": 0,
+      "total": 3,
+      "timeout": "1m0s",
+      "measured_at": "2026-09-22T05:01:42Z",
+      "operators": [
+        {
+          "operator": "cmp-flip",
+          "caught": 1,
+          "survived": 0,
+          "equivalent": 0,
+          "invalid": 0
+        },
+        {
+          "operator": "off-by-one",
+          "caught": 1,
+          "survived": 0,
+          "equivalent": 0,
+          "invalid": 0
+        },
+        {
+          "operator": "zero-return",
+          "caught": 1,
+          "survived": 0,
+          "equivalent": 0,
+          "invalid": 0
+        }
+      ],
+      "specs": [
+        {
+          "spec": "processable",
+          "impl_func": "Processable",
+          "test": "TestSpec_Processable",
+          "score": 1,
+          "caught": 3,
+          "survived": 0,
+          "equivalent": 0,
+          "invalid": 0
+        }
+      ]
+    },
+    "forgery": {
+      "total": 3,
+      "as_declared": 3,
+      "succeeding": 0,
+      "measured_at": "2026-09-22T05:01:44Z",
+      "corpus": "forgeries"
+    }
   },
   "signature": null
 }

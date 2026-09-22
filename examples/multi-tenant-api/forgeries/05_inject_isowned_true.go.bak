@@ -1,3 +1,5 @@
+// sb-forgery: expect flow-violation
+//
 // Attempt #5: call shenguard.NewResourceAccess directly with
 // `isOwned: true`, bypassing the DB ownership check.
 //

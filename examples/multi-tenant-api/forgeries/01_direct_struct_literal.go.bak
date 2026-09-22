@@ -1,3 +1,5 @@
+// sb-forgery: expect compile-error
+//
 // Attempt #1: forge a TenantAccess by constructing the struct literal
 // directly.
 //

@@ -60,10 +60,80 @@ sixth when `shen-derive` is configured):
 | 4. shen tc+ | `bin/shen-check.sh` | Verifies spec internal consistency. Catches contradictory rules. |
 | 5. tcb audit | `bin/shenguard-audit.sh` | Re-runs shengen, diffs output, rejects unexpected files in `shenguard/`. |
 | 6. shen-derive | `sb derive` | Regenerates committed spec-equivalence tests, fails on drift, then runs them. Active when `[[derive.specs]]` is configured. |
+| +. flow | `sb flow` | Evaluates the spec's `(flow …)` premises over the resolved symbol graph (SCIP). Catches a handler that reaches a sink with no proof on the path, and a raw constructor call the grep gate's regex cannot see through an aliased import. Gate kind `flow`. |
+| +. forgery | `sb forgery` | Stages every `*.go.bak` in `forgeries/` and runs the check its header declares. Catches an outcome that no longer matches its declaration — including a forgery that starts *succeeding*. Gate kind `forgery`. |
 
 Gate topology is declared in `sb.toml`. The legacy fixed five-gate
 shape still works; the new `[[gates]]` array of tables lets you
-declare a custom gate list with optional parallel groups.
+declare a custom gate list with optional parallel groups. The `flow`
+and `forgery` kinds are additional manifest gates; the fixed five-gate
+shape above is untouched by either.
+
+`sb mutate` is not a gate. It is a measurement: it breaks the
+implementation in a small fixed set of ways and counts how many the
+committed spec test notices, which is the only way to learn how much a
+green gate 6 is worth. See **Gate strength**, below.
+
+## Gate Strength — Measuring What a Green Build Is Worth
+
+A passing gate is evidence of absence of bugs *within what the gate can
+see*. Nothing above says how much that is. Two commands measure it, and
+a third goes looking for what neither found.
+
+**`sb mutate` — mutation score.** Applies a fixed operator set to each
+implementation package (flip a comparison; add one to a numeric
+literal; drop a conjunct; swap head for last and tail for init; return
+the zero value first), and for every mutant runs *only* the committed
+spec test. The kill rate is caught over live. A mutant the compiler
+rejects is excluded as invalid rather than counted as a kill — a build
+error is evidence about Go, not about the test. An equivalent mutant is
+excluded too, but only the author may declare one, keyed by a stable
+`operator:file:line:col` id in `sb.toml`:
+
+```toml
+[derive.mutation]
+equivalent = [
+  "off-by-one:internal/derived/x.go:12:20",  # bound is exclusive either way
+]
+```
+
+Every survivor is a change to the implementation the spec test did not
+notice — a concrete, minimal counterexample to the claim that the
+behavioral gate covers that code, and a ready-made prompt for a new
+sample.
+
+**`sb forgery` — the forgery corpus.** A directory of programs that try
+to obtain a guard value without its constructor, or to skip a step of
+the proof chain. Each declares in its own header what it expects the
+toolchain to do (`compile-error`, `runtime-panic`, `runtime-error`,
+`flow-violation`, `grep-miss-flow-catch`, `derive-catch`, or `succeeds
+(documented TCB limit)`), and the gate stages it and runs that check. A
+forgery that succeeds without the last declaration is a gate failure:
+the corpus exists so that a *new* success is news.
+
+**`sb loop --falsify`.** After an iteration in which every gate passes,
+a second phase runs the inverse of the main prompt — given the spec,
+the guards, the corpus and the mutation survivors, find one forgery or
+one input where spec and impl disagree. When every gate passes the
+verifier has returned exactly one bit, and a loop bounded by what the
+verifier returns has nothing to work with; the falsifier is what
+produces the next bit. Findings land in `forgeries/` or in
+`.sb/falsifier-samples.json`, which shen-derive picks up as a fourth
+sample source — and both are re-checked by machinery that does not
+trust them, so a wrong claim becomes a failing gate or an ordinary
+passing sample, never a false result.
+
+Measured on the examples today:
+
+| Example | Spec | Mutation score | Forgery corpus |
+|---|---|---|---|
+| payment | `processable` | 100% (3 caught / 3 live) | 3/3 as declared, 0 succeeding |
+| multi-tenant-api | `same-user?` | 100% (2 caught / 2 live) | 9/9 as declared, 1 succeeding (`unsafe`, documented) |
+
+Read those honestly: a 100% kill rate over three mutants says nothing
+in this operator set survived, not that the samples are complete. Both
+implementations are a few lines long. TypeScript is unmeasured; `sb
+mutate` says so in the report rather than skipping the spec silently.
 
 ## Discharge Reports — Audit-Grade Verification Artifacts
 

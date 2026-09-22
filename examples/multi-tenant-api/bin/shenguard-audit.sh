@@ -69,7 +69,13 @@ if [ -n "$SCAN_DIRS" ]; then
     while IFS= read -r f; do
         case "$f" in
             */shenguard/*) continue ;;
-            */bypass_attempts/*) continue ;;
+            */forgeries/*) continue ;;
+            # The scratch package `sb forgery` stages each corpus entry
+            # into, and the older hand-run equivalent. A forgery is
+            # supposed to contain the call this grep is looking for —
+            # that is what makes it a forgery — so scanning the staging
+            # area would make the corpus fail the gate it is measuring.
+            */forgery_harness/*) continue ;;
             */bypass_harness/*) continue ;;
         esac
         allowed=0
@@ -97,7 +103,8 @@ fi
 if [ "$GREP_ONLY" -eq 1 ]; then
     echo "PASS: no direct calls to the raw constructors outside $ALLOWED_CALLERS"
     echo "NOTE: this is a regex over source text. It cannot see an aliased"
-    echo "      import (bypass_attempts/08_aliased_import.go.bak). Install a"
+    echo "      import (forgeries/08_aliased_import.go.bak, which the forgery gate"
+    echo "      re-measures as grep-miss-flow-catch). Install a"
     echo "      SCIP indexer and let the flow gate discharge the premise."
     exit 0
 fi

@@ -175,6 +175,8 @@ func renderAuditMarkdown(r *DischargeReport, sourcePath string) string {
 		b.WriteString("\n> :warning: **At least one rule is vacuous** — its datatype is uninhabited, so no value of that type can exist and every claim resting on it is empty. This is a spec defect, not an implementation defect. See the per-rule sections below.\n")
 	}
 
+	renderGateStrength(&b, r.Evidence)
+
 	// Per-rule sections, alphabetised for stability.
 	rules := append([]DischargeRule(nil), r.Rules...)
 	sort.SliceStable(rules, func(i, j int) bool { return rules[i].Name < rules[j].Name })
@@ -279,6 +281,74 @@ func renderVerificationRecipe(b *strings.Builder, r *DischargeReport, sourcePath
 		"premises from a freshly built index. A check it cannot re-derive is reported " +
 		"UNVERIFIED rather than passed — add `--strict` to treat that as a failure. When a " +
 		"check fails, it names the premises that lost their basis.\n")
+}
+
+// renderGateStrength writes the "Gate strength" section (W4). The rest
+// of this report answers "did the gates pass?". This section answers
+// the question a reader should ask next, which is "and how much is
+// that worth?" — measured, not asserted.
+//
+// It is omitted entirely when no measurement has been taken. A section
+// full of zeros would read as a bad score, when the truth is that
+// nobody has looked.
+func renderGateStrength(b *strings.Builder, e *DischargeEvidence) {
+	if e == nil || (e.MutationScore == nil && e.Forgery == nil) {
+		return
+	}
+	b.WriteString("\n## Gate Strength\n\n")
+	b.WriteString("A discharge says a gate passed. This section says how much that is worth, by breaking the software on purpose and counting what the gates noticed.\n")
+
+	if m := e.MutationScore; m != nil {
+		fmt.Fprintf(b, "\n### Mutation score — %.1f%%\n\n", m.Score*100)
+		fmt.Fprintf(b, "`sb mutate` applied a fixed operator set to each implementation package and ran **only** the committed spec test against every mutant. %d of %d live mutants were caught, with %d marked equivalent by the author and %d excluded as invalid (the mutated package did not compile, which is evidence about Go and not about the test).\n\n",
+			m.Caught, m.Caught+m.Survived, m.Equivalent, m.Invalid)
+		fmt.Fprintf(b, "Measured %s; per-mutant timeout %s. A mutant that times out counts as caught: the gate's verdict on it was still \"not this implementation\".\n\n",
+			emptyDash(m.MeasuredAt), m.Timeout)
+
+		if len(m.Specs) > 0 {
+			b.WriteString("| Spec | Impl | Test | Score | Caught | Survived | Equivalent | Invalid |\n")
+			b.WriteString("|---|---|---|---:|---:|---:|---:|---:|\n")
+			for _, s := range m.Specs {
+				fmt.Fprintf(b, "| `%s` | `%s` | `%s` | %.1f%% | %d | %d | %d | %d |\n",
+					s.Spec, s.ImplFunc, s.Test, s.Score*100, s.Caught, s.Survived, s.Equivalent, s.Invalid)
+			}
+			b.WriteString("\n")
+		}
+		if len(m.Operators) > 0 {
+			b.WriteString("**Per operator.** A column of survivors under one operator names the shape of the blind spot, not just its size.\n\n")
+			b.WriteString("| Operator | Caught | Survived | Equivalent | Invalid |\n|---|---:|---:|---:|---:|\n")
+			for _, o := range m.Operators {
+				fmt.Fprintf(b, "| `%s` | %d | %d | %d | %d |\n", o.Operator, o.Caught, o.Survived, o.Equivalent, o.Invalid)
+			}
+			b.WriteString("\n")
+		}
+		if len(m.Survivors) > 0 {
+			fmt.Fprintf(b, "**%d survivor(s).** Each is a change to the implementation the spec test did not notice — a concrete, minimal counterexample to the claim that the behavioral gate covers this code.\n\n", len(m.Survivors))
+			b.WriteString("| Mutant | Change |\n|---|---|\n")
+			for _, s := range m.Survivors {
+				fmt.Fprintf(b, "| `%s` | `%s` → `%s` |\n",
+					escapeMarkdownInline(s.ID), escapeMarkdownInline(s.Before), escapeMarkdownInline(s.After))
+			}
+			b.WriteString("\n")
+		} else {
+			b.WriteString("No survivors: every mutant this operator set produced was either caught by the spec test or marked equivalent.\n\n")
+		}
+		for _, g := range m.Gaps {
+			fmt.Fprintf(b, "> :warning: **Unmeasured.** %s\n\n", g)
+		}
+	}
+
+	if f := e.Forgery; f != nil {
+		b.WriteString("\n### Forgery corpus\n\n")
+		fmt.Fprintf(b, "`sb forgery` staged %d program(s) from `%s` and ran the check each one's header declares. %d produced their declared outcome. %d succeeded — that is, obtained or used a guard value the proof chain never justified.\n\n",
+			f.Total, f.Corpus, f.AsDeclared, f.Succeeding)
+		if f.Succeeding > 0 {
+			b.WriteString("A succeeding forgery is not necessarily a defect: the corpus deliberately carries the ones that document a limit of the trust model, so that a **new** success shows up as a gate failure rather than as prose nobody re-reads. See `docs/TRUST-MODEL.md`.\n\n")
+		}
+		for _, mm := range f.Mismatched {
+			fmt.Fprintf(b, "> :warning: **Outcome does not match its declaration.** %s\n\n", escapeMarkdownInline(mm))
+		}
+	}
 }
 
 func renderRuleSection(b *strings.Builder, rule DischargeRule) {

@@ -9,6 +9,13 @@
 # Bugs are chosen so that shengen alone is happy — the Go compiler
 # type-checks every variant — but shen-derive exposes the divergence
 # against the Shen spec's behavior.
+#
+# W4 NOTE. The three .go.bak files moved to ../forgeries/ and each one
+# now declares `// sb-forgery: expect derive-catch` in its header, so
+# `sb forgery` re-checks them on every gate run rather than only when
+# someone runs this script. This script stays because it tells the
+# side-by-side story — which gate caught it, and why the compiler could
+# not — which a pass/fail gate deliberately does not.
 
 set -u
 
@@ -52,7 +59,7 @@ RESULTS+=("bug,shengen_build,shen_derive_verify")
 for entry in "${BUGS[@]}"; do
     name="${entry%%:*}"
     desc="${entry##*:}"
-    bak="$DIR/${name}.go.bak"
+    bak="$ROOT/forgeries/${name}.go.bak"
 
     if [[ ! -f "$bak" ]]; then
         echo "error: missing $bak"

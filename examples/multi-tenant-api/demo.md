@@ -16,11 +16,11 @@ find . -type f -not -path './bin/*' -not -path './.claude/*' -not -path './trans
 ```output
 ./.gitignore
 ./AUDIT.md
-./bypass_attempts/01_direct_struct_literal.go.bak
-./bypass_attempts/02_mismatched_user_id.go.bak
-./bypass_attempts/03_reflection_escape.go.bak
-./bypass_attempts/04_handler_skips_check.go.bak
-./bypass_attempts/05_inject_isowned_true.go.bak
+./forgeries/01_direct_struct_literal.go.bak
+./forgeries/02_mismatched_user_id.go.bak
+./forgeries/03_reflection_escape.go.bak
+./forgeries/04_handler_skips_check.go.bak
+./forgeries/05_inject_isowned_true.go.bak
 ./cmd/ralph/main.go
 ./cmd/server/main.go
 ./demo.md
@@ -342,49 +342,30 @@ For the trust-boundary write-up — which surfaces of this project are inside th
 
 ## Bypass Attempts
 
-A common reaction to a structural-guarantee claim is: "I bet I can forge a `TenantAccess` if I want to." We took that seriously. Five `.go.bak` files under `bypass_attempts/` enumerate the obvious forgery techniques; `bin/show-bypass-attempts.sh` rotates each into a temporary harness package, builds it, and records what stops it.
+A common reaction to a structural-guarantee claim is: "I bet I can forge a `TenantAccess` if I want to." We took that seriously, and then we stopped taking our own word for it. Nine `.go.bak` files under `forgeries/` enumerate the obvious forgery techniques, and each one declares in its own header what it expects the toolchain to do. `sb forgery` — which `bin/show-bypass-attempts.sh` is now a thin wrapper over, and which runs as a gate on every `sb gates` — stages each file into a scratch package, runs the check that expectation names, and fails if any outcome differs from its declaration. The "Measured" column below is therefore what the toolchain did on this run, not what a doc comment says it once did.
 
 ```bash
 ./bin/show-bypass-attempts.sh
 ```
 
 ```output
-# Bypass Attempts
+# Forgery corpus
 
-Each row below tries to forge or skip a step in the proof chain
-`JwtToken → AuthenticatedUser → TenantAccess → ResourceAccess`. The
-last column records what the Go toolchain (or runtime) does when
-the attempt is rotated into the package and built.
+Each row is a program that tries to obtain a guard value without walking the proof chain, or to skip a step of it. The expectation is declared in the file's own header (`// sb-forgery: expect …`) and the outcome column is what `sb forgery` measured when it staged the file and ran the check that expectation names — not a recorded claim.
 
-| # | File | Technique | Outcome |
-|---|------|-----------|---------|
-| 1 | `01_direct_struct_literal.go.bak` | forge a TenantAccess by constructing the struct literal | **FAILS at compile**: `internal/bypass_harness/01_direct_struct_literal.go:28:3: cannot refer to unexported field principal in struct literal of type shenguard.TenantAccess` |
-| 2 | `02_mismatched_user_id.go.bak` | pair token-A with user-B's UserId (the singron HN | **compiles**, rejected by runtime predicate `(= User (head (head Jwt)))` |
-| 3 | `03_reflection_escape.go.bak` | forge a TenantAccess via unsafe reflection. | **compiles**, rejected by code review (`unsafe.Pointer` red flag) |
-| 4 | `04_handler_skips_check.go.bak` | a handler that "forgets" to call verified.CheckTenantAccess | **compiles**, rejected by the `shenguard.New*` grep gate in `bin/shenguard-audit.sh` |
-| 5 | `05_inject_isowned_true.go.bak` | call shenguard.NewResourceAccess directly with | **compiles**, rejected by the `shenguard.New*` grep gate in `bin/shenguard-audit.sh` |
+| # | File | Technique | Declared | Measured |
+|---|------|-----------|----------|----------|
+| 1 | `01_direct_struct_literal.go.bak` | forge a TenantAccess by constructing the struct literal directly | `compile-error` | **compile-error** |
+| 2 | `02_mismatched_user_id.go.bak` | pair token-A with user-B's UserId (the singron HN critique) | `runtime-error` | **runtime-error** |
+| 3 | `03_reflection_escape.go.bak` | forge a TenantAccess via unsafe reflection | `succeeds (documented TCB limit)` | **succeeds (documented TCB limit)** |
+| 4 | `04_handler_skips_check.go.bak` | a handler that "forgets" to call verified.CheckTenantAccess before reading resources | `flow-violation` | **flow-violation** |
+| 5 | `05_inject_isowned_true.go.bak` | call shenguard.NewResourceAccess directly with `isOwned: true`, bypassing the DB ownership check | `flow-violation` | **flow-violation** |
+| 6 | `06_empty_literal.go.bak` | forge a TenantAccess with the EMPTY struct literal | `compile-error` | **compile-error** |
+| 7 | `07_unpaired_proof.go.bak` | apply Alice's TenantAccess proof to Bob's resource — an UNPAIRED proof | `compile-error` | **compile-error** |
+| 8 | `08_aliased_import.go.bak` | call the raw constructor through an aliased import, so the package-qualified call text the grep gate looks for never appears in the file | `grep-miss-flow-catch` | **grep-miss-flow-catch** |
+| 9 | `09_branded_empty_literal.go.bak` | forge a TenantAccess with an empty literal at a brand the attacker declares | `runtime-panic` | **runtime-panic** |
 
-**How to read the table.** A "FAILS at compile" outcome is a
-type-system guarantee: the Go compiler refuses to produce a binary.
-A "compiles" outcome means the attempt is structurally well-typed
-but is rejected by one of the other layers of the trust model
-described in `../../docs/TRUST-MODEL.md`:
-
-- Attempt #2 compiles but the constructor's verified premise
-  `(= User (head (head Jwt)))` returns an error at runtime, so no
-  `AuthenticatedUser` value materialises.
-- Attempt #3 compiles AND succeeds (Go's `unsafe.Pointer` is more
-  powerful than the visibility rules). The defence here is
-  code-review and grep — see the doc comment inside the file.
-- Attempts #4 and #5 compile because the type system can only
-  enforce "if you ask for a verified.TenantAccess, you walked the
-  chain"; it cannot stop someone from writing a handler that
-  doesn't ask. The local `bin/shenguard-audit.sh` and a
-  `bypass-policy` grep catch these patterns.
-
-The structural guarantee from W2.1 is attempt #2's failure: pairing
-token-A with user-B is now structurally rejected, where pre-W2.1
-the constructor was infallible.
+**How to read this table.** `compile-error` is the strongest outcome: the compiler refuses to produce a binary. `runtime-error` is a `verified` premise lowered into a generated constructor. `runtime-panic` is W1's witness field, a runtime member of the TCB. `flow-violation` is the W3 gate over the resolved symbol graph, and `grep-miss-flow-catch` is the row that separates that gate from a regex — the legacy grep passes the file and the flow gate fails it. `derive-catch` is the behavioral gate: the forgery stands in for an implementation and the committed spec test rejects it. `succeeds (documented TCB limit)` is an admission, and it is in the corpus so that any *new* success shows up as a gate failure rather than as prose nobody re-reads.
 ```
 
 The centerpiece is attempt #2: pre-W2.1 the constructor `NewAuthenticatedUser(token JwtToken, expiry TokenExpiry, user UserId) AuthenticatedUser` was **infallible** — it returned an `AuthenticatedUser` for any `(token, expiry, user)` triple. The W2.1 spec change `(= User (head (head Jwt))) : verified` flips this: the constructor now rejects mismatched pairs at construction time. The bypass file confirms the runtime rejection; the spec change is what installed it.

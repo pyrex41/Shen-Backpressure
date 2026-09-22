@@ -13,6 +13,9 @@ import (
 func cmdLoop(args []string) {
 	fs := flag.NewFlagSet("loop", flag.ExitOnError)
 	dryRun := fs.Bool("dry-run", false, "print the loop script without running it")
+	falsify := fs.Bool("falsify", false, "after a passing iteration, run a second phase that looks for one forgery or one disagreeing input")
+	falsifyOnly := fs.Bool("falsify-only", false, "run just the falsify phase once against the current tree, without looping")
+	falsifyPrompt := fs.Bool("falsify-prompt", false, "print the hydrated falsifier prompt and exit; calls no harness")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `sb loop — Launch a Ralph loop
 
@@ -21,6 +24,21 @@ Usage: sb loop [flags]
 Runs a headless LLM harness in a loop with five-gate verification.
 Each iteration: run gates → if fail, inject errors into prompt → call
 harness → repeat. Stops when all gates pass or max iterations reached.
+
+With --falsify, a passing iteration is not the end. A second phase runs
+the inverse of the main prompt: given the spec, the generated guards,
+the forgery corpus and the mutation survivors, find ONE program that
+obtains a guard value without its constructor, or ONE input where the
+spec and the implementation disagree. Findings are written to the
+forgery corpus (with a declared expectation the gate re-checks) or to
+` + FalsifierSamplesPath + `, which shen-derive picks up as a fourth
+sample source. The phase calls the same harness the main loop does.
+
+The reasoning: when every gate passes, the verifier has returned
+exactly one bit, and a loop whose progress is bounded by the verifier's
+output has nothing to work with. The falsifier under-approximates —
+looking for a witness that something IS wrong — which is the only way
+to learn how strong the gates that just passed actually are.
 
 Configuration via sb.toml [loop] or environment variables:
   RALPH_HARNESS          LLM command (default: "claude -p")
@@ -39,6 +57,28 @@ Flags:
 		os.Exit(1)
 	}
 
+	// The falsify-only paths do not need the main loop's prompt and
+	// plan files, so they are handled before the prerequisite check.
+	if *falsifyPrompt {
+		tmplSrc, src, err := loadFalsifierTemplate()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "sb loop: %v\n", err)
+			os.Exit(1)
+		}
+		prompt, err := BuildFalsifierPrompt(tmplSrc, cfg, loadMutationScore())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "sb loop: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "sb loop: falsifier prompt from %s\n", src)
+		fmt.Print(prompt)
+		return
+	}
+	if *falsifyOnly {
+		runFalsifyPhase(cfg, 0)
+		return
+	}
+
 	// Verify prerequisites
 	for _, path := range []string{cfg.Spec, cfg.Prompt, cfg.Plan} {
 		if _, err := os.Stat(path); err != nil {
@@ -52,10 +92,10 @@ Flags:
 		return
 	}
 
-	runLoop(cfg)
+	runLoop(cfg, *falsify)
 }
 
-func runLoop(cfg *Config) {
+func runLoop(cfg *Config, falsify bool) {
 	fmt.Fprintf(os.Stderr, "Ralph loop: harness=%q max_iter=%d timeout=%s\n",
 		cfg.Harness, cfg.MaxIter, cfg.HarnessTimeout)
 	fmt.Fprintf(os.Stderr, "Press Ctrl+C to stop.\n\n")
@@ -69,8 +109,23 @@ func runLoop(cfg *Config) {
 		gateOutput, gatesPassed := runGatesForLoop(cfg)
 
 		if gatesPassed {
-			fmt.Fprintf(os.Stderr, "\nAll gates passed on iteration %d. Done.\n", i)
-			return
+			fmt.Fprintf(os.Stderr, "\nAll gates passed on iteration %d.\n", i)
+			if !falsify {
+				fmt.Fprintln(os.Stderr, "Done.")
+				return
+			}
+			// A passing iteration is the point at which the verifier
+			// returns its fewest bits — one, "green" — so it is
+			// exactly when the falsifier is worth running. What it
+			// finds becomes a permanent gate; what it fails to find is
+			// weak evidence that the gates are doing their job.
+			f := runFalsifyPhase(cfg, i)
+			if !f.Any() {
+				fmt.Fprintln(os.Stderr, "Done.")
+				return
+			}
+			fmt.Fprintln(os.Stderr, "\nsb loop: the falsifier produced new material; continuing so the next iteration verifies it.")
+			continue
 		}
 
 		// Write gate failures to backpressure log

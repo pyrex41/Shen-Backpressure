@@ -1,8 +1,8 @@
 # Discharge Report — Audit Rendering
 
-Generated 2026-09-22T04:53:12Z. Source artifact: `transcript/discharge_report.json` (schema_version=1).
+Generated 2026-09-22T05:01:42Z. Source artifact: `transcript/discharge_report.json` (schema_version=1).
 
-**Implementation commit:** `db919d64e3aa7d9c1afb8993149390868602eeef` (working tree dirty)
+**Implementation commit:** `ca43ead79fc8c6dc5708b9325bdb786b281a6320` (working tree dirty)
 
 **Spec files:**
 
@@ -41,6 +41,36 @@ The shengen hash matters because the guard types are a pure function of the spec
 - **Premises:** 14 total — 12 static, 1 runtime-evaluator, 1 runtime-sampled, 0 unproven
 - **Weakest evidence anywhere in this report:** runtime
 
+## Gate Strength
+
+A discharge says a gate passed. This section says how much that is worth, by breaking the software on purpose and counting what the gates noticed.
+
+### Mutation score — 100.0%
+
+`sb mutate` applied a fixed operator set to each implementation package and ran **only** the committed spec test against every mutant. 3 of 3 live mutants were caught, with 0 marked equivalent by the author and 0 excluded as invalid (the mutated package did not compile, which is evidence about Go and not about the test).
+
+Measured 2026-09-22T05:01:42Z; per-mutant timeout 1m0s. A mutant that times out counts as caught: the gate's verdict on it was still "not this implementation".
+
+| Spec | Impl | Test | Score | Caught | Survived | Equivalent | Invalid |
+|---|---|---|---:|---:|---:|---:|---:|
+| `processable` | `Processable` | `TestSpec_Processable` | 100.0% | 3 | 0 | 0 | 0 |
+
+**Per operator.** A column of survivors under one operator names the shape of the blind spot, not just its size.
+
+| Operator | Caught | Survived | Equivalent | Invalid |
+|---|---:|---:|---:|---:|
+| `cmp-flip` | 1 | 0 | 0 | 0 |
+| `off-by-one` | 1 | 0 | 0 | 0 |
+| `zero-return` | 1 | 0 | 0 | 0 |
+
+No survivors: every mutant this operator set produced was either caught by the spec test or marked equivalent.
+
+
+### Forgery corpus
+
+`sb forgery` staged 3 program(s) from `forgeries` and ran the check each one's header declares. 3 produced their declared outcome. 0 succeeded — that is, obtained or used a guard value the proof chain never justified.
+
+
 ## Rules
 
 ### `account-id` — wrapper (✅ Discharged)
@@ -56,7 +86,7 @@ Spec:
   X : account-id;)
 ```
 
-Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -80,7 +110,7 @@ Spec:
   [Id Balance] : account-state;)
 ```
 
-Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -106,7 +136,7 @@ Spec:
   X : amount;)
 ```
 
-Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -133,7 +163,7 @@ Spec:
   [Bal Tx] : balance-checked;)
 ```
 
-Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -160,7 +190,7 @@ Spec:
   B0 Txs -> ...)
 ```
 
-Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -187,7 +217,7 @@ Spec:
   [Tx Check] : safe-transfer;)
 ```
 
-Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 
@@ -216,7 +246,7 @@ Spec:
   [Amount From To] : transaction;)
 ```
 
-Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
+Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
 
 **Premises**
 

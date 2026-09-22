@@ -1,3 +1,6 @@
+// sb-forgery: expect runtime-error
+// sb-forgery-entry: ForgeMismatchedAuth
+//
 // Attempt #2: pair token-A with user-B's UserId (the singron HN
 // critique).
 //

@@ -22,8 +22,15 @@ type Sample struct {
 
 	// Provenance names which sample source produced this value: empty
 	// for the deterministic boundary pool and its seeded random draws,
-	// "path:<n>" for a solver-produced witness of the spec's nth path.
+	// "path:<n>" for a solver-produced witness of the spec's nth path,
+	// "falsify:<n>" for an input the falsifier proposed.
 	Provenance string
+
+	// Note is the falsifier's account of why this input is worth
+	// keeping — usually the mutant id it claims to kill. It is emitted
+	// as a comment beside the case, because a sample with no rationale
+	// is one nobody dares delete later. Empty for every other source.
+	Note string
 }
 
 // SampleCtx threads sampling options through the recursive GenSamples

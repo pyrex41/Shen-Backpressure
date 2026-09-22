@@ -1,3 +1,6 @@
+// sb-forgery: expect derive-catch
+// sb-forgery-replaces: internal/derived/processable.go
+//
 // Bug 3: Strict-zero boundary error. The spec says running balances
 // must be `(>= X 0) : verified` — exactly zero is fine. This impl
 // uses `balance <= 0` for the early-exit check, so any case where
@@ -12,7 +15,7 @@ import (
 	"ralph-shen-agent/internal/shenguard"
 )
 
-func Processable(b0 shenguard.Amount, txs []shenguard.Transaction) bool {
+func Processable[B shenguard.Brand](b0 shenguard.Amount, txs []shenguard.Transaction[B]) bool {
 	balance := b0.Val()
 	for _, tx := range txs {
 		balance -= tx.Amount().Val()

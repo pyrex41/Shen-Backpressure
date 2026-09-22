@@ -57,7 +57,36 @@ type DischargeReport struct {
 	Toolchain *DischargeToolchain `json:"toolchain,omitempty"`
 	// --------------------------------------------------------------
 
+	// Evidence carries measurements *about* the gates rather than
+	// results *from* them (W4). Additive and omitempty; schema_version
+	// does not move.
+	Evidence *DischargeEvidence `json:"evidence,omitempty"`
+
 	Signature *DischargeSignature `json:"signature"`
+}
+
+// DischargeEvidence holds gate-strength measurements. A discharge
+// says "the gate passed"; this says "and here is how much that is
+// worth".
+type DischargeEvidence struct {
+	// MutationScore is `sb mutate`'s kill rate over the committed
+	// spec test: the fraction of small, deliberate breaks to the
+	// implementation that the behavioral gate noticed.
+	MutationScore *MutationScore `json:"mutation_score,omitempty"`
+
+	// Forgery is `sb forgery`'s summary over the corpus of programs
+	// that try to obtain a guard value without the constructor.
+	Forgery *ForgeryEvidence `json:"forgery,omitempty"`
+}
+
+// ForgeryEvidence summarises one `sb forgery` run.
+type ForgeryEvidence struct {
+	Total      int      `json:"total"`
+	AsDeclared int      `json:"as_declared"`
+	Succeeding int      `json:"succeeding"`
+	MeasuredAt string   `json:"measured_at"`
+	Corpus     string   `json:"corpus"`
+	Mismatched []string `json:"mismatched,omitempty"`
 }
 
 // ---- W5 certificate block (mirrors shen-derive/report) ----------

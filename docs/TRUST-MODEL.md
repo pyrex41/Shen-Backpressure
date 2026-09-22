@@ -107,7 +107,7 @@ never checks that `check` is the check for `tx`. Any balance proof
 pairs with any transaction. The same hole one tier up in the
 multi-tenant chain lets Alice's `TenantAccess` be paired with a
 resource in Bob's tenant — see
-`examples/multi-tenant-api/bypass_attempts/07_unpaired_proof.go.bak`,
+`examples/multi-tenant-api/forgeries/07_unpaired_proof.go.bak`,
 which compiled and succeeded before brands existed.
 
 Brands close it with a phantom type parameter, the encoding from
@@ -159,12 +159,25 @@ survive. The inference and its golden tables live in
   with its own brand still gets the pairing.
 - **They say nothing about provenance.** A brand binds a proof to a
   value. It does not make a boolean the caller supplied true — see
-  `bypass_attempts/05_inject_isowned_true.go.bak`, still caught by the
-  `Check*` wrapper discipline and its grep gate, not by the type
-  system.
+  `forgeries/05_inject_isowned_true.go.bak`, caught by the `Check*`
+  wrapper discipline — since W3 as a `constructor-only` flow premise
+  over the resolved symbol graph, with the grep gate as its fallback —
+  and not by the type system.
 - **They do not stop `unsafe`.** `unsafe.Pointer` can set the brand's
-  neighbours as easily as any other field
-  (`bypass_attempts/03_reflection_escape.go.bak`).
+  neighbours as easily as any other field, the witness included: that
+  forgery mints the witness bool through `unsafe` and then reads the
+  value cleanly (`forgeries/03_reflection_escape.go.bak`, which
+  declares `expect succeeds (documented TCB limit)`).
+
+**Every claim in this section is re-measured, not recalled.** Each
+statement above about what compiles, what panics, and what gets caught
+by which gate has a file in `examples/multi-tenant-api/forgeries/`
+that declares that outcome in its header, and the `forgery` gate
+(`sb forgery`) stages it and runs the check on every `sb gates` run. A
+claim here that stops being true fails a build. That matters most for
+the `succeeds` entries: they are the documented limits of this model,
+and the corpus exists so that a **new** success shows up as a red gate
+rather than as prose nobody re-reads.
 
 ### The witness panic is a runtime member of the TCB
 

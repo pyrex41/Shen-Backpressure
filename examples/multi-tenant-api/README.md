@@ -48,10 +48,15 @@ which exercise this through the live HTTP layer. The
 spec premise: it constructs Alice's JWT and tries to pair it with
 Bob's UserId; the constructor returns an error.
 
-`bypass_attempts/` ships five `.go.bak` files demonstrating common
-forging techniques — `bin/show-bypass-attempts.sh` rotates each into
-a harness and reports which gate stops it. `demo.md` shows the
-output of that script alongside the curl transcript.
+`forgeries/` ships nine `.go.bak` files demonstrating common forging
+techniques. Each one declares in its own header what it expects the
+toolchain to do (`// sb-forgery: expect compile-error`, `expect
+flow-violation`, `expect succeeds (documented TCB limit)`, …), and the
+`forgery` gate in `sb.toml` stages it and runs that check on every
+`sb gates` run — so a recorded outcome cannot drift from the measured
+one. `bin/show-bypass-attempts.sh` is a thin wrapper over
+`sb forgery -markdown` that renders the same run as a table; `demo.md`
+shows its output alongside the curl transcript.
 
 ## Prerequisites
 
@@ -89,18 +94,29 @@ expiry, tampering, and middleware.
 ../../bin/sb gates
 ```
 
-Expected output — all six gates pass:
+Expected output — every gate passes:
 
 ```
-PASS  shengen        17ms
-PASS  test           164ms
-PASS  build          469ms
+PASS  shengen        11ms
+PASS  test           294ms
+PASS  build          905ms
 PASS  shen-check     206ms
-PASS  tcb-audit      35ms
-PASS  shen-derive    195ms
-
-6/6 gates passed
+PASS  tcb-audit      122ms
+PASS  flow           367ms
+PASS  forgery        2.1s
+PASS  shen-derive    367ms
+PASS  shen-cedar     703ms
+PASS  shen-rego      323ms
+PASS  shen-decidable 327ms
 ```
+
+`flow` (W3) evaluates the spec's `(flow …)` premises over the resolved
+symbol graph from `scip-go`; `forgery` (W4) stages every file in
+`forgeries/` and checks it against the outcome its header declares.
+The last three come from the `[cedar]`, `[rego]` and `[decidable-shen]`
+tables. Without a SCIP indexer the flow gate falls back to the legacy
+grep and records the premises `unproven`; without a Shen runtime
+`shen-check` is the one gate that fails.
 
 The `shengen` and `tcb-audit` gates locate `shengen` via the
 repo-root `cmd/shengen`, building it into `bin/` on first run; Gate 4
@@ -195,7 +211,7 @@ internal/verified/                Check* wrappers — the only public path to Te
 internal/derived/                 Hand-written impls that shen-derive verifies against the spec
 internal/handlers/                HTTP handlers; admin endpoints; cross-tenant tests
 internal/db/                      SQLite-backed storage layer
-bypass_attempts/                  Five .go.bak forging attempts; bin/show-bypass-attempts.sh runs them all
+forgeries/                        Nine .go.bak forgeries, each declaring its expected outcome; the "forgery" gate runs them
 cmd/server/main.go                HTTP server entry point
 cmd/ralph/main.go                 Pre-engine Ralph loop (predates sb loop)
 demo.md                           Showboat-format curl transcript with real JWTs

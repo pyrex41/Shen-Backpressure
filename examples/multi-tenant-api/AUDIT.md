@@ -180,7 +180,7 @@ of these files** — that is the audit.
 | **`verified.CheckResourceAccess`** | `internal/verified/access.go` | SQL: `SELECT COUNT(*) FROM resources WHERE id = ? AND tenant_id = ?`. The `tenant_id` comes from `access.Tenant().Val()` — i.e., the tenant dimension is structurally bound here. This is the link in the chain whose binding *is* type-enforced. |
 | **Generated guards** | `internal/shenguard/guards_gen.go` | Generated from the spec; `tcb-audit` catches drift. Spot-check that the lowering of `(= User (head (head Jwt))) : verified` inside `NewAuthenticatedUser` is `if !(user == jwt.claims.sub) { return ..., err }` and that of `(= IsMember true) : verified` inside `NewTenantAccess` is `if !(isMember == true) { return ..., err }`. |
 | **Flow gate** | `sb flow` over `(flow ...)` in `specs/core.shen` | The premises `(constructor-only ...)` and `(must-pass-through ...)` are evaluated over a resolved symbol graph produced by `scip-go`, and appear in the discharge report with basis `flow-analysis`. Check the two rules `tenant-access-discipline` and `resource-access-discipline` in `transcript/audit_report.md`. **The indexer is in the TCB for these premises** — it runs after the Go type checker, which is exactly why it sees through an aliased import; see `../../docs/FLOW.md`. |
-| **Grep gate (fallback only)** | `bin/shenguard-audit.sh --grep-only` | The pre-W3 discipline: a regex for the raw constructors outside the allowed files. It is now the *fallback* the flow gate runs when no SCIP indexer is on PATH, and the premises are then recorded `unproven` with basis `grep-fallback`. What it cannot see is `bypass_attempts/08_aliased_import.go.bak`: an aliased import changes the text without changing the program. If your report says `grep-fallback`, you are reading evidence about spelling. |
+| **Grep gate (fallback only)** | `bin/shenguard-audit.sh --grep-only` | The pre-W3 discipline: a regex for the raw constructors outside the allowed files. It is now the *fallback* the flow gate runs when no SCIP indexer is on PATH, and the premises are then recorded `unproven` with basis `grep-fallback`. What it cannot see is `forgeries/08_aliased_import.go.bak`: an aliased import changes the text without changing the program. If your report says `grep-fallback`, you are reading evidence about spelling. |
 
 ### 5. Walk a request through the chain
 
@@ -231,7 +231,7 @@ The package-private discipline for `NewTenantAccess` /
 exported by shengen), but the `flow` gate's `constructor-only`
 premise rejects any caller outside the allowlist, and the legacy
 `bin/shenguard-audit.sh` greps for direct calls as the fallback
-when no SCIP indexer is available. The `bypass_attempts/`
+when no SCIP indexer is available. The `forgeries/`
 directory ships six forging attempts that exercise the remaining
 defences — including `08_aliased_import.go.bak`, which passes the
 grep and fails the flow gate; run

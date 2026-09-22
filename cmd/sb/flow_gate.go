@@ -44,6 +44,7 @@ func cmdFlow(args []string) {
 	fs := flag.NewFlagSet("flow", flag.ExitOnError)
 	fallback := fs.String("fallback", "", "legacy grep command to run when no SCIP indexer is available")
 	force := fs.Bool("force", false, "re-run the indexer even when cached facts are current")
+	noReport := fs.Bool("no-report", false, "evaluate and print, but do not record premises in the discharge report (used by `sb forgery`, whose staged tree is not the project)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `sb flow — Evaluate (flow ...) premises over the resolved symbol graph
 
@@ -92,13 +93,15 @@ Flags:
 	}
 
 	if !out.Available {
-		os.Exit(runFlowFallback(cfg, decls, out, *fallback))
+		os.Exit(runFlowFallback(cfg, decls, out, *fallback, *noReport))
 	}
 
 	results := flow.Evaluate(out.Facts, decls)
 	rules := flowRules(decls, results, out, flow.EngineGo)
-	if err := mergeFlowRules(rules); err != nil {
-		fmt.Fprintf(os.Stderr, "sb flow: warning: recording premises in %s: %v\n", DischargeReportPath, err)
+	if !*noReport {
+		if err := mergeFlowRules(rules); err != nil {
+			fmt.Fprintf(os.Stderr, "sb flow: warning: recording premises in %s: %v\n", DischargeReportPath, err)
+		}
 	}
 
 	violations := 0
@@ -115,14 +118,16 @@ Flags:
 // premise as unproven with basis "grep-fallback", and returns the exit
 // code the gate should carry. A failing grep is still a failing gate:
 // degrading the *evidence* must not degrade the *enforcement*.
-func runFlowFallback(cfg *Config, decls []flow.Decl, out *IndexOutcome, fallback string) int {
+func runFlowFallback(cfg *Config, decls []flow.Decl, out *IndexOutcome, fallback string, noReport bool) int {
 	fmt.Fprintf(os.Stderr,
 		"sb flow: WARNING: no SCIP indexer on PATH (%s). Flow premises cannot be discharged;\n"+
 			"         install it with: %s\n", out.Indexer, out.InstallHint)
 
 	rules := flowRules(decls, nil, out, "")
-	if err := mergeFlowRules(rules); err != nil {
-		fmt.Fprintf(os.Stderr, "sb flow: warning: recording premises in %s: %v\n", DischargeReportPath, err)
+	if !noReport {
+		if err := mergeFlowRules(rules); err != nil {
+			fmt.Fprintf(os.Stderr, "sb flow: warning: recording premises in %s: %v\n", DischargeReportPath, err)
+		}
 	}
 
 	if fallback == "" {

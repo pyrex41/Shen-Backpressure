@@ -12,6 +12,8 @@
 //   derive    Run spec-equivalence verification
 //   index     Build the resolved symbol graph (SCIP) the flow gate reasons over
 //   flow      Evaluate (flow ...) premises over that graph (gate kind "flow")
+//   forgery   Run the forgery corpus, checking each file's declared outcome (gate kind "forgery")
+//   mutate    Mutate the implementation and measure what the spec test kills
 //   policy    Run Cedar (shen-cedar) + Rego (shen-rego) runtime policy emitters + drift + real (cedar/opa) validate; --decidable for fragment tier sketch
 //   context   Emit project context from the manifest
 //   audit-report  Long-form Markdown rendering of the latest discharge report
@@ -47,6 +49,10 @@ func main() {
 		cmdIndex(os.Args[2:])
 	case "flow":
 		cmdFlow(os.Args[2:])
+	case "forgery":
+		cmdForgery(os.Args[2:])
+	case "mutate":
+		cmdMutate(os.Args[2:])
 	case "policy":
 		cmdPolicy(os.Args[2:])
 	case "context":
@@ -82,7 +88,9 @@ Commands:
   derive    Run spec-equivalence verification
   index     Build the resolved symbol graph (SCIP) for flow premises
   flow      Evaluate (flow ...) premises over the symbol graph
-  policy    Run Cedar (shen-cedar) + Rego (shen-rego) runtime policy emitters + drift + opa/cedar validate; use --decidable for the Decidable-Shen-fragment (native terminating) tier
+  forgery   Run the forgery corpus and check each declared outcome
+  mutate    Measure the behavioral gate's kill rate over a mutant set
+  policy   Run Cedar (shen-cedar) + Rego (shen-rego) runtime policy emitters + drift + opa/cedar validate; use --decidable for the Decidable-Shen-fragment (native terminating) tier
   context   Emit project context from the manifest (surfaces cedar/rego/decidable-shen policy tiers)
   audit-report  Long-form Markdown rendering of the latest discharge report
   verify-report Re-derive a committed report's claims (no model, no network)

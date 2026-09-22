@@ -1,0 +1,59 @@
+// sb-forgery: expect runtime-panic
+// sb-forgery-entry: ReadForgedTenant
+//
+// Attempt #9: forge a TenantAccess with an empty literal at a brand
+// the attacker declares.
+//
+// Attempt #6 stops at the compiler: `shenguard.TenantAccess{}` names
+// no brand, so it is "cannot use generic type … without
+// instantiation". That is a real defence, but it is only the first
+// half of W1, and attempt #6 cannot demonstrate the second half —
+// a file that does not compile never reaches a runtime.
+//
+// This attempt supplies the missing brand. Declaring `forgedBrand` is
+// legal from any package, and `shenguard.TenantAccess[forgedBrand]{}`
+// is then a legal expression: unexported fields stop you naming a
+// field, they never stopped you taking the zero value. So the forged
+// proof exists, is well-typed, and would satisfy any handler that asks
+// for one.
+//
+// Outcome: **panics on first read**. The generated struct's first
+// field is an unexported `valid witness`, whose zero value is not
+// minted, and every accessor opens with `mustBeMinted`. The moment
+// anything actually *uses* the forgery — here, `Tenant()` — the
+// program dies with
+//
+//	shenguard: forged TenantAccess value: not produced by NewTenantAccess
+//	(zero value, empty literal, or a dropped constructor error)
+//
+// That panic is the runtime half of W1, and it is a member of the TCB:
+// it is a check that runs, not a check the compiler discharged. It is
+// also what catches the *other* zero-value forgery, the one nobody
+// writes on purpose — a caller that drops a constructor's error and
+// keeps the accompanying zero value. See ../../docs/TRUST-MODEL.md.
+//
+// The pairing with attempt #6 is the point. Together they say: to
+// forge a proof you must first name a brand, which is an explicit and
+// greppable act, and then the value you get still detonates the first
+// time you read it.
+package bypass_attempts_demo
+
+import (
+	"multi-tenant-api/internal/shenguard"
+)
+
+// forgedBrand is a brand the attacker declares. Nothing stops this;
+// brands are ordinary types.
+type forgedBrand struct{}
+
+// ForgeEmptyTenantAccess builds the forgery. This much succeeds: the
+// expression is legal Go and the value is well-typed.
+func ForgeEmptyTenantAccess() shenguard.TenantAccess[forgedBrand] {
+	return shenguard.TenantAccess[forgedBrand]{}
+}
+
+// ReadForgedTenant is the gate's entry point. Reading the forgery is
+// where it dies.
+func ReadForgedTenant() string {
+	return ForgeEmptyTenantAccess().Tenant().Val()
+}
