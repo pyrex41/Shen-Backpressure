@@ -9,7 +9,7 @@ package derived_test
 import (
 	"testing"
 	"context"
-	shenguard "ralph-shen-agent/internal/shenguard"
+	shenguard "ralph-shen-agent/internal/guardcompat"
 	derived "ralph-shen-agent/internal/derived"
 )
 

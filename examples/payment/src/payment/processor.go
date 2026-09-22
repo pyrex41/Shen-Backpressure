@@ -26,15 +26,27 @@ type Account struct {
 }
 
 // Processor manages accounts and executes transfers with balance invariants.
-type Processor struct {
+//
+// The brand parameter B is the GDP brand of the transfers this processor
+// accepts (see internal/shenguard's `Brand`). It is a phantom parameter:
+// it costs nothing at runtime and carries the guarantee that a
+// SafeTransfer handed to Transfer was built from a Transaction minted in
+// the same scope, rather than from some other transaction that happened
+// to have a balance proof lying around.
+//
+// One brand per processor, not one per transfer: Go has no existential
+// types, so a heterogeneous history would need an interface box that
+// erases the brand again. A caller who wants per-transfer binding
+// declares a brand per request scope and keeps a processor per scope.
+type Processor[B shenguard.Brand] struct {
 	mu       sync.RWMutex
 	accounts map[string]*Account
-	history  []shenguard.SafeTransfer
+	history  []shenguard.SafeTransfer[B]
 }
 
-// NewProcessor creates a new payment processor.
-func NewProcessor() *Processor {
-	return &Processor{
+// NewProcessor creates a new payment processor at the caller's brand.
+func NewProcessor[B shenguard.Brand]() *Processor[B] {
+	return &Processor[B]{
 		accounts: make(map[string]*Account),
 	}
 }
@@ -44,7 +56,7 @@ func NewProcessor() *Processor {
 // amount premise is discharged at runtime by the embedded Shen
 // evaluator (profile B, `:runtime-via :eval`), so the constructor —
 // and therefore this method — takes a context.Context.
-func (p *Processor) CreateAccount(ctx context.Context, id string, initialBalance float64) error {
+func (p *Processor[B]) CreateAccount(ctx context.Context, id string, initialBalance float64) error {
 	amt, err := shenguard.NewAmount(ctx, initialBalance)
 	if err != nil {
 		return err
@@ -61,7 +73,7 @@ func (p *Processor) CreateAccount(ctx context.Context, id string, initialBalance
 }
 
 // GetBalance returns the current balance for an account.
-func (p *Processor) GetBalance(id string) (float64, error) {
+func (p *Processor[B]) GetBalance(id string) (float64, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -74,12 +86,14 @@ func (p *Processor) GetBalance(id string) (float64, error) {
 
 // Transfer executes a safe transfer between two accounts.
 // The caller must construct a shenguard.SafeTransfer, which requires:
-//  1. A shenguard.Transaction (with validated Amount, From, To)
-//  2. A shenguard.BalanceChecked proof (verifying balance >= amount)
+//  1. A shenguard.Transaction[B] (with validated Amount, From, To)
+//  2. A shenguard.BalanceChecked[B] proof (verifying balance >= amount)
 //
 // This means the balance invariant is enforced by the type system —
-// you cannot call Transfer without first proving sufficient funds.
-func (p *Processor) Transfer(ctx context.Context, safe shenguard.SafeTransfer) error {
+// you cannot call Transfer without first proving sufficient funds, and
+// the proof must be about *this* transaction: NewSafeTransfer only
+// accepts a BalanceChecked at the same brand as its Transaction.
+func (p *Processor[B]) Transfer(ctx context.Context, safe shenguard.SafeTransfer[B]) error {
 	tx := safe.Tx()
 	fromId := tx.From().Val()
 	toId := tx.To().Val()
@@ -121,11 +135,11 @@ func (p *Processor) Transfer(ctx context.Context, safe shenguard.SafeTransfer) e
 }
 
 // History returns a copy of all completed safe transfers.
-func (p *Processor) History() []shenguard.SafeTransfer {
+func (p *Processor[B]) History() []shenguard.SafeTransfer[B] {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	h := make([]shenguard.SafeTransfer, len(p.history))
+	h := make([]shenguard.SafeTransfer[B], len(p.history))
 	copy(h, p.history)
 	return h
 }

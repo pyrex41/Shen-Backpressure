@@ -3,6 +3,11 @@ set -euo pipefail
 
 # shengen-codegen.sh — Generate Go guard types from Shen specs.
 # Usage: ./bin/shengen-codegen.sh [spec-path] [package-name] [output-path]
+#
+# Set SHENGEN_BRANDS=1 to emit GDP brand parameters and witness fields
+# (proof binding, W1). Opt-in: unset, the output is the pre-brand shape.
+# A project that opts in must pass the same flag to its TCB audit gate
+# (`bin/shenguard-audit.sh --brands`), or the drift check will fail.
 
 SPEC="${1:-specs/core.shen}"
 PKG="${2:-shenguard}"
@@ -35,5 +40,10 @@ if [ ! -f "$SPEC" ]; then
 fi
 
 mkdir -p "$(dirname "$OUT")"
-"$SHENGEN" "$SPEC" "$PKG" > "$OUT" 2>/dev/null
+BRAND_FLAGS=()
+if [ -n "${SHENGEN_BRANDS:-}" ]; then
+    BRAND_FLAGS=(--brands)
+fi
+
+"$SHENGEN" "${BRAND_FLAGS[@]}" "$SPEC" "$PKG" > "$OUT" 2>/dev/null
 echo "Generated $OUT from $SPEC (package $PKG)"

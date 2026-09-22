@@ -8,7 +8,7 @@
 //	  --func processable \
 //	  --impl-pkg ralph-shen-agent/internal/derived \
 //	  --impl-func Processable \
-//	  --import ralph-shen-agent/internal/shenguard \
+//	  --import ralph-shen-agent/internal/guardcompat \
 //	  --out ../examples/payment/internal/derived/processable_spec_test.go
 package derived
 
@@ -22,7 +22,11 @@ import (
 //
 // This is a hand-written efficient version. Its correctness is checked
 // against the Shen spec (see processable_spec_test.go).
-func Processable(b0 shenguard.Amount, txs []shenguard.Transaction) bool {
+//
+// Generic over the transactions' GDP brand B: the predicate holds for a
+// list of transactions from any one minting scope, and says nothing
+// that would let transactions from two scopes be mixed.
+func Processable[B shenguard.Brand](b0 shenguard.Amount, txs []shenguard.Transaction[B]) bool {
 	balance := b0.Val()
 	for _, tx := range txs {
 		balance -= tx.Amount().Val()

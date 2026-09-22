@@ -8,14 +8,20 @@ import (
 	"ralph-shen-agent/internal/shenguard"
 )
 
+// txBrand is this test package's GDP brand: a type declared here and
+// nowhere else, so every proof minted below is a proof about a value
+// from this scope. A SafeTransfer built at some other brand does not
+// type-check against a Processor[txBrand].
+type txBrand struct{}
+
 // helper builds a SafeTransfer from raw values, proving the balance invariant.
-func mustSafeTransfer(t *testing.T, amount float64, from, to string, balance float64) shenguard.SafeTransfer {
+func mustSafeTransfer(t *testing.T, amount float64, from, to string, balance float64) shenguard.SafeTransfer[txBrand] {
 	t.Helper()
 	amt, err := shenguard.NewAmount(context.Background(),amount)
 	if err != nil {
 		t.Fatalf("NewAmount(%v) failed: %v", amount, err)
 	}
-	tx := shenguard.NewTransaction(amt, shenguard.NewAccountId(from), shenguard.NewAccountId(to))
+	tx := shenguard.NewTransaction[txBrand](amt, shenguard.NewAccountId(from), shenguard.NewAccountId(to))
 	check, err := shenguard.NewBalanceChecked(balance, tx)
 	if err != nil {
 		t.Fatalf("NewBalanceChecked(%v, tx{%v}) failed: %v", balance, amount, err)
@@ -24,7 +30,7 @@ func mustSafeTransfer(t *testing.T, amount float64, from, to string, balance flo
 }
 
 func TestCreateAccount(t *testing.T) {
-	p := NewProcessor()
+	p := NewProcessor[txBrand]()
 
 	if err := p.CreateAccount(context.Background(),"alice", 100); err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -40,7 +46,7 @@ func TestCreateAccount(t *testing.T) {
 }
 
 func TestCreateAccountNegativeBalance(t *testing.T) {
-	p := NewProcessor()
+	p := NewProcessor[txBrand]()
 
 	// NewAmount rejects negative values — this is the guard type in action
 	err := p.CreateAccount(context.Background(),"bob", -50)
@@ -50,7 +56,7 @@ func TestCreateAccountNegativeBalance(t *testing.T) {
 }
 
 func TestTransfer(t *testing.T) {
-	p := NewProcessor()
+	p := NewProcessor[txBrand]()
 	p.CreateAccount(context.Background(),"alice", 100)
 	p.CreateAccount(context.Background(),"bob", 50)
 
@@ -78,7 +84,7 @@ func TestBalanceCheckRejectsInsufficientFunds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx := shenguard.NewTransaction(amt, shenguard.NewAccountId("alice"), shenguard.NewAccountId("bob"))
+	tx := shenguard.NewTransaction[txBrand](amt, shenguard.NewAccountId("alice"), shenguard.NewAccountId("bob"))
 
 	// Alice only has 20 — BalanceChecked should reject
 	_, err = shenguard.NewBalanceChecked(20, tx)
@@ -89,7 +95,7 @@ func TestBalanceCheckRejectsInsufficientFunds(t *testing.T) {
 }
 
 func TestTransferSelfTransfer(t *testing.T) {
-	p := NewProcessor()
+	p := NewProcessor[txBrand]()
 	p.CreateAccount(context.Background(),"alice", 100)
 
 	safe := mustSafeTransfer(t, 10, "alice", "alice", 100)
@@ -100,7 +106,7 @@ func TestTransferSelfTransfer(t *testing.T) {
 }
 
 func TestTransferAccountNotFound(t *testing.T) {
-	p := NewProcessor()
+	p := NewProcessor[txBrand]()
 	p.CreateAccount(context.Background(),"alice", 100)
 
 	safe := mustSafeTransfer(t, 10, "alice", "ghost", 100)
@@ -111,7 +117,7 @@ func TestTransferAccountNotFound(t *testing.T) {
 }
 
 func TestHistory(t *testing.T) {
-	p := NewProcessor()
+	p := NewProcessor[txBrand]()
 	p.CreateAccount(context.Background(),"alice", 100)
 	p.CreateAccount(context.Background(),"bob", 0)
 
@@ -133,7 +139,7 @@ func TestHistory(t *testing.T) {
 // TestBalanceNeverNegative is the key invariant test that mirrors
 // the Shen type proof: no sequence of valid transfers can make a balance negative.
 func TestBalanceNeverNegative(t *testing.T) {
-	p := NewProcessor()
+	p := NewProcessor[txBrand]()
 	p.CreateAccount(context.Background(),"a", 100)
 	p.CreateAccount(context.Background(),"b", 0)
 
@@ -152,7 +158,7 @@ func TestBalanceNeverNegative(t *testing.T) {
 	// Third transfer: 10 from a to b — should fail at BalanceChecked construction
 	// because a only has 0 left
 	amt, _ := shenguard.NewAmount(context.Background(),10)
-	tx := shenguard.NewTransaction(amt, shenguard.NewAccountId("a"), shenguard.NewAccountId("b"))
+	tx := shenguard.NewTransaction[txBrand](amt, shenguard.NewAccountId("a"), shenguard.NewAccountId("b"))
 	_, err := shenguard.NewBalanceChecked(0, tx)
 	if err == nil {
 		t.Fatal("BalanceChecked should reject: balance 0 < amount 10")

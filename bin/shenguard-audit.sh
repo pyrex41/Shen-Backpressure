@@ -8,7 +8,13 @@ set -euo pipefail
 # boundary and stale generated code.
 #
 # Usage:
-#   ./bin/shenguard-audit.sh [--lang go|ts|py|rs] [spec-path] [package-name] [output-path]
+#   ./bin/shenguard-audit.sh [--lang go|ts|py|rs] [--brands] [spec-path] [package-name] [output-path]
+#
+# --brands: the project opted into GDP brands (W1), so the emitter is
+# re-run with --brands AND every wrapper type in the committed file must
+# carry the unexported witness field. A generated file whose wrapper
+# types lost their witness has lost the zero-value defence — an empty
+# literal would pass for a proof again — so the gate fails.
 #
 # Defaults: --lang go, spec specs/core.shen, package shenguard,
 #           output internal/shenguard/guards_gen.go (per language convention).
@@ -23,6 +29,7 @@ set -euo pipefail
 
 LANG_FLAG="go"
 SKIP_ISOLATION=0
+BRANDS=0
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -32,6 +39,16 @@ while [[ $# -gt 0 ]]; do
             ;;
         --lang=*)
             LANG_FLAG="${1#--lang=}"
+            shift
+            ;;
+        --brands)
+            # Project opted into GDP brands: regenerate with --brands and
+            # require the witness field on every wrapper type.
+            BRANDS=1
+            shift
+            ;;
+        --no-brands)
+            BRANDS=0
             shift
             ;;
         --no-isolation-check)
@@ -128,7 +145,11 @@ run_go_emitter() {
         echo "FAIL: shengen binary not found and could not build from $REPO_ROOT/cmd/shengen/main.go"
         return 1
     fi
-    "$shengen" "$SPEC" "$PKG" > "$out_path" 2>/dev/null
+    local brand_flags=()
+    if [ "$BRANDS" -eq 1 ]; then
+        brand_flags=(--brands)
+    fi
+    "$shengen" "${brand_flags[@]}" "$SPEC" "$PKG" > "$out_path" 2>/dev/null
 }
 
 run_ts_emitter() {
@@ -138,7 +159,11 @@ run_ts_emitter() {
         echo "FAIL: shengen-ts source not found at $src"
         return 1
     fi
-    npx tsx "$src" "$SPEC" --out "$out_path" >/dev/null 2>&1
+    local brand_flags=()
+    if [ "$BRANDS" -eq 1 ]; then
+        brand_flags=(--brands)
+    fi
+    npx tsx "$src" "$SPEC" "${brand_flags[@]}" --out "$out_path" >/dev/null 2>&1
 }
 
 run_py_emitter() {
@@ -197,6 +222,49 @@ if [ "$SKIP_ISOLATION" -eq 0 ]; then
         echo "The shenguard package must contain ONLY generated code."
         echo "Move hand-written code to a separate package."
         echo "Allowed: ${ALLOWED_FILES[*]}"
+        exit 1
+    fi
+fi
+
+# --- Step 2b: With brands in effect, require the witness on every
+#              wrapper type. ---
+#
+# The brand parameter is a compile-time mechanism and step 3's diff
+# would catch its removal, but the witness deserves its own check with
+# its own message: it is the only thing standing between an attacker and
+# the empty literal `T{}`, which Go's visibility rules permit from any
+# package. A wrapper type declaration not immediately followed by the
+# witness field is a forgery boundary with a hole in it.
+if [ "$BRANDS" -eq 1 ]; then
+    MISSING_WITNESS=""
+    case "$LANG_FLAG" in
+        go)
+            # Every generated struct declaration must carry
+            # `valid witness` as its first field. Sum types lower to
+            # interfaces, which have no fields, and are skipped.
+            while IFS= read -r decl_line; do
+                lineno="${decl_line%%:*}"
+                name=$(printf '%s' "$decl_line" | sed -E 's/^[0-9]+:type ([A-Za-z0-9_]+).*/\1/')
+                next=$(sed -n "$((lineno + 1))p" "$OUT" | tr -d '\t ')
+                if [ "$next" != "validwitness" ]; then
+                    MISSING_WITNESS="$MISSING_WITNESS $name"
+                fi
+            done < <(grep -n -E '^type [A-Za-z0-9_]+(\[[^]]*\])? struct \{$' "$OUT" || true)
+            ;;
+        ts)
+            # The TypeScript emitter brands through a witness property on
+            # each generated wrapper class.
+            if ! grep -q 'witness' "$OUT"; then
+                MISSING_WITNESS=" (no witness declaration in $OUT)"
+            fi
+            ;;
+    esac
+    if [ -n "$MISSING_WITNESS" ]; then
+        echo "FAIL: --brands is in effect but these wrapper types carry no witness field:$MISSING_WITNESS"
+        echo ""
+        echo "Without the witness the empty literal T{} is a legal expression"
+        echo "from any package, and forges a proof no constructor ever checked."
+        echo "Regenerate with --brands and commit the output."
         exit 1
     fi
 fi
