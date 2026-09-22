@@ -70,6 +70,7 @@ shen-derive/
   core/          S-expression AST, parser, evaluator, pattern matcher
   specfile/      .shen file parser + Shen→Go type table
   verify/        Sample generator + spec evaluator + Go test emitter
+  symbolic/      Symbolic evaluator, constraint AST, SMT-LIB2 + Z3 driver, vacuity
   archive/       Parked v1 code (laws/, codegen/, shen/, demo/) — .go.bak
   main.go        CLI: `verify`, `parse`, `lint`
 ```
@@ -117,6 +118,51 @@ deliberate parallel to shengen's classifier rather than a shared
 library — shengen is a monolithic single-file tool and keeping them
 loosely coupled is worth more than dedup.
 
+### symbolic/
+
+A sibling to `core.Eval`. Where the concrete evaluator maps arguments
+to a value, the symbolic one maps *symbolic* arguments to a set of
+execution paths, each with a path condition — the constraints an input
+must satisfy to take that path. Coverage mirrors `core.Eval`'s: the
+same primitives, the same special forms (plus `cond`), the same
+multi-clause pattern matching with `where` guards, and `head`/`tail`
+on top.
+
+Three decisions shape it.
+
+*Lists are unrolled, not modelled.* Every list site is enumerated at
+each concrete length from 0 to a configurable depth (default 4). The
+spine is then concrete and only scalars are symbolic, which makes
+`foldr`, `scanl`, `filter` and list recursion terminate without any
+theory of sequences. The bound is the honest limit of the evidence and
+it is printed in the generated file's header.
+
+*Paths are found by replay, not continuations.* The evaluator is an
+ordinary recursive Go walk, so it cannot suspend at a branch. Instead
+each run replays a prefix of decisions and defaults to the true branch
+beyond it; afterwards the enumerator enqueues one new prefix per fresh
+decision with that decision flipped. Repeating until the queue drains
+covers the decision tree. A condition that folded to a literal is not
+a decision point, so indices stay aligned across replays.
+
+*Numbers are Reals.* The spec subset mixes ints and floats freely, and
+LRA is decidable. The model decoder narrows whole-valued results back
+to `IntVal`, and a prettify pass asks the solver to confirm an
+all-integer (then two-decimal) rounding of its model, so committed
+literals read as `5` rather than `16/3`.
+
+The constraint AST is small — linear real arithmetic, booleans, strings
+with length — and prints straight to SMT-LIB2. The solver is Z3 over a
+subprocess rather than the Go binding, so the dependency is a binary on
+`PATH`: `FindSolver` returns `ErrSolverUnavailable` when it is missing
+and every path is then reported feasibility-unknown. Nothing fails; the
+harness proceeds with the boundary pool alone and says so.
+
+`CheckVacuity` reuses the same layer for a different question: are a
+datatype's verified premises jointly satisfiable? UNSAT means the type
+is uninhabited — no program can construct one — so every rule that
+consumes it is vacuously true, which is a spec defect worth failing on.
+
 ### verify/
 
 The harness. Given a `Define` and a `TypeTable`, `BuildHarness`:
@@ -143,6 +189,28 @@ The harness. Given a `Define` and a `TypeTable`, `BuildHarness`:
    guard if any, and run the first matching body.
 6. Converts the evaluated value to a Go literal (via the type table's
    return-type mapping) and records the case.
+7. With `PathCover` set, appends a third sample source: one concrete
+   witness per feasible path found by `symbolic/`. Path cases are
+   exempt from `MaxCases` — coverage of the spec should not be
+   truncated by the pool's budget — and are built through the same
+   `mustXxx` helpers, so the two sources share one set of
+   constructors. Each carries a `path:<n>` provenance tag, emitted as
+   a comment above the case, and the file's header records
+   `paths_total` / `paths_feasible` / `paths_dead` next to the seed
+   line. With the flag off, nothing about the output changes.
+
+A predicate-shaped spec deserves a note. `processable` returns a
+boolean and contains no `if`, so it has exactly one structural path per
+list shape — which would make "one sample per path" nearly vacuous.
+The enumerator therefore splits each structural path of a
+boolean-returning spec on its outcome, asking the solver for an input
+that makes it true and one that makes it false. On payment that yields
+10 paths (lengths 0-4 x two outcomes), 9 feasible and 1 dead: the
+empty-list false outcome is unreachable because `amount`'s `(>= X 0)`
+premise forces the opening balance non-negative. Constrained wrappers
+contribute their predicates to every path condition for exactly this
+reason — a witness must be constructible through the guard, or the
+generated test would panic in `mustAmount`.
 
 `Harness.Emit()` then produces a package-qualified Go test file:
 imports, `mustXxx` helpers for each guard type it constructs, a
@@ -222,13 +290,21 @@ stamps into the generated file's header for reproducibility.
   types store the underlying primitive as `IntVal` or `FloatVal`
   based on where it came from. Mixed-mode arithmetic promotes. If you
   want pure-float semantics per define, use explicit float literals.
-- **Full theorem proving.** The spec is the oracle for the sampled
-  inputs. That is engineering confidence, not mathematical proof.
+- **Full theorem proving.** The spec is the oracle for the inputs it
+  is evaluated on. Path cover raises the ceiling — within the list
+  unrolling depth, no path of the spec goes unexercised — but it is
+  still bounded evidence, not mathematical proof.
   Shen's `tc+` still enforces the datatype-level sequent rules
   separately via the `shen-check` gate.
 
 ## Future directions (non-committal)
 
+- **Differential SMT against the implementation.** The symbolic layer
+  answers "which inputs reach this spec path". The inverse question —
+  compile the Go implementation's branches to path conditions via
+  `go/ssa` and ask Z3 for an input where spec and impl disagree —
+  would turn sampled equivalence into bounded proof. Deliberately not
+  attempted yet; it is the open-ended part of the design.
 - **Property-based sampling extensions.** Today the random draws are
   uniform over numeric and alphanumeric ranges. Per-type generators
   (value classes, user-supplied distributions) could catch more bugs.
