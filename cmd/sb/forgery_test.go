@@ -63,6 +63,26 @@ func ReadForged() string { return "" }
 		}
 	})
 
+	t.Run("dotted identifiers do not end the sentence", func(t *testing.T) {
+		// These descriptions are full of `pkg.Func` names, and cutting
+		// at the first period truncated two corpus entries to "call
+		// verified" and "call shenguard".
+		p := writeForgery(t, dir, "dotted", `// sb-forgery: expect flow-violation
+//
+// Forgery #4: a handler that forgets to call verified.CheckTenantAccess
+// before reading resources. More prose follows.
+package demo
+`)
+		f, err := ParseForgeryHeader(p)
+		if err != nil {
+			t.Fatalf("ParseForgeryHeader: %v", err)
+		}
+		want := "a handler that forgets to call verified.CheckTenantAccess before reading resources"
+		if f.Description != want {
+			t.Errorf("Description = %q, want %q", f.Description, want)
+		}
+	})
+
 	t.Run("multi-word expectation survives", func(t *testing.T) {
 		p := writeForgery(t, dir, "tcb", `// sb-forgery: expect succeeds (documented TCB limit)
 // sb-forgery-entry: Forge

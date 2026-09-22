@@ -23,12 +23,12 @@
 //   - It DOES stop the empty literal from being anonymous: forging
 //     `shenguard.TenantAccess[...]{}` now requires naming a brand in
 //     source, and the witness field makes the forged value panic on
-//     first read regardless (see bypass_attempts/06_empty_literal).
+//     first read regardless (see forgeries/06_empty_literal).
 //   - It DOES keep generic library code honest: the signatures in
 //     internal/verified refuse to mix two brands, so a caller that
 //     wants per-scope binding (a background job, a test, a second
 //     tenant of the same process) declares its own brand and gets the
-//     compile-time pairing for free — bypass_attempts/07_unpaired_proof
+//     compile-time pairing for free — forgeries/07_unpaired_proof
 //     shows the error.
 //
 // Go has no existential types, so a constructor cannot mint a brand the

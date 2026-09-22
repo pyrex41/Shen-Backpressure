@@ -224,7 +224,7 @@
    graph. The difference is not cosmetic: a regex over
    `shenguard.New(TenantAccess|ResourceAccess)` answers a question
    about spelling, so `sg "…/internal/shenguard"` evades it (see
-   bypass_attempts/08_aliased_import.go.bak). The premise below
+   forgeries/08_aliased_import.go.bak). The premise below
    answers a question about the program, so the alias resolves to the
    same symbol and the reference is caught.
 

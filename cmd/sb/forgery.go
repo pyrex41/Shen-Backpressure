@@ -364,7 +364,7 @@ func ParseForgeryHeader(path string) (Forgery, error) {
 				}
 			}
 			if inDesc {
-				if i := strings.Index(f.Description, "."); i >= 0 {
+				if i := sentenceEnd(f.Description); i >= 0 {
 					f.Description = f.Description[:i]
 					descDone = true
 				}
@@ -399,6 +399,25 @@ func ParseForgeryHeader(path string) (Forgery, error) {
 			path, f.Expect, ForgeryReplacesPrefix+" <project-relative path>")
 	}
 	return f, nil
+}
+
+// sentenceEnd returns the index of the period that ends the first
+// sentence, or -1 if there is none yet. A period is only a sentence
+// end when a space or the end of the text follows it — these
+// descriptions are full of dotted identifiers like
+// `verified.CheckTenantAccess` and `shenguard.NewResourceAccess`, and
+// cutting at the first period full stop truncated them to "call
+// verified" and "call shenguard".
+func sentenceEnd(s string) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '.' {
+			continue
+		}
+		if i+1 == len(s) || s[i+1] == ' ' {
+			return i
+		}
+	}
+	return -1
 }
 
 // forgeryRunner owns the scratch directories and restores the tree
