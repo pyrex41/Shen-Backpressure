@@ -307,6 +307,18 @@ func nextFormKey(raw string, start int) string {
 		if raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\n' || raw[i] == '\r' {
 			continue
 		}
+		// A (flow ...) form is not ours — `sb flow` consumes it — so
+		// skip past it rather than giving up. Without this, a bare
+		// flow form standing between a `:doc` annotation and the rule
+		// it describes would silently detach the doc.
+		if strings.HasPrefix(raw[i:], "(flow ") {
+			end := endOfForm(raw, i)
+			if end < 0 {
+				return ""
+			}
+			i = end // loop's i++ moves past the closing paren
+			continue
+		}
 		// We're at the first non-whitespace, non-comment byte.
 		for _, prefix := range []string{"(datatype ", "(define "} {
 			if strings.HasPrefix(raw[i:], prefix) {
@@ -329,6 +341,33 @@ func nextFormKey(raw string, start int) string {
 		return ""
 	}
 	return ""
+}
+
+// endOfForm returns the index of the closing paren of the
+// parenthesised form starting at start, or -1 when it never closes.
+// String literals are honoured so a paren inside one does not count.
+func endOfForm(raw string, start int) int {
+	depth := 0
+	inString := false
+	for i := start; i < len(raw); i++ {
+		switch raw[i] {
+		case '"':
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if inString {
+				continue
+			}
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // extractRuntimeViaMarkers scans the RAW source (before comment
