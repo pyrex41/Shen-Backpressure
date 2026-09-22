@@ -26,17 +26,24 @@ check-skilldata:
 	@diff -qr sb/ cmd/sb/skilldata/ && echo "skilldata in sync" || \
 	  (echo "skilldata drift — run 'make sync-skilldata'" && exit 1)
 
+# -trimpath keeps the build path out of the binary, so the same source
+# and toolchain produce the same bytes from any checkout location. The
+# discharge report's toolchain block records the shengen binary's
+# sha256, and without -trimpath that hash would depend on where the
+# repo happens to live. See docs/TRUST-MODEL.md (W5.1).
+GOFLAGS_REPRO := -trimpath
+
 build-sb: sync-skilldata
-	cd cmd/sb && go build -o ../../bin/sb .
+	cd cmd/sb && go build $(GOFLAGS_REPRO) -o ../../bin/sb .
 
 build-shengen:
-	cd cmd/shengen && go build -o ../../bin/shengen .
+	cd cmd/shengen && go build $(GOFLAGS_REPRO) -o ../../bin/shengen .
 
 build-shengen-ts:
 	cd cmd/shengen-ts && npm install && npm run build
 
 build-shen-derive:
-	cd shen-derive && go build -o ../bin/shen-derive .
+	cd shen-derive && go build $(GOFLAGS_REPRO) -o ../bin/shen-derive .
 
 build-shen-derive-ts:
 	cd cmd/shen-derive-ts && npm install && npm run build

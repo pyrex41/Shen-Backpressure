@@ -2328,6 +2328,11 @@ func generateDBWrappers(types []Datatype, st *SymbolTable, pkg string, specPath 
 	return b.String()
 }
 
+// version is the shengen emitter version. It is recorded in the
+// discharge report's toolchain block alongside the binary's sha256, so
+// a reader can tell which emitter produced a committed guards file.
+const version = "0.3.0"
+
 func main() {
 	outFile := flag.String("out", "", "Output file path (default: stdout)")
 	specFile := flag.String("spec", "", "Spec file path (alternative to positional arg)")
@@ -2338,11 +2343,22 @@ func main() {
 		"Emit GDP brand parameters and witness fields (proof binding, W1). Opt-in.")
 	noBrands := flag.Bool("no-brands", false,
 		"Force the pre-brand output shape. Wins over --brands; this is the default.")
+	brandTableOut := flag.String("brand-table", "",
+		"Write the inferred GDP brand table to this file as JSON (implies --brands)")
+	showVersion := flag.Bool("version", false, "Print the shengen version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("shengen %s\n", version)
+		return
+	}
 
 	// --brands is opt-in and --no-brands is the explicit form of the
 	// default, so an invocation that passes both gets today's output.
-	useBrands := *brands && !*noBrands
+	// --brand-table needs the inference to have run, so it implies
+	// --brands unless the caller explicitly asked for the pre-brand
+	// shape.
+	useBrands := (*brands || *brandTableOut != "") && !*noBrands
 
 	path := "specs/core.shen"
 	if *specFile != "" {
@@ -2356,6 +2372,12 @@ func main() {
 	} else if flag.NArg() > 1 {
 		pkg = flag.Arg(1)
 	}
+
+	// W5.1 — the header records the spec relative to its own project
+	// root, not to the caller's cwd, so the same spec yields
+	// byte-identical output from anywhere. The on-disk path we read
+	// from stays exactly what the caller passed.
+	headerPath := canonicalSpecPath(path)
 
 	types, defines, err := parseFile(path)
 	if err != nil {
@@ -2382,6 +2404,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Brand table (GDP proof binding):\n%s\n", indentLines(bt.String(), "  "))
 	}
 
+	if *brandTableOut != "" {
+		if err := WriteBrandTableJSON(*brandTableOut, BrandTableToJSON(bt, headerPath, version)); err != nil {
+			fmt.Fprintf(os.Stderr, "error writing brand table %s: %v\n", *brandTableOut, err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "Generated %s (brand table)\n", *brandTableOut)
+	}
+
 	if len(defines) > 0 {
 		fmt.Fprintf(os.Stderr, "Defined functions:\n")
 		for _, def := range defines {
@@ -2394,7 +2424,7 @@ func main() {
 		return
 	}
 
-	output := generateGoBrands(types, st, pkg, path, bt)
+	output := generateGoBrands(types, st, pkg, headerPath, bt)
 
 	if *outFile != "" {
 		if err := os.WriteFile(*outFile, []byte(output), 0644); err != nil {
@@ -2408,7 +2438,7 @@ func main() {
 
 	// Generate scoped DB wrappers if requested
 	if *dbWrappers != "" {
-		dbOutput := generateDBWrappers(types, st, pkg, path, bt)
+		dbOutput := generateDBWrappers(types, st, pkg, headerPath, bt)
 		if dbOutput != "" {
 			if err := os.WriteFile(*dbWrappers, []byte(dbOutput), 0644); err != nil {
 				fmt.Fprintf(os.Stderr, "error writing %s: %v\n", *dbWrappers, err)

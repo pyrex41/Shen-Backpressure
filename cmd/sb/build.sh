@@ -29,5 +29,5 @@ echo "Copied skill data from sb/ into skilldata/"
 
 # Build
 cd "$SCRIPT_DIR"
-go build -o "$REPO_ROOT/bin/sb" .
+go build -trimpath -o "$REPO_ROOT/bin/sb" .
 echo "Built bin/sb"

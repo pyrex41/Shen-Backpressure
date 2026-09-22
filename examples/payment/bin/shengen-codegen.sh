@@ -25,7 +25,7 @@ if [ -z "$SHENGEN" ]; then
         if [ -f "$src/main.go" ]; then
             echo "Building shengen from $src..."
             mkdir -p bin
-            (cd "$src" && go build -o "$OLDPWD/bin/shengen" .)
+            (cd "$src" && go build -trimpath -o "$OLDPWD/bin/shengen" .)
             SHENGEN=bin/shengen
             break
         fi

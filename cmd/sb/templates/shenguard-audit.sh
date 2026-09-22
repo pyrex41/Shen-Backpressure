@@ -22,7 +22,7 @@ fi
 if [ -z "$SHENGEN" ]; then
     SHENGEN_SRC="${SHENGEN_SRC:-cmd/shengen}"
     if [ -f "$SHENGEN_SRC/main.go" ]; then
-        (cd "$SHENGEN_SRC" && go build -o "$(pwd)/../../bin/shengen" .) 2>/dev/null
+        (cd "$SHENGEN_SRC" && go build -trimpath -o "$(pwd)/../../bin/shengen" .) 2>/dev/null
         SHENGEN=bin/shengen
     else
         echo "FAIL: shengen binary not found and source not at $SHENGEN_SRC/main.go"

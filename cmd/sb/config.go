@@ -570,7 +570,10 @@ func FindShengen() (string, error) {
 			srcDir := filepath.Dir(src)
 			outPath, _ := filepath.Abs("bin/shengen")
 			fmt.Fprintf(os.Stderr, "Building shengen from %s...\n", srcDir)
-			cmd := exec.Command("go", "build", "-o", outPath, ".")
+			// -trimpath so the binary's bytes (and therefore the
+			// sha256 the discharge report records for it) do not
+			// depend on where this checkout lives. W5.1.
+			cmd := exec.Command("go", "build", "-trimpath", "-o", outPath, ".")
 			cmd.Dir = srcDir
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
@@ -679,7 +682,10 @@ func FindShenCedar() (string, error) {
 			srcDir := filepath.Dir(src)
 			outPath := filepath.Join(os.TempDir(), "shen-backpressure-shen-cedar")
 			fmt.Fprintf(os.Stderr, "Building shen-cedar from %s...\n", srcDir)
-			cmd := exec.Command("go", "build", "-o", outPath, ".")
+			// -trimpath so the binary's bytes (and therefore the
+			// sha256 the discharge report records for it) do not
+			// depend on where this checkout lives. W5.1.
+			cmd := exec.Command("go", "build", "-trimpath", "-o", outPath, ".")
 			cmd.Dir = srcDir
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
@@ -746,7 +752,10 @@ func FindShenRego() (string, error) {
 			srcDir := filepath.Dir(src)
 			outPath := filepath.Join(os.TempDir(), "shen-backpressure-shen-rego")
 			fmt.Fprintf(os.Stderr, "Building shen-rego from %s...\n", srcDir)
-			cmd := exec.Command("go", "build", "-o", outPath, ".")
+			// -trimpath so the binary's bytes (and therefore the
+			// sha256 the discharge report records for it) do not
+			// depend on where this checkout lives. W5.1.
+			cmd := exec.Command("go", "build", "-trimpath", "-o", outPath, ".")
 			cmd.Dir = srcDir
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
