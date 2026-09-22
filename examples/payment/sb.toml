@@ -59,8 +59,15 @@ dir = "../../shen-derive"
 # `path_depth`), and asks Z3 for one concrete input per feasible path.
 # Those inputs are committed alongside the boundary pool, and the
 # generated test's header records paths_total / paths_feasible /
-# paths_dead. Needs a `z3` binary on PATH; without one the gate keeps
-# working on the boundary pool alone and says so in the header.
+# paths_dead.
+#
+# Needs a `z3` binary on PATH (`pip install z3-solver` provides one).
+# Without z3 shen-derive still works — it enumerates the paths, reports
+# feasibility as unknown, and falls back to the boundary pool, saying so
+# in the header — but the file it generates then has 35 cases instead of
+# 44, so the drift check will flag the committed copy as stale. A CI
+# runner for this example therefore needs z3, which is the price of
+# committing path witnesses. Drop these two lines to opt back out.
 path_cover = true
 path_depth = 4
 
