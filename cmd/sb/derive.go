@@ -394,6 +394,12 @@ func finalizeDischargeReport(parts []*DischargeReport, cfg *Config, failures []p
 		r.Tools.ShenRuntime = &name
 		r.Tools.ShenRuntimeAvailable = true
 	}
+	// The flow gate writes its own rules into the same report and,
+	// because the derive gate is always appended last, it has already
+	// run by now. Carry its rules across rather than dropping them:
+	// the report is the union of everything that discharged
+	// something, and neither gate owns the file.
+	carryFlowRules(r)
 	computeDischargedSinceCommit(r)
 	if err := writeDischarge(DischargeReportPath, r); err != nil {
 		fmt.Fprintf(os.Stderr, "sb derive: write discharge report: %v\n", err)

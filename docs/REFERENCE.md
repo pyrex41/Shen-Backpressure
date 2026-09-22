@@ -27,6 +27,40 @@ Gates 1–5 cover the structural pipeline (shengen-driven). Gate 6
 (`sb derive`) runs whenever the manifest declares `[[derive.specs]]`
 and adds sampled spec-equivalence on top.
 
+## sb.toml gate kinds
+
+The five-gate shape is fixed; additional gates are declared in the
+`[[gates]]` array of tables and each carries a `kind`.
+
+| `kind` | Served by | `run` means |
+|---|---|---|
+| `command` (default) | the shell | the command to run; a non-zero exit fails the gate |
+| `derive` | `sb derive` | ignored — auto-appended when `[[derive.specs]]` is present |
+| `flow` | `sb flow` | the **fallback** grep, used only when no SCIP indexer is on PATH |
+
+```toml
+[[gates]]
+name = "flow"
+kind = "flow"
+# Not the gate: the legacy regex to fall back to when `sb index` finds
+# no SCIP indexer. Omit it when there is no legacy gate to degrade to.
+run  = "./bin/shenguard-audit.sh --grep-only"
+```
+
+A `flow` gate reads the `(flow <name> …)` forms from the spec named by
+`[paths] spec` (and from every `[[derive.specs]]` path), runs
+`sb index` — `scip-go` for `lang = "go"`, `scip-typescript` for
+`lang = "ts"`, cached by a content hash over the source tree — and
+records each premise in the discharge report: discharged with basis
+`flow-analysis`, or violated with the offending reference's
+`file:line:col` and the shortest violating path. With no indexer the
+premises are recorded `unproven` with basis `grep-fallback`. The two
+premise forms, the two engines, and what the indexer costs in TCB
+terms are in [FLOW.md](FLOW.md).
+
+Gates sharing a non-empty `parallel_group` run concurrently;
+everything else runs in declared order.
+
 ## The Codegen Bridge (shengen)
 
 `shengen` parses `specs/core.shen` and emits target-language types

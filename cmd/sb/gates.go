@@ -118,6 +118,21 @@ func buildGateList(cfg *Config) []gate {
 		// Manifest-defined gates: convert each GateDef to a gate.
 		for _, gd := range cfg.Gates {
 			bin, args := SplitCommand(gd.Run)
+			if gd.Kind == GateKindFlow {
+				// A flow gate is served by `sb flow`, and its `run`
+				// field carries the legacy grep command to fall back
+				// to when no SCIP indexer is available.
+				self, err := os.Executable()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "sb gates: cannot locate self for flow gate %q: %v\n", gd.Name, err)
+					continue
+				}
+				bin = self
+				args = []string{"flow"}
+				if gd.Run != "" {
+					args = append(args, "-fallback", gd.Run)
+				}
+			}
 			gates = append(gates, gate{
 				name:          gd.Name,
 				kind:          gd.Kind,

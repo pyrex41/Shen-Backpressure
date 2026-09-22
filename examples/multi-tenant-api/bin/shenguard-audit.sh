@@ -16,11 +16,23 @@ set -euo pipefail
 #      logic so every example benefits from language-aware audits without
 #      duplicating per-language allowlists / emitter discovery).
 #
-# Usage: ./bin/shenguard-audit.sh [spec-path] [package-name] [output-path]
+# Usage: ./bin/shenguard-audit.sh [--grep-only] [spec-path] [package-name] [output-path]
+#
+# --grep-only runs step 1 and stops. That mode is what the `flow` gate
+# in sb.toml names as its fallback: when no SCIP indexer is on PATH,
+# `sb flow` cannot discharge the flow premises in specs/core.shen and
+# runs this grep instead, recording the premises as unproven with
+# basis "grep-fallback". See ../../docs/FLOW.md.
+
+GREP_ONLY=0
+if [ "${1:-}" = "--grep-only" ]; then
+    GREP_ONLY=1
+    shift
+fi
 
 ROOT_SCRIPT="$(cd "$(dirname "$0")/../../.." && pwd)/bin/shenguard-audit.sh"
 
-if [ ! -x "$ROOT_SCRIPT" ]; then
+if [ "$GREP_ONLY" -eq 0 ] && [ ! -x "$ROOT_SCRIPT" ]; then
     echo "FAIL: repo-root audit script not found at $ROOT_SCRIPT"
     exit 1
 fi
@@ -40,7 +52,15 @@ fi
 # is what makes the token↔user binding unforgeable. The grep gate is the
 # second-line defence against handlers that try to construct the lower-tier
 # guards directly.
-ALLOWED_CALLER="internal/verified/access.go"
+# The allowlist is file-granular, because that is all a regex over
+# source text can express. The (flow ...) premise in specs/core.shen
+# states the same discipline per *function*: only
+# internal/verified/CheckTenantAccess and the Cedar differential
+# oracle cmd/cedar-verify/computeGuardAllow may reference the raw
+# constructors. This grep has to exempt the whole of
+# cmd/cedar-verify/main.go to say the weaker half of that, which is a
+# concrete example of what the flow gate buys.
+ALLOWED_CALLERS="internal/verified/access.go cmd/cedar-verify/main.go"
 SCAN_DIRS=""
 [ -d internal ] && SCAN_DIRS="$SCAN_DIRS internal"
 [ -d cmd ] && SCAN_DIRS="$SCAN_DIRS cmd"
@@ -48,25 +68,38 @@ BAD_CALLS=""
 if [ -n "$SCAN_DIRS" ]; then
     while IFS= read -r f; do
         case "$f" in
-            "$ALLOWED_CALLER") continue ;;
-            "./$ALLOWED_CALLER") continue ;;
             */shenguard/*) continue ;;
             */bypass_attempts/*) continue ;;
             */bypass_harness/*) continue ;;
         esac
+        allowed=0
+        for a in $ALLOWED_CALLERS; do
+            case "$f" in
+                "$a"|"./$a") allowed=1 ;;
+            esac
+        done
+        [ "$allowed" -eq 1 ] && continue
         BAD_CALLS="$BAD_CALLS $f"
     done < <(grep -rln -E 'shenguard\.New(TenantAccess|ResourceAccess)\b' $SCAN_DIRS 2>/dev/null || true)
 fi
 if [ -n "$BAD_CALLS" ]; then
-    echo "FAIL: direct call(s) to shenguard.NewTenantAccess / NewResourceAccess outside $ALLOWED_CALLER:"
+    echo "FAIL: direct call(s) to the raw TenantAccess / ResourceAccess constructors outside $ALLOWED_CALLERS:"
     for f in $BAD_CALLS; do
         echo "  $f"
     done
     echo ""
-    echo "These constructors must only be called from $ALLOWED_CALLER (the"
+    echo "These constructors must only be called from $ALLOWED_CALLERS (the"
     echo "Check* wrappers that consult the DB before constructing the proof)."
     echo "Direct calls bypass the DB membership / ownership check."
     exit 1
+fi
+
+if [ "$GREP_ONLY" -eq 1 ]; then
+    echo "PASS: no direct calls to the raw constructors outside $ALLOWED_CALLERS"
+    echo "NOTE: this is a regex over source text. It cannot see an aliased"
+    echo "      import (bypass_attempts/08_aliased_import.go.bak). Install a"
+    echo "      SCIP indexer and let the flow gate discharge the premise."
+    exit 0
 fi
 
 # --- Step 2: Standard regen + drift audit (delegated to root script). ---

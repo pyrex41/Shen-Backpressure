@@ -16,6 +16,11 @@ type GateKind string
 const (
 	GateKindCommand GateKind = "command"
 	GateKindDerive  GateKind = "derive"
+	// GateKindFlow evaluates the spec's (flow …) premises over the
+	// resolved symbol graph. Its `run` field is the *fallback* grep
+	// command, used only when no SCIP indexer is on PATH; see
+	// docs/FLOW.md.
+	GateKindFlow GateKind = "flow"
 )
 
 // GateDef is a manifest-defined gate entry from [[gates]] in sb.toml.

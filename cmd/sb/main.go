@@ -10,6 +10,8 @@
 //   gen       Run shengen to generate guard types from specs
 //   gates     Run manifest-defined verification gates
 //   derive    Run spec-equivalence verification
+//   index     Build the resolved symbol graph (SCIP) the flow gate reasons over
+//   flow      Evaluate (flow ...) premises over that graph (gate kind "flow")
 //   policy    Run Cedar (shen-cedar) + Rego (shen-rego) runtime policy emitters + drift + real (cedar/opa) validate; --decidable for fragment tier sketch
 //   context   Emit project context from the manifest
 //   audit-report  Long-form Markdown rendering of the latest discharge report
@@ -39,6 +41,10 @@ func main() {
 		cmdGates(os.Args[2:])
 	case "derive":
 		cmdDerive(os.Args[2:])
+	case "index":
+		cmdIndex(os.Args[2:])
+	case "flow":
+		cmdFlow(os.Args[2:])
 	case "policy":
 		cmdPolicy(os.Args[2:])
 	case "context":
@@ -68,6 +74,8 @@ Commands:
   gen       Generate guard types from Shen specs
   gates     Run manifest-defined verification gates
   derive    Run spec-equivalence verification
+  index     Build the resolved symbol graph (SCIP) for flow premises
+  flow      Evaluate (flow ...) premises over the symbol graph
   policy    Run Cedar (shen-cedar) + Rego (shen-rego) runtime policy emitters + drift + opa/cedar validate; use --decidable for the Decidable-Shen-fragment (native terminating) tier
   context   Emit project context from the manifest (surfaces cedar/rego/decidable-shen policy tiers)
   audit-report  Long-form Markdown rendering of the latest discharge report

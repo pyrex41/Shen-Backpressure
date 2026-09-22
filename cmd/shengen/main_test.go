@@ -1031,3 +1031,99 @@ func buildGoPackage(t *testing.T, guardsSource, pkgName, extraSource string) err
 	}
 	return nil
 }
+
+// ============================================================================
+// (flow ...) forms — W3
+// ============================================================================
+
+// TestParseIgnoresFlowForms checks that a spec carrying (flow ...)
+// premises loads unchanged. Flow premises are consumed by `sb flow`
+// alone: shengen emits no code for them, and must not treat the form
+// as a malformed datatype or define. Both spellings appear in the
+// wild — bare at the top level, and inside a Shen comment so
+// `shen tc+` does not meet an undefined `flow` symbol — so both are
+// covered here.
+func TestParseIgnoresFlowForms(t *testing.T) {
+	const flowForms = `(flow tenant-access-discipline
+  (constructor-only internal/shenguard/NewTenantAccess
+                    internal/verified/CheckTenantAccess)
+  (must-pass-through *ListResources* internal/verified/CheckTenantAccess DB#Query*))`
+
+	baseline := `(datatype account-id
+  X : string;
+  ==============
+  X : account-id;)
+
+(define same-id?
+  {account-id --> account-id --> boolean}
+  A B -> (= A B))`
+
+	variants := map[string]string{
+		"bare":      baseline + "\n\n" + flowForms + "\n",
+		"commented": baseline + "\n\n\\* flow premises\n" + flowForms + "\n*\\\n",
+	}
+
+	wantTypes, wantDefines, err := parseSpecFile(t, baseline)
+	if err != nil {
+		t.Fatalf("baseline spec failed to parse: %v", err)
+	}
+
+	for name, spec := range variants {
+		types, defines, err := parseSpecFile(t, spec)
+		if err != nil {
+			t.Fatalf("%s: spec with flow forms failed to parse: %v", name, err)
+		}
+		if len(types) != len(wantTypes) {
+			t.Errorf("%s: got %d datatypes, want %d", name, len(types), len(wantTypes))
+		}
+		if len(defines) != len(wantDefines) {
+			t.Errorf("%s: got %d defines, want %d", name, len(defines), len(wantDefines))
+		}
+		if len(types) > 0 && types[0].Name != "account-id" {
+			t.Errorf("%s: first datatype = %q, want account-id", name, types[0].Name)
+		}
+		if len(defines) > 0 && defines[0].Name != "same-id?" {
+			t.Errorf("%s: first define = %q, want same-id?", name, defines[0].Name)
+		}
+	}
+}
+
+// TestGenerateIgnoresFlowForms goes one step further than the parser:
+// the emitted Go must be byte-identical with and without the flow
+// forms, so adding a flow premise to a spec cannot move the generated
+// guards and cannot make the drift audit red.
+func TestGenerateIgnoresFlowForms(t *testing.T) {
+	baseline := `(datatype account-id
+  X : string;
+  ==============
+  X : account-id;)`
+	withFlow := baseline + "\n\n(flow d (constructor-only a/B a/C))\n"
+
+	typesA, _, err := parseSpecFile(t, baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typesB, _, err := parseSpecFile(t, withFlow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emit := func(types []Datatype) string {
+		st := newSymbolTable()
+		st.Build(types)
+		return generateGo(types, st, "shenguard", "core.shen")
+	}
+	if got, want := emit(typesB), emit(typesA); got != want {
+		t.Errorf("flow forms changed the generated output:\n--- with ---\n%s\n--- without ---\n%s", got, want)
+	}
+}
+
+// parseSpecFile writes spec to a temp file and runs the real loader,
+// so the test exercises parseFile rather than a test-only shortcut.
+func parseSpecFile(t *testing.T, spec string) ([]Datatype, []Define, error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "core.shen")
+	if err := os.WriteFile(path, []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return parseFile(path)
+}

@@ -114,6 +114,9 @@ and reading the named TCB.
 
 - [`docs/TRUST-MODEL.md`](docs/TRUST-MODEL.md) — project-level
   trust model
+- [`docs/FLOW.md`](docs/FLOW.md) — flow premises: the
+  `(constructor-only …)` and `(must-pass-through …)` forms that
+  replace grep gates, evaluated over a resolved symbol graph
 - [`examples/payment/AUDIT.md`](examples/payment/AUDIT.md) —
   payment demo reviewer workflow
 - [`examples/multi-tenant-api/AUDIT.md`](examples/multi-tenant-api/AUDIT.md)

@@ -1,12 +1,12 @@
 # Discharge Report — Audit Rendering
 
-Generated 2026-05-23T04:35:14Z. Source artifact: `.sb/discharge_report.json` (schema_version=1).
+Generated 2026-09-22T04:16:23Z. Source artifact: `.sb/discharge_report.json` (schema_version=1).
 
-**Implementation commit:** `d9194a75ecc6c7d1d19355c371da26278610d21e` (working tree dirty)
+**Implementation commit:** `76467fdd14e9b455808a1593b9b10d28289eeacb`
 
 **Spec files:**
 
-- `specs/core.shen` (sha256 `5cd6e689dff7fa71d761537dcc8eaafa8243bd7240dd07cff1d5883ac1164141`)
+- `specs/core.shen` (sha256 `e58f2ba7e92e94b8df7f234f6fd346faa8d05b0f175b09ea44c757690e676f56`)
 
 **Target languages:** go
 
@@ -21,8 +21,8 @@ Generated 2026-05-23T04:35:14Z. Source artifact: `.sb/discharge_report.json` (sc
 
 ## Summary
 
-- **Rules:** 15 total — 15 discharged, 0 violated, 0 unproven
-- **Premises:** 33 total — 32 static, 1 runtime-sampled, 0 unproven
+- **Rules:** 17 total — 17 discharged, 0 violated, 0 unproven
+- **Premises:** 36 total — 35 static, 1 runtime-sampled, 0 unproven
 
 ## Rules
 
@@ -41,7 +41,7 @@ Spec:
   [Jwt User] : authenticated-user;)
 ```
 
-Continuously discharged since commit `d9194a75ecc6c7d1d19355c371da26278610d21e`.
+Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 **Premises**
 
@@ -68,7 +68,7 @@ Spec:
   Auth : authenticated-principal;)
 ```
 
-Continuously discharged since commit `d9194a75ecc6c7d1d19355c371da26278610d21e`.
+Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 **Premises**
 
@@ -92,7 +92,7 @@ Spec:
   X : jwt-audience;)
 ```
 
-Continuously discharged since commit `d9194a75ecc6c7d1d19355c371da26278610d21e`.
+Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 **Premises**
 
@@ -118,7 +118,7 @@ Spec:
   X : jwt-issuer;)
 ```
 
-Continuously discharged since commit `d9194a75ecc6c7d1d19355c371da26278610d21e`.
+Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 **Premises**
 
@@ -147,7 +147,7 @@ Spec:
   [Sub Exp Iss Aud] : parsed-claims;)
 ```
 
-Continuously discharged since commit `d9194a75ecc6c7d1d19355c371da26278610d21e`.
+Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 **Premises**
 
@@ -181,7 +181,7 @@ Spec:
   [Access Resource IsOwned] : resource-access;)
 ```
 
-Continuously discharged since commit `d9194a75ecc6c7d1d19355c371da26278610d21e`.
+Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 **Premises**
 
@@ -197,6 +197,28 @@ Continuously discharged since commit `d9194a75ecc6c7d1d19355c371da26278610d21e`.
 - `resource-access.field-isowned` code references: `internal/shenguard/guards_gen.go:250`
 - `resource-access.verified-isowned-true` code references: `internal/shenguard/guards_gen.go:250`
 
+### `resource-access-discipline` — flow (✅ Discharged)
+
+Flow discipline: only internal/verified/CheckResourceAccess and cmd/cedar-verify/computeGuardAllow may reference the constructor internal/shenguard/NewResourceAccess. *(auto-generated from rule structure; not reviewed by spec author)*
+
+Spec:
+
+```shen
+(flow resource-access-discipline
+  (constructor-only internal/shenguard/NewResourceAccess
+                    internal/verified/CheckResourceAccess
+                    cmd/cedar-verify/computeGuardAllow))
+```
+
+Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
+
+**Premises**
+
+| ID | Expression | Discharge | Basis | Rationale |
+|---|---|---|---|---|
+| `constructor-only:internal/shenguard/NewResourceAccess` | `(constructor-only internal/shenguard/NewResourceAccess                     internal/verified/CheckResourceAccess                     cmd/cedar-verify/computeGuardAllow)` | static | flow-analysis | Resolved references to internal/shenguard/NewResourceAccess, 2 references in all, are confined to internal/verified/CheckResourceAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go. |
+
+
 ### `resource-id` — wrapper (✅ Discharged)
 
 A resource-id value is a string with no further runtime constraints; the type exists to keep raw strings from being mistaken for one. *(auto-generated from rule structure; not reviewed by spec author)*
@@ -210,7 +232,7 @@ Spec:
   X : resource-id;)
 ```
 
-Continuously discharged since commit `d9194a75ecc6c7d1d19355c371da26278610d21e`.
+Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 **Premises**
 
@@ -232,7 +254,7 @@ Spec:
   A B -> ...)
 ```
 
-Continuously discharged since commit `d9194a75ecc6c7d1d19355c371da26278610d21e`.
+Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 **Premises**
 
@@ -258,7 +280,7 @@ Spec:
   [Service Secret] : service-credential;)
 ```
 
-Continuously discharged since commit `d9194a75ecc6c7d1d19355c371da26278610d21e`.
+Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 **Premises**
 
@@ -285,7 +307,7 @@ Spec:
   X : service-id;)
 ```
 
-Continuously discharged since commit `d9194a75ecc6c7d1d19355c371da26278610d21e`.
+Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 **Premises**
 
@@ -308,7 +330,7 @@ Spec:
   Cred : authenticated-principal;)
 ```
 
-Continuously discharged since commit `d9194a75ecc6c7d1d19355c371da26278610d21e`.
+Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 **Premises**
 
@@ -334,7 +356,7 @@ Spec:
   [Principal Tenant IsMember] : tenant-access;)
 ```
 
-Continuously discharged since commit `d9194a75ecc6c7d1d19355c371da26278610d21e`.
+Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 **Premises**
 
@@ -350,6 +372,32 @@ Continuously discharged since commit `d9194a75ecc6c7d1d19355c371da26278610d21e`.
 - `tenant-access.field-ismember` code references: `internal/shenguard/guards_gen.go:224`
 - `tenant-access.verified-ismember-true` code references: `internal/shenguard/guards_gen.go:224`
 
+### `tenant-access-discipline` — flow (✅ Discharged)
+
+Flow discipline: only internal/verified/CheckTenantAccess and cmd/cedar-verify/computeGuardAllow may reference the constructor internal/shenguard/NewTenantAccess and every call path from *ListResources* to DB#Query* references internal/verified/CheckTenantAccess first. *(auto-generated from rule structure; not reviewed by spec author)*
+
+Spec:
+
+```shen
+(flow tenant-access-discipline
+  (constructor-only internal/shenguard/NewTenantAccess
+                    internal/verified/CheckTenantAccess
+                    cmd/cedar-verify/computeGuardAllow)
+  (must-pass-through *ListResources*
+                     internal/verified/CheckTenantAccess
+                     DB#Query*))
+```
+
+Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
+
+**Premises**
+
+| ID | Expression | Discharge | Basis | Rationale |
+|---|---|---|---|---|
+| `constructor-only:internal/shenguard/NewTenantAccess` | `(constructor-only internal/shenguard/NewTenantAccess                     internal/verified/CheckTenantAccess                     cmd/cedar-verify/computeGuardAllow)` | static | flow-analysis | Resolved references to internal/shenguard/NewTenantAccess, 3 references in all, are confined to internal/verified/CheckTenantAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go. |
+| `must-pass-through:*ListResources*→DB#Query*` | `(must-pass-through *ListResources*                      internal/verified/CheckTenantAccess                      DB#Query*)` | static | flow-analysis | Every call path from 1 definition matching *ListResources* to a call of DB#Query* passes through a reference to internal/verified/CheckTenantAccess. Engine: go-datalog; index: scip-go. |
+
+
 ### `tenant-id` — wrapper (✅ Discharged)
 
 A tenant-id value is a string with no further runtime constraints; the type exists to keep raw strings from being mistaken for one. *(auto-generated from rule structure; not reviewed by spec author)*
@@ -363,7 +411,7 @@ Spec:
   X : tenant-id;)
 ```
 
-Continuously discharged since commit `d9194a75ecc6c7d1d19355c371da26278610d21e`.
+Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 **Premises**
 
@@ -386,7 +434,7 @@ Spec:
   X : user-id;)
 ```
 
-Continuously discharged since commit `d9194a75ecc6c7d1d19355c371da26278610d21e`.
+Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 **Premises**
 
@@ -411,7 +459,7 @@ Spec:
   [Claims Sig] : verified-jwt;)
 ```
 
-Continuously discharged since commit `d9194a75ecc6c7d1d19355c371da26278610d21e`.
+Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 **Premises**
 
