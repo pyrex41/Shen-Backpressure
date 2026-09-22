@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T04:51:35Z",
+  "generated_at": "2026-09-22T04:53:12Z",
   "spec": {
     "files": [
       {
@@ -11,7 +11,7 @@
     "rule_count": 7
   },
   "impl": {
-    "git_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+    "git_commit": "db919d64e3aa7d9c1afb8993149390868602eeef",
     "git_dirty": true,
     "target_languages": [
       "go"
@@ -336,7 +336,7 @@
     "goos": "linux",
     "goarch": "amd64",
     "shengen_version": "shengen 0.3.0",
-    "shengen_sha256": "7befa4e04aae02284ef53274876dfd6401e38c9aa6ef6196c76debf8c169259b",
+    "shengen_sha256": "4a7d38acf282002e50cc85431a73e838edb0e659514e6a26943b85858b106088",
     "z3_version": "Z3 version 5.1.0 - 64 bit"
   },
   "signature": null

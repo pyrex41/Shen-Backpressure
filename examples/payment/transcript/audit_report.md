@@ -1,8 +1,8 @@
 # Discharge Report — Audit Rendering
 
-Generated 2026-09-22T04:51:35Z. Source artifact: `transcript/discharge_report.json` (schema_version=1).
+Generated 2026-09-22T04:53:12Z. Source artifact: `transcript/discharge_report.json` (schema_version=1).
 
-**Implementation commit:** `65a24daad14dd78f13886c4a6f376aeef1febc25` (working tree dirty)
+**Implementation commit:** `db919d64e3aa7d9c1afb8993149390868602eeef` (working tree dirty)
 
 **Spec files:**
 
@@ -26,7 +26,7 @@ Generated 2026-09-22T04:51:35Z. Source artifact: `transcript/discharge_report.js
 | Go | `go1.24.7` |
 | platform | `linux/amd64` |
 | shengen | `shengen 0.3.0` |
-| shengen sha256 | `7befa4e04aae02284ef53274876dfd6401e38c9aa6ef6196c76debf8c169259b` |
+| shengen sha256 | `4a7d38acf282002e50cc85431a73e838edb0e659514e6a26943b85858b106088` |
 | z3 | `Z3 version 5.1.0 - 64 bit` |
 
 The shengen hash matters because the guard types are a pure function of the spec bytes and that binary. Re-run the same emitter on the same spec and you get the same guards file, byte for byte, from any directory.

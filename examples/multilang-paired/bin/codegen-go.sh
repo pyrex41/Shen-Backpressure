@@ -19,7 +19,7 @@ done
 if [ -z "$SHENGEN" ]; then
     if [ -f "../../cmd/shengen/main.go" ]; then
         mkdir -p ../../bin
-        (cd ../../cmd/shengen && go build -trimpath -o ../../bin/shengen .)
+        (cd ../../cmd/shengen && go build -trimpath -buildvcs=false -o ../../bin/shengen .)
         SHENGEN="../../bin/shengen"
     fi
 fi

@@ -573,7 +573,7 @@ func FindShengen() (string, error) {
 			// -trimpath so the binary's bytes (and therefore the
 			// sha256 the discharge report records for it) do not
 			// depend on where this checkout lives. W5.1.
-			cmd := exec.Command("go", "build", "-trimpath", "-o", outPath, ".")
+			cmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", outPath, ".")
 			cmd.Dir = srcDir
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
@@ -685,7 +685,7 @@ func FindShenCedar() (string, error) {
 			// -trimpath so the binary's bytes (and therefore the
 			// sha256 the discharge report records for it) do not
 			// depend on where this checkout lives. W5.1.
-			cmd := exec.Command("go", "build", "-trimpath", "-o", outPath, ".")
+			cmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", outPath, ".")
 			cmd.Dir = srcDir
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
@@ -755,7 +755,7 @@ func FindShenRego() (string, error) {
 			// -trimpath so the binary's bytes (and therefore the
 			// sha256 the discharge report records for it) do not
 			// depend on where this checkout lives. W5.1.
-			cmd := exec.Command("go", "build", "-trimpath", "-o", outPath, ".")
+			cmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", outPath, ".")
 			cmd.Dir = srcDir
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {

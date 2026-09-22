@@ -137,7 +137,7 @@ run_go_emitter() {
     if [ -z "$shengen" ]; then
         if [ -f "$REPO_ROOT/cmd/shengen/main.go" ]; then
             mkdir -p bin
-            (cd "$REPO_ROOT/cmd/shengen" && go build -trimpath -o "$REPO_ROOT/bin/shengen" .) 2>/dev/null
+            (cd "$REPO_ROOT/cmd/shengen" && go build -trimpath -buildvcs=false -o "$REPO_ROOT/bin/shengen" .) 2>/dev/null
             shengen="$REPO_ROOT/bin/shengen"
         fi
     fi

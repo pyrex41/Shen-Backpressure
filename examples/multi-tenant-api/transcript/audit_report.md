@@ -1,8 +1,8 @@
 # Discharge Report — Audit Rendering
 
-Generated 2026-09-22T04:51:24Z. Source artifact: `transcript/discharge_report.json` (schema_version=1).
+Generated 2026-09-22T04:53:15Z. Source artifact: `transcript/discharge_report.json` (schema_version=1).
 
-**Implementation commit:** `65a24daad14dd78f13886c4a6f376aeef1febc25` (working tree dirty)
+**Implementation commit:** `db919d64e3aa7d9c1afb8993149390868602eeef` (working tree dirty)
 
 **Spec files:**
 
@@ -26,7 +26,7 @@ Generated 2026-09-22T04:51:24Z. Source artifact: `transcript/discharge_report.js
 | Go | `go1.24.7` |
 | platform | `linux/amd64` |
 | shengen | `shengen 0.3.0` |
-| shengen sha256 | `7befa4e04aae02284ef53274876dfd6401e38c9aa6ef6196c76debf8c169259b` |
+| shengen sha256 | `4a7d38acf282002e50cc85431a73e838edb0e659514e6a26943b85858b106088` |
 | scip-go | `0.2.7` |
 | scip-typescript | `0.4.0` |
 

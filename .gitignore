@@ -54,3 +54,7 @@ __pycache__/
 # Node.js
 node_modules/
 dist/
+
+# Locally-built emitter binaries inside examples (bin/shengen is
+# rebuilt on demand by each example's codegen script).
+examples/*/bin/shengen

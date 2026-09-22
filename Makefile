@@ -26,12 +26,14 @@ check-skilldata:
 	@diff -qr sb/ cmd/sb/skilldata/ && echo "skilldata in sync" || \
 	  (echo "skilldata drift — run 'make sync-skilldata'" && exit 1)
 
-# -trimpath keeps the build path out of the binary, so the same source
-# and toolchain produce the same bytes from any checkout location. The
+# -trimpath keeps the build path out of the binary and -buildvcs=false
+# keeps the revision stamp out of it, so the same source and toolchain
+# produce the same bytes from any checkout, tracked or not. The
 # discharge report's toolchain block records the shengen binary's
-# sha256, and without -trimpath that hash would depend on where the
-# repo happens to live. See docs/TRUST-MODEL.md (W5.1).
-GOFLAGS_REPRO := -trimpath
+# sha256; without both flags that hash would change every time the repo
+# moved or anyone made a commit, which would make it useless as an
+# identifier for the emitter. See docs/TRUST-MODEL.md (W5.1).
+GOFLAGS_REPRO := -trimpath -buildvcs=false
 
 build-sb: sync-skilldata
 	cd cmd/sb && go build $(GOFLAGS_REPRO) -o ../../bin/sb .

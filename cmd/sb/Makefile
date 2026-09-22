@@ -4,7 +4,7 @@
 
 # Build the sb binary (syncs skills first)
 build: sync-skills
-	go build -trimpath -o ../../bin/sb .
+	go build -trimpath -buildvcs=false -o ../../bin/sb .
 
 # Sync sb/ skill bundle → cmd/sb/skilldata/ for go:embed
 sync-skills:
