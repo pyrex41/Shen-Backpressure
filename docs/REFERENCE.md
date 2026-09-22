@@ -37,6 +37,7 @@ The five-gate shape is fixed; additional gates are declared in the
 | `command` (default) | the shell | the command to run; a non-zero exit fails the gate |
 | `derive` | `sb derive` | ignored — auto-appended when `[[derive.specs]]` is present |
 | `flow` | `sb flow` | the **fallback** grep, used only when no SCIP indexer is on PATH |
+| `forgery` | `sb forgery` | the legacy regex a `grep-miss-flow-catch` forgery must slip past; empty reuses the `flow` gate's |
 
 ```toml
 [[gates]]
@@ -58,8 +59,153 @@ premises are recorded `unproven` with basis `grep-fallback`. The two
 premise forms, the two engines, and what the indexer costs in TCB
 terms are in [FLOW.md](FLOW.md).
 
+A `forgery` gate runs the project's corpus of programs that try to
+obtain a guard value without its constructor. Every `*.go.bak` under
+the corpus directory declares the outcome it expects in a header line
+the gate reads, and the gate stages it into a scratch package inside
+the project module and runs the check that expectation names:
+
+```go
+// sb-forgery: expect grep-miss-flow-catch
+// sb-forgery-entry: ReadForgedTenant          // runtime outcomes only
+// sb-forgery-replaces: internal/derived/x.go  // derive-catch only
+```
+
+| expectation | the check the gate runs |
+|---|---|
+| `compile-error` | `go build` on the staged package must fail |
+| `runtime-panic` | a generated driver calls the entry point; the program must panic |
+| `runtime-error` | the driver's entry must return a non-nil error |
+| `flow-violation` | it must compile, and `sb flow` over the staged tree must fail |
+| `grep-miss-flow-catch` | the legacy regex must **pass** it *and* `sb flow` must fail it |
+| `derive-catch` | it replaces the named impl file; the committed spec test must fail |
+| `succeeds (documented TCB limit)` | it compiles and runs cleanly, and the corpus says so on purpose |
+
+Any outcome that differs from its declaration fails the gate. A
+forgery that succeeds without the last declaration is a failure: the
+corpus exists so a *new* success shows up as a red build rather than as
+prose nobody re-reads. `grep-miss-flow-catch` is the only expectation
+that compares two gates, and the gate refuses to record it unless the
+regex really does miss it — a forgery both gates catch is not evidence
+that one sees more than the other.
+
+```toml
+[[gates]]
+name = "forgery"
+kind = "forgery"
+run  = "./bin/shenguard-audit.sh --grep-only"
+
+[forgery]
+dir   = "forgeries"                  # default
+stage = "internal/forgery_harness"   # default; removed after every run
+```
+
+`sb forgery -markdown` renders the corpus as a table whose outcome
+column is measured rather than recorded, and `sb forgery -only <sub>`
+runs one entry.
+
 Gates sharing a non-empty `parallel_group` run concurrently;
 everything else runs in declared order.
+
+## `sb mutate` — gate strength
+
+`sb mutate` is a measurement, not a gate. For each `[[derive.specs]]`
+entry it applies a fixed operator set to the implementation package
+over `go/ast` and, for every mutant, runs *only* the committed spec
+test.
+
+| operator | rewrite |
+|---|---|
+| `cmp-flip` | one comparison to its counterpart (`==`↔`!=`, `<`↔`<=`, `>`↔`>=`) |
+| `off-by-one` | one integer or float literal to itself plus one |
+| `drop-conjunct` | `A && B` → `A && true`, `A || B` → `A || false` |
+| `list-swap` | `xs[0]` → `xs[len(xs)-1]`, `xs[1:]` → `xs[:len(xs)-1]` |
+| `zero-return` | `return <zero values>` as the function's first statement |
+
+The set is small on purpose: large operator sets manufacture equivalent
+mutants, and each one costs an author real time to dismiss.
+
+Outcomes are `caught`, `survived`, `equivalent` and `invalid`. The
+score is `caught / (caught + survived)`. Two classification rules are
+worth stating because each is a way a kill rate can be quietly
+inflated:
+
+- A mutant the compiler rejects is `invalid`, not caught. A build error
+  is evidence about Go, not about the test.
+- A mutant that times out **is** caught. The test's verdict on it was
+  still "not this implementation".
+
+An equivalent mutant is one no test could kill. Only the author may
+declare one, keyed by a stable id that is computed against the
+committed file so it survives unrelated edits elsewhere:
+
+```toml
+[derive.mutation]
+timeout    = "60s"
+equivalent = [
+  "off-by-one:internal/derived/x.go:12:20",  # bound is exclusive either way
+]
+```
+
+The score lands in the discharge report under a new top-level
+`evidence` object — additive and `omitempty`, so `schema_version` does
+not move and a project that never runs `sb mutate` emits the same bytes
+it did before — and `sb audit-report` renders it as a **Gate Strength**
+section that leads with the kill rate and lists every survivor with its
+location. The section is omitted entirely when nothing has been
+measured: a table of zeros reads as a bad score when the truth is that
+nobody looked.
+
+A spec whose `lang` is not `go` is recorded as a `gaps` entry rather
+than skipped silently; the operator set is implemented over `go/ast`
+only.
+
+## `sb loop --falsify`
+
+After an iteration in which every gate passes, `--falsify` runs a
+second phase. Its prompt (`sb/FALSIFIER_PROMPT.md`, overridable per
+project at `prompts/falsifier_prompt.md`) is hydrated with the spec,
+the generated guards, the current forgery corpus and the mutation
+survivors, and asks for exactly one of:
+
+- **a new forgery** written to the corpus with a declared expectation,
+  which `sb forgery` runs immediately; or
+- **one input where the spec and the implementation disagree**,
+  appended to `.sb/falsifier-samples.json`.
+
+That file carries *inputs*, never expected outputs. shen-derive reads
+it as a fourth sample source (behind `--falsifier-samples`, which `sb
+derive` passes whenever the file exists) and derives each expectation
+from the spec's own evaluator. So a right claim becomes a failing test
+with a counterexample, and a wrong one becomes an ordinary passing
+sample — the falsifier cannot make the suite wrong by being wrong, only
+by being uninteresting.
+
+```json
+{
+  "schema_version": 1,
+  "samples": [
+    {
+      "spec": "processable",
+      "note": "boundary: the running balance lands exactly on zero",
+      "args": [7, [{"amount": 7, "from": "a", "to": "b"}]]
+    }
+  ]
+}
+```
+
+Arguments are decoded against each parameter's Shen type: a scalar for
+a `number`/`string`/`boolean` or for a wrapper datatype, a JSON array
+for `(list T)`, and either a field-ordered array or a name-keyed object
+for a composite. A malformed entry warns and names itself rather than
+failing the gate; a newer `schema_version` is an error, because reading
+it partially would make the gate quietly weaker.
+
+`sb loop --falsify-prompt` prints the hydrated prompt and calls no
+harness; `--falsify-only` runs the phase once against the current tree.
+
+Gate kinds and the loop share one harness command, so a project that
+configured `[loop] harness` has configured both phases.
 
 ## The Codegen Bridge (shengen)
 

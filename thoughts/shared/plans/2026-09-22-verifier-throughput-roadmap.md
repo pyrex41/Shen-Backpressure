@@ -381,6 +381,91 @@ Estimated 4 weeks.
 
 ## W4. Falsifier agent and gate strength
 
+### Status (W4 implemented; TypeScript operators deferred)
+
+Steps 1–5 are done. The forgery gate, `sb mutate`, and
+`sb loop --falsify` all ship; the TypeScript half of step 1 is
+deliberately not implemented.
+
+| Step | State |
+|------|-------|
+| 1. `cmd/sb/mutate.go`, five operators over `go/ast` | done |
+| 1b. TypeScript operators via the compiler API | **DEFERRED** (see gaps) |
+| 2. `evidence.mutation_score` + audit-report "Gate strength" | done |
+| 3. Gate kind `forgery`; `bypass_attempts/` migrated | done |
+| 4. `sb loop --falsify` + `sb/FALSIFIER_PROMPT.md` | done |
+| 5. Run on both examples; publish the first kill rate | done |
+
+**First published kill rates.**
+
+| Example | Spec / impl | Score | Mutants | Forgery corpus |
+|---|---|---|---|---|
+| payment | `processable` / `Processable` | 100% | 3 caught, 0 survived, 0 equivalent, 0 invalid | 3/3 as declared, 0 succeeding |
+| multi-tenant-api | `same-user?` / `SameUser` | 100% | 2 caught, 0 survived, 0 equivalent, 0 invalid | 9/9 as declared, 1 succeeding |
+
+Both implementations are a handful of lines, so the operator set has
+few sites to act on and a small mutant count is a weak measurement even
+at a perfect rate. The value of publishing it now is the baseline, and
+the number worth watching is what happens to it as the implementations
+grow. There were no survivors, so no samples were added and the
+`[derive.mutation] equivalent` list stays empty in both examples.
+
+**What the forgery gate verifies end to end**, which is the part W3
+left to review. Every expectation in the closed set is exercised by at
+least one corpus entry, and all of them were measured, not asserted:
+
+| Expectation | Entry | Was previously checked by |
+|---|---|---|
+| `compile-error` | multi-tenant 01, 06, 07 | a doc comment |
+| `runtime-error` | multi-tenant 02 | a doc comment |
+| `runtime-panic` | multi-tenant 09 (new) | nothing — attempt 06 stops at the compiler |
+| `flow-violation` | multi-tenant 04, 05 | **review only** (W3 step 5 gap) |
+| `grep-miss-flow-catch` | multi-tenant 08 | **review only** (W3 step 5 gap) |
+| `derive-catch` | payment bug1, bug2, bug3 | `demo-shen-derive/run.sh`, run by hand |
+| `succeeds (documented TCB limit)` | multi-tenant 03 | a doc comment |
+
+Two corpus repairs fell out of standing the claims up. Attempt 08 had
+stopped compiling under W1 — it names generic guard types without a
+brand — so the gate it was written to demonstrate had never actually
+run against it; it now threads a brand and verifiably passes
+`bin/shenguard-audit.sh --grep-only` while failing `sb flow`. Attempt
+03 claimed `unsafe` fully defeats the structural guarantee but did not
+mint the W1 witness, so the forgery it built would in fact have panicked
+on first read; it now writes the witness bool through `unsafe` too,
+which is the honest version of that limit.
+
+Gaps recorded at implementation time:
+
+- **TypeScript operators are not implemented.** `cmd/shengen-ts` does
+  carry `typescript` in `devDependencies`, which is the condition the
+  plan set — but no example has a Go-side `[[derive.specs]]` entry in
+  TypeScript to measure against, and the environment has no
+  `node_modules` for `examples/shen-web-tools`, so a second
+  implementation of the operator set could not be run even once. An
+  unverifiable implementation is worth less than a recorded gap.
+  `sb mutate` makes the gap loud rather than silent: a spec whose
+  `lang` is not `go` produces a `gaps` entry in the report and a `GAP:`
+  line on stderr instead of being skipped.
+- **The falsifier phase is wired but has never been run against a live
+  model** in this environment. Prompt hydration, corpus ingestion and
+  the sample append are unit-tested with fixtures, and the sample
+  source is verified end to end on payment with a hand-written entry
+  (decoded through the composite `transaction`, evaluated by the spec to
+  `true`, emitted with its provenance and note). What is untested is
+  whether a model given this prompt finds anything.
+- **`sb mutate` is not wired into `sb gates`.** A survivor is news, not
+  a build break — the right response is usually a new sample rather
+  than a revert — and a per-mutant test run is too slow for every
+  iteration. It is run on demand and its result is carried in the
+  report.
+- The `guard-brand-bound` discharge basis from W1's acceptance
+  criteria is still absent. Refreshing the transcripts here did not
+  add it: the W1 status note defers it pending a schema-level
+  decision, and a transcript refresh is the wrong place to take one.
+- Mutants are generated per-file and evaluated one at a time with no
+  parallelism. Fine at 3 and 2 mutants; it will need attention before
+  it is fine at 300.
+
 ### Goal
 
 Turn `bypass_attempts/` from a hand-written demo into a measured,
