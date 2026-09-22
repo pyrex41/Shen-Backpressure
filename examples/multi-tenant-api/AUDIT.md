@@ -45,28 +45,83 @@ Three integration tests cover the chain:
 
 ## Auditor steps
 
-### 1. Verify the spec hash matches the committed file
+### 1. Re-derive the committed report
 
 ```bash
 cd examples/multi-tenant-api
+sb verify-report --in transcript/discharge_report.json
+```
+
+This is the first step because it does mechanically, and more
+thoroughly, what a reviewer used to do by hand. It re-hashes the
+spec, re-runs shengen and diffs the output against the committed
+`internal/shenguard/guards_gen.go` **byte for byte**, resolves every
+code reference the report cites, re-runs the committed sample tests,
+re-evaluates the three flow premises from a **freshly built** SCIP
+index rather than the `.sb/` cache, and compares the toolchain block
+against the binaries you have.
+
+It invokes no model and touches no network: the producer needed a
+model, a solver and a loop; you need none of them. That asymmetry is
+the point.
+
+Read the outcome column, not just the exit status:
+
+- `PASS` — re-derived here, now, from the committed artifacts.
+- `UNVERIFIED` — *not re-derived*, because a tool was missing. It is
+  not a pass and it is not a failure; add `--strict` if your pipeline
+  should insist.
+- `FAIL` — the report's claim does not hold. The output names the
+  premise IDs that lost their basis.
+
+To satisfy yourself the check is real rather than decorative, break
+something and watch it fail:
+
+```bash
+# one byte in the generated guards file
+sed -i 's/type TenantId struct {/type TenantId struct  {/' internal/shenguard/guards_gen.go
+sb verify-report --in transcript/discharge_report.json   # FAIL, names every static premise
+git checkout internal/shenguard/guards_gen.go
+```
+
+If the report carries a signature, add `--require-sig` to refuse an
+unsigned or badly-signed one. A signature says *who produced this
+report*; the re-derivation above says *whether it is true*. Neither
+substitutes for the other.
+
+### 1b. Verify the spec hash by hand (optional)
+
+```bash
 sha256sum specs/core.shen
 ```
 
-Compare the value to `spec.files[].sha256` in
-`transcript/discharge_report.json` and `transcript/audit_report.md`.
-If they disagree, the artifact is stale — re-run gates before
-continuing.
+Compare to `spec.files[].sha256` in
+`transcript/discharge_report.json`. `verify-report` already does
+this; the manual form is here for a reviewer who wants to see the
+number with their own eyes.
 
 ### 2. Read the rendered audit report
 
 Open `transcript/audit_report.md`. It contains:
 
 - **Spec hash and git commit** the report was produced against
-- **Per-rule discharge tables** classifying each premise as
-  `static`, `runtime-sample`, or `unproven` with code references
-  back into the impl
+- **Per-rule discharge tables** carrying each premise's `precision`
+  (`static` > `path-cover` > `sampled` > `runtime` > `unproven`), its
+  discharge classification, its basis, and code references back into
+  the impl. The whole authorization chain — `verified-jwt` →
+  `authenticated-user` → `human-principal` / `service-principal` →
+  `tenant-access` → `resource-access` — now carries
+  `guard-brand-bound`: each proof is bound by a phantom brand to the
+  specific JWT it came from, so a `TenantAccess` from one chain
+  cannot be paired with a `ResourceAccess` from another.
 - **Counter-examples** for any violated premise (empty for the
-  canonical pass case)
+  canonical pass case), each naming a blamed party — a flow violation
+  blames `impl` with basis `flow-analysis`, because the handler that
+  reaches the sink without the proof is implementation code
+- A **Toolchain** section naming the Go version, the shengen binary's
+  sha256, and the SCIP indexer versions the flow gate used
+- A **Signature** status line, and a **"How to Verify This Report"**
+  section that is literally the command in step 1
 - **`discharged_since_commit`** per rule — how stable each invariant
   has been across the project's history
 - The canonical discharge-category glossary in the appendix

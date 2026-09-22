@@ -24,17 +24,60 @@ The invariant is encoded twice:
 
 ## Auditor steps
 
-### 1. Verify the spec hash matches the committed file
+### 1. Re-derive the committed report
 
 ```bash
 cd examples/payment
+sb verify-report --in transcript/discharge_report.json
+```
+
+This is the first step because it does mechanically, and more
+thoroughly, what a reviewer used to do by hand. It re-hashes the
+spec, re-runs shengen and diffs the output against the committed
+`internal/shenguard/guards_gen.go` **byte for byte**, resolves every
+code reference the report cites, re-runs the committed sample tests,
+re-checks the path-cover counters against the committed test
+header when `z3` is present, and compares the toolchain block
+against the binaries you have.
+
+It invokes no model and touches no network: the producer needed a
+model, a solver and a loop; you need none of them. That asymmetry is
+the point.
+
+Read the outcome column, not just the exit status:
+
+- `PASS` — re-derived here, now, from the committed artifacts.
+- `UNVERIFIED` — *not re-derived*, because a tool was missing. It is
+  not a pass and it is not a failure; add `--strict` if your pipeline
+  should insist.
+- `FAIL` — the report's claim does not hold. The output names the
+  premise IDs that lost their basis.
+
+To satisfy yourself the check is real rather than decorative, break
+something and watch it fail:
+
+```bash
+# one byte in the generated guards file
+sed -i 's/type AccountId struct {/type AccountId struct  {/' internal/shenguard/guards_gen.go
+sb verify-report --in transcript/discharge_report.json   # FAIL, names every static premise
+git checkout internal/shenguard/guards_gen.go
+```
+
+If the report carries a signature, add `--require-sig` to refuse an
+unsigned or badly-signed one. A signature says *who produced this
+report*; the re-derivation above says *whether it is true*. Neither
+substitutes for the other.
+
+### 1b. Verify the spec hash by hand (optional)
+
+```bash
 sha256sum specs/core.shen
 ```
 
-Compare the output to the `spec.files[].sha256` field in
-`transcript/discharge_report.json` and `transcript/audit_report.md`.
-If they disagree, the committed audit artifact is stale relative to
-the spec — re-run gates before continuing.
+Compare to `spec.files[].sha256` in
+`transcript/discharge_report.json`. `verify-report` already does
+this; the manual form is here for a reviewer who wants to see the
+number with their own eyes.
 
 ### 2. Read the rendered audit report
 
@@ -42,12 +85,24 @@ Open `transcript/audit_report.md`. The file is committed and
 viewable directly on GitHub. It contains:
 
 - **Spec hash and git commit** the report was produced against
-- **Per-rule discharge tables** showing each premise's
-  classification (`static` / `runtime-sample` / `unproven`) and the
-  basis for the classification
+- **Per-rule discharge tables** showing each premise's `precision`
+  (`static` > `path-cover` > `sampled` > `runtime` > `unproven`), its
+  discharge classification, and the basis. `safe-transfer`'s two
+  premises carry `guard-brand-bound`: the generic constructor
+  `NewSafeTransfer[B]` will not accept a balance proof minted for a
+  different transaction, so the premise is discharged by proof
+  binding rather than merely by type.
 - **Counter-examples** for any failed premise (with `case_id`,
-  `spec_output`, `impl_output`, and a ready-to-paste
-  `go test -run …` reproducer)
+  `spec_output`, `impl_output`, a **blamed party**, and a
+  ready-to-paste `go test -run …` reproducer). Read `blame_basis`
+  before acting on `blame`: with no Shen host installed, an
+  `evaluator-only` basis means a lowering bug would have produced the
+  same evidence as an implementation bug.
+- A **Toolchain** section naming the Go version, the shengen binary's
+  sha256, and z3 — the guards file is a pure function of the spec
+  bytes and that binary
+- A **Signature** status line, and a **"How to Verify This Report"**
+  section that is literally the command in step 1
 - **`discharged_since_commit`** per rule — the earliest commit in
   `.sb/history/` at which this invariant was discharged in the same
   category. The audit answer to "how long has this invariant held?"

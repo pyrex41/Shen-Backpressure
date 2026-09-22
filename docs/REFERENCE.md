@@ -242,6 +242,99 @@ The full `sb gates` topology for this example is 13 gates
 and the known emitter-coverage gaps (Go skips free-standing defines;
 TS has a `where`-on-last-clause parser bug).
 
+## Certificates: `sb verify-report` and `sb sign-report`
+
+A discharge report is only worth what an independent reader can check
+in it. Two commands close that gap.
+
+### `sb verify-report`
+
+```
+sb verify-report [--in PATH] [--require-sig] [--strict] [--skip-tests]
+                 [--cosign-identity ID] [--cosign-issuer URL]
+```
+
+Re-derives a committed report's claims from the committed artifacts.
+Never invokes a model; never touches the network.
+
+| Check | What it re-derives |
+|---|---|
+| spec hashes | every spec the report names still hashes to the recorded sha256 |
+| static discharges | shengen is re-run and diffed **byte for byte** against the committed guards file |
+| code references | every `file:line`, and every `file:NewConstructor`, resolves |
+| sampled evidence | the committed shen-derive tests are re-run |
+| path cover | the report's counters match the committed test header (needs `z3`) |
+| flow premises | re-evaluated from a **freshly built** index, never the `.sb/` cache |
+| toolchain | compared against the binaries present now |
+| signature | with `--require-sig` |
+
+Outcomes are `PASS`, `FAIL`, `UNVERIFIED` and `SKIP`. `UNVERIFIED`
+means the tool needed to re-derive that claim was not present — a
+weaker statement than `PASS` and a *different* one from `FAIL`. Only
+`FAIL` sets a non-zero exit status, and the failure names the premise
+IDs that lost their basis. `--strict` promotes `UNVERIFIED` to a
+failure.
+
+Every `sb audit-report` rendering ends with a "How to Verify This
+Report" section containing this exact command for that report.
+
+### `sb sign-report`
+
+```
+sb sign-report [--in PATH] [--out PATH] [--key PATH] [--generate-key] [--cosign]
+```
+
+Fills the report's reserved `signature` field. The default is ed25519
+from the Go standard library with a key file (`sb sign-report
+--generate-key` writes the gitignored `.sb/signing-key.json`), so a
+report can be signed and checked offline. `--cosign` shells out to a
+`cosign` binary for keyless signing; cosign is never a Go dependency
+of `sb`.
+
+The signature covers `sb-canonical-json-v1`: the document with its own
+`signature` member removed, object keys sorted, no insignificant
+whitespace, numbers preserved exactly as written. Re-indenting a
+report does not break its signature; changing one claim does. See
+`docs/TRUST-MODEL.md` for the canonicalization rules in full and for
+what a signature does and does not move inside the trust boundary.
+
+### Reproducible generation
+
+`sb gen` is a pure function of the spec bytes and the shengen binary:
+
+- the generated header records the spec path relative to the spec's
+  own project root (nearest `sb.toml`/`go.mod`/`package.json`/
+  `Cargo.toml`/`.git`), not to the caller's cwd, so the same spec
+  yields byte-identical output from any directory;
+- every build of `sb` and `shengen` passes `-trimpath -buildvcs=false`,
+  so the binary's bytes depend on neither the checkout location nor
+  the commit;
+- the Go toolchain is pinned by a `toolchain` directive in each
+  module's `go.mod`.
+
+The report's `toolchain` block records the Go version, the platform,
+the shengen version and sha256, the z3 version when path cover ran,
+and each SCIP indexer version when flow premises were evaluated.
+
+### Precision and blame
+
+Every premise carries a `precision` on the total order `static >
+path-cover > sampled > runtime > unproven`, and every counter-example
+carries a `blame` in `{spec, impl, wrapper, lowering}` with a
+`blame_basis` recording how the assignment was reached. `sb context`
+leads its discharge section with the blamed party — the single most
+useful bit for the next prompt. The vocabulary is defined in
+`docs/TRUST-MODEL.md`.
+
+### `shengen --brand-table`
+
+Writes W1's inferred brand table as JSON. `sb derive` feeds it to
+shen-derive, which upgrades every premise the inference pairs from
+`guard-type-at-boundary` to `guard-brand-bound` and records the
+generic constructor signature (`SafeTransfer[B]`) that does the
+pairing. The table names, per type, exactly which premise indices are
+brand-bound, so the report never has to re-implement brand inference.
+
 ## Design Decisions
 
 - **Why shengen?** Shen proves invariants deductively but doesn't
@@ -266,6 +359,18 @@ TS has a `where`-on-last-clause parser bug).
 - **Why Shen over Coq/Lean/Agda?** Turing-complete, Lisp syntax that
   LLMs handle well, runs as a subprocess, sequent-calculus type
   rules map cleanly to constructor preconditions.
+- **Why re-derive rather than trust the report?** Producing a report
+  takes a model, a solver, an indexer and a loop; checking one takes
+  none of them. That asymmetry is what makes a certificate worth
+  having, and it only holds if checking is genuinely independent —
+  hence `verify-report` builds a fresh index rather than reading the
+  cache, and re-runs the emitter rather than reading a recorded hash.
+- **Why ed25519 with a key file as the signing default, not cosign?**
+  Keyless signing needs an OIDC token, a Fulcio certificate and a
+  Rekor entry, none of which an air-gapped verifier can obtain. The
+  default has to be checkable everywhere the report can be read;
+  cosign is the opt-in for pipelines that already have the identity,
+  and it stays a subprocess so `sb` keeps its stdlib-only build.
 - **Why a checked-in skilldata mirror?** Embedding the canonical
   `sb/` tree at build time means a fresh clone embeds the right
   bundle without `make` first; CI catches drift via

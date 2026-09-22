@@ -15,6 +15,7 @@
 - [What's assumed (the TCB)](#whats-assumed-the-tcb)
 - [What this project does NOT claim](#what-this-project-does-not-claim)
 - [When to use this](#when-to-use-this)
+- [Certificates: verifying a report yourself](#certificates-verifying-a-report-yourself)
 - [Glossary: discharge categories](#glossary-discharge-categories)
 - [Worked example: the multi-tenant JWT chain](#worked-example-the-multi-tenant-jwt-chain)
 - [Reviewer workflow](#reviewer-workflow)
@@ -417,7 +418,16 @@ a fresh emitter run. See [Proof binding: GDP
 brands](#proof-binding-gdp-brands) for what the panic does and does not
 buy.
 
-### 8. Your build pipeline
+### 9. The report signer's key (only when signing is used)
+
+A signature adds the signer's key management to the TCB. A compromised
+key produces valid signatures over false reports. It does **not** add
+anything to the TCB for a reader who runs `sb verify-report` without
+`--require-sig`: verification re-derives the claims from the committed
+artifacts and never consults a key. See [Certificates: verifying a
+report yourself](#certificates-verifying-a-report-yourself).
+
+### 10. Your build pipeline
 
 If a CI step runs `sb gen` and uploads the result without first
 running `tcb-audit`, the published binary may contain
@@ -491,6 +501,130 @@ It is **less valuable** when:
 - You need a third-party-attested certification rather than a
   self-produced verification artifact.
 
+## Certificates: verifying a report yourself
+
+Everything above asks you to trust a document this project produced.
+This section is about not having to.
+
+### The asymmetry
+
+Producing a discharge report takes a model, a solver, an indexer, and
+a loop. Checking one takes none of them. That gap is the whole point
+of a certificate: the expensive party does the work, and anybody can
+check it cheaply and independently.
+
+```sh
+cd examples/payment
+sb verify-report --in transcript/discharge_report.json
+```
+
+That command re-derives every claim in the report from the committed
+artifacts alone. It never invokes a model, never touches the network,
+and reads nothing outside the repository it is standing in. It:
+
+- re-hashes every spec the report names;
+- re-runs shengen on the spec and diffs the output against the
+  committed guards file, **byte for byte**;
+- resolves every `file:line` (and every `file:NewConstructor`) a
+  premise cites;
+- re-runs the committed sample tests;
+- re-checks the path-cover counters against the committed test
+  header, when `z3` is present;
+- re-evaluates the flow premises from a **freshly built** index —
+  never a cached one, because a cache is an artifact of a previous
+  run and the point is to trust nothing a previous run left behind.
+
+A check it cannot re-derive is reported `UNVERIFIED`, not `PASS`.
+That distinction is load-bearing: a missing `z3` means a claim *was
+not checked here*, which is a different statement from *the claim is
+false*, and collapsing the two would make the verifier lie in the
+comfortable direction. `--strict` turns `UNVERIFIED` into a failure
+for pipelines that want to insist on the full set of tools.
+
+When a check fails, it names the premises that lost their basis.
+Tamper with one byte of a guards file and every premise whose
+evidence was that file is listed by ID.
+
+### Reproducibility
+
+`sb gen` is a pure function of the spec bytes and the shengen
+binary — which is only a checkable claim if "the shengen binary" is
+pinned. Three things make it so:
+
+1. The generated header records the spec path relative to the spec's
+   own project root, not to the caller's working directory. Before
+   W5, running the emitter from the repository root and from the
+   example directory produced two different first lines for the same
+   spec.
+2. Every build of `sb` and `shengen` passes `-trimpath -buildvcs=false`.
+   Without the first, the binary's bytes depend on where the checkout
+   lives; without the second, on which commit is checked out. Either
+   would turn the recorded hash into a timestamp.
+3. The Go toolchain is pinned with a `toolchain` directive in
+   `cmd/sb/go.mod`, `cmd/shengen/go.mod` and `shen-derive/go.mod`.
+
+The report's `toolchain` block records the result: the Go version,
+the platform, the shengen version **and its sha256**, the z3 version
+when path cover ran, and each SCIP indexer version when flow premises
+were evaluated. `verify-report` compares them and reports any
+difference — as a note, not a failure. A report verified under a newer
+Go is not thereby wrong, and refusing it would be theatre.
+
+### Signing, and what it moves inside the trust boundary
+
+`sb sign-report` fills the report's `signature` field. Two modes:
+
+- **ed25519 with a key file** (the default). Standard library only,
+  no network, no registry, no daemon. `sb sign-report --generate-key`
+  writes `.sb/signing-key.json`, which is gitignored — publish the
+  public half, keep the private half off the network. A report signed
+  this way can be produced and checked on an air-gapped machine.
+- **`--cosign`** (documented, opt-in). Shells out to a `cosign`
+  binary for keyless signing, so the signer is the ambient CI
+  identity rather than a key someone must rotate. cosign is **not** a
+  Go dependency of `sb`: it is a subprocess, and its absence is
+  reported rather than worked around. Verification then requires
+  `--cosign-identity` and `--cosign-issuer`, because a keyless
+  signature from *somebody* proves nothing — anyone with an OIDC
+  account can make one, and only you can say whose you expect.
+
+**What is signed.** Not the file: the canonical byte derivation
+`sb-canonical-json-v1`, defined in `cmd/sb/canonical.go`:
+
+1. Parse the report as generic JSON, so whitespace and key order in
+   the file stop mattering.
+2. **Delete the top-level `signature` member.** This is what makes
+   the signature a fixed point: the signer hashes an unsigned
+   document, writes the signature into it, and the verifier —
+   holding the signed document — recomputes the same bytes by
+   removing it again.
+3. Re-encode with object keys sorted by UTF-8 code point, no
+   insignificant whitespace, HTML escaping off, and numbers written
+   exactly as the document carried them (no float round trip).
+
+Array order *is* significant and is preserved: arrays are data, not
+key/value pairs. The scheme's name is stored inside every signature,
+so a future change to the rules is distinguishable from a bad
+signature rather than indistinguishable from one.
+
+This is deliberately not RFC 8785 (JCS). JCS re-serialises numbers
+through the ECMAScript algorithm, which would mean hand-rolling a
+float formatter; preserving the source digits is both simpler and
+stricter.
+
+**The trust boundary a signature moves.** A valid signature says:
+*the holder of this key asserts that this document came out of their
+pipeline.* It adds the signer's key management to the TCB — a
+compromised key produces valid signatures over false reports. It says
+nothing whatever about whether the claims hold.
+
+That is why signing and verification are independent commands, and
+why `verify-report` re-derives the claims whether or not a signature
+is present. `--require-sig` combines them: refuse a report nobody
+vouched for, *and* re-derive what it says. Neither check subsumes the
+other, and a pipeline that runs only the signature check has bought
+provenance and no verification at all.
+
 ## Glossary: discharge categories
 
 The discharge report (`discharge_report.json`) classifies every
@@ -503,8 +637,52 @@ maps the schema strings to plain English:
 | `runtime-sample` | The Shen `(define …)` block was evaluated as an oracle on a deterministic boundary pool plus optional seeded random draws, and the hand-written implementation matched on every sampled input. **Sampled evidence, not exhaustive.** | shen-derive generated a `go test` (or TS test) file pinning the implementation; the test was run and passed. |
 | `unproven` | The tool could not classify the premise in this release. Treat the premise as outside the verified boundary. | Nothing. The premise is named in the spec but not discharged by either of the above mechanisms. |
 
-The schema reserves `runtime-assertion` and `prover` for future use;
-v1 emits only the three above.
+`guard-brand-bound` is a fourth static basis, emitted when W1's brand
+inference pairs the premise with its conclusion through a shared
+phantom brand. It is the narrower, stronger claim: not "a proof of the
+right type" but "a proof about the right *subject*". The premise also
+records the generic constructor signature (`SafeTransfer[B]`) that
+does the pairing. See [Proof binding: GDP
+brands](#proof-binding-gdp-brands).
+
+### Precision and blame
+
+Each premise additionally carries a `precision` on a **total order**,
+strongest first:
+
+| Precision | Means |
+|---|---|
+| `static` | The compiler refuses to build a violating program. Nothing has to run. |
+| `path-cover` | A solver found a concrete witness for every feasible path of the spec at the configured unroll depth, and the impl agreed on each. Bounded, but nothing inside the bound went unexercised. |
+| `sampled` | The impl agreed with the spec on a deterministic pool of inputs. Evidence, not proof. |
+| `runtime` | The check runs in production, on the value actually in hand. Strong about that value; silent about every value the program never sees. |
+| `unproven` | Nothing was established. |
+
+Precision is *derived* from the discharge and basis rather than
+supplied separately, so it cannot contradict them, and an unrecognised
+value ranks below `unproven` — a report may understate its evidence,
+never overstate it. `sb audit-report` states the weakest precision
+anywhere in the document, because a chain of reasoning is only as
+strong as its weakest link.
+
+Each counter-example carries a `blame` naming one responsible party,
+and a `blame_basis` saying how the assignment was reached:
+
+| Blame | Assigned when |
+|---|---|
+| `spec` | The rule is vacuous — its datatype is uninhabited, so it proves nothing while looking like it proves everything. |
+| `impl` | The implementation disagrees with a spec both oracles read the same way. |
+| `wrapper` | A `:runtime-via` checker, or the generated wrapper around it, failed. The spec and the impl may both be right; the composition is not. |
+| `lowering` | The spec's Go evaluator and the Shen host disagree about what the spec *means*. Neither the spec author nor the implementer is at fault: the translation is. |
+
+**Read `blame_basis` before acting on `blame`.** With no Shen host
+installed — which is this repository's situation — "the spec says X"
+means "the Go evaluator says X", and a lowering bug produces evidence
+identical to an implementation bug. Those counter-examples are
+recorded as `impl` with `blame_basis: evaluator-only`, which says so
+out loud instead of asserting a confidence nobody has.
+
+The schema reserves `runtime-assertion` and `prover` for future use.
 
 For the canonical glossary inside the engine, see `auditAppendix`
 in `cmd/sb/audit_report.go:277-321` — every rendered `audit_report.md`
@@ -556,9 +734,17 @@ If you are a security reviewer opening this codebase cold:
    `examples/payment/AUDIT.md`,
    `examples/multi-tenant-api/AUDIT.md`,
    `examples/shen-web-tools/AUDIT.md`.
-3. **Verify the spec hash** matches the committed file
-   (`sha256sum specs/core.shen`); the same value appears in
-   `transcript/audit_report.md`'s `spec.files[].sha256`.
+3. **Re-derive the whole report** rather than spot-checking it:
+
+   ```sh
+   cd examples/<demo>
+   sb verify-report --in transcript/discharge_report.json
+   ```
+
+   This subsumes the spec-hash check, the guards-file check, and the
+   sample re-run, and it names any premise that lost its basis. Every
+   `transcript/audit_report.md` ends with this exact command in its
+   "How to Verify This Report" section.
 4. **Read `transcript/audit_report.md`** — the long-form rendering
    of the discharge report. Pay attention to the
    `discharged_since_commit` field: it tells you how stable each
@@ -566,6 +752,9 @@ If you are a security reviewer opening this codebase cold:
 5. **Re-run the gates at the recorded commit** to confirm the
    artifact reproduces:
    `git checkout <commit-from-report> && cd examples/<demo> && sb gates`.
+   Read the report's `toolchain` block first: the guards file is a
+   pure function of the spec bytes and the shengen binary whose
+   sha256 is recorded there.
 6. **Read the TCB.** For each `Check*` wrapper named in [What's
    assumed](#whats-assumed-the-tcb), open the source and read it.
    These are small (10-50 lines each); reading them is the audit.

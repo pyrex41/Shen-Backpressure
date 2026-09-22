@@ -109,10 +109,15 @@ Gaps recorded at implementation time:
   committed TypeScript reference instead.
 - Python and Rust reference emitters are untouched; the plan's `NewType`
   and `PhantomData` lowering is not implemented.
-- The committed `transcript/discharge_report.json` and
+- ~~The committed `transcript/discharge_report.json` and
   `transcript/audit_report.md` are not refreshed, so payment's report
-  does not yet carry a `guard-brand-bound` discharge basis. That needs
-  `sb gates` plus a schema-level decision about the new basis token.
+  does not yet carry a `guard-brand-bound` discharge basis.~~
+  **Closed by W5.4.** The basis token is defined in
+  `shen-derive/report/schema.go`, `shengen --brand-table` exports the
+  inference, and both examples' transcripts are refreshed. Payment's
+  report carries `guard-brand-bound` on `safe-transfer`'s two premises
+  and on `balance-invariant`'s transaction premise; multi-tenant's
+  carries it across the whole authorization chain.
 - shen-derive does not run the brand inference, so its generated
   harness writes unparameterized type names. payment routes the derive
   gate through `internal/guardcompat`, which pins one shared brand; the
@@ -444,6 +449,85 @@ weeks.
 ---
 
 ## W5. Certificates: proof-carrying reports with blame
+
+### Status (W5 implemented)
+
+All five steps are done. `schema_version` stays 1; every field added is
+additive and `omitempty`, and a report carrying none of them marshals
+byte-identically to a pre-W5 one (pinned by
+`TestW5FieldsAreOmittedWhenAbsent`).
+
+| Step | State | Notes |
+|------|-------|-------|
+| 1. Reproducible build settings; `toolchain` block | done | `-trimpath -buildvcs=false` everywhere, `toolchain go1.24.7` pinned in all three `go.mod`s, header nondeterminism fixed |
+| 2. `sb verify-report` | done | 8 checks; `UNVERIFIED` is distinct from `FAIL`; both tamper tests fail naming the premise |
+| 3. Signature via ed25519 key file; `--cosign` mode | done | cosign is a subprocess, not a dependency; `sb-canonical-json-v1` documented |
+| 4. Precision + blame + `guard-brand-bound` | done | `shengen --brand-table` added; payment and multi-tenant reports carry all three |
+| 5. Audit-report renderer + `sb context` blame-first | done | precision column, blame in counter-examples, toolchain + signature sections, verification recipe |
+| 6. Examples refreshed; verified from a clean checkout | done | see the table below |
+
+#### Acceptance results
+
+Verified from a `git archive HEAD` export at `/tmp/clean2` — no `.sb/`
+directory, no git metadata, nothing a previous run left behind:
+
+| Example | `sb verify-report --in transcript/discharge_report.json` | Exit |
+|---|---|---|
+| `examples/payment` | 7 PASS, 1 SKIP (no flow premises), 0 FAIL — including `static discharges` re-deriving `guards_gen.go` byte-identically and `path cover` agreeing with the committed test header | 0 |
+| `examples/multi-tenant-api` | 7 PASS, 1 SKIP (no path-cover premises), 0 FAIL — including 3 flow premises re-evaluated clean from a **freshly built** scip-go index | 0 |
+
+Both runs report `toolchain: re-derived with the same tools the report
+records`, which is only true because `-buildvcs=false` landed: with
+`-trimpath` alone the emitter hashed differently inside and outside a
+git checkout, and the recorded hash was a timestamp rather than an
+identifier. `shengen` now builds to
+`4a7d38acf282002e50cc85431a73e838edb0e659514e6a26943b85858b106088`
+from either tree.
+
+Tamper tests (the plan's second acceptance criterion):
+
+| Tamper | Result |
+|---|---|
+| one byte in `internal/shenguard/guards_gen.go` (`struct {` → `struct  {`) | `FAIL static discharges`, first difference located at line 54, and all 12 static premises listed by ID as having lost their basis |
+| one committed sample flipped (`case_00` `want: true` → `false`) | `FAIL sampled evidence`, with the failing case echoed and `processable.oracle-spec-equiv` named |
+
+New in the reports:
+
+- payment — `guard-brand-bound` on `safe-transfer`'s two premises and
+  on `balance-invariant`'s transaction premise, satisfying **W1's**
+  outstanding acceptance criterion, which had been blocked on "a
+  schema-level decision about the new basis token";
+- multi-tenant — `guard-brand-bound` across the whole authorization
+  chain (6 premises);
+- both — `precision` on every premise, a `toolchain` block, and a
+  "How to Verify This Report" section that is literally the command.
+
+Gaps recorded at implementation time:
+
+- **Blame is `evaluator-only` everywhere**, because no Shen host is
+  installed. The `lowering` blame value is implemented and unit-tested
+  but cannot be produced in this environment: distinguishing a
+  lowering bug from an implementation bug requires a second oracle.
+  Wiring a host makes `AssignBlame` return `evaluator-and-host` (or
+  `lowering`) with no further code change.
+- **Path-cover re-derivation compares counters rather than re-running
+  the solver.** `sb derive` already diffs the committed test file
+  against a fresh regeneration, so re-solving inside `verify-report`
+  would duplicate that work; what it adds is the check that the
+  report and the committed test file are the same document. A z3 that
+  disagreed about *feasibility* while the test file was unchanged
+  would not be caught here — it would be caught by the derive gate.
+- **`--cosign` is implemented but untested end-to-end**: there is no
+  cosign binary and no OIDC identity in this environment. The
+  key-file path is covered by `TestSignAndVerifyRoundTrip`, including
+  the tamper and the re-indent cases.
+- **`shengen-ts` emits no brand table**, so a TypeScript project gets
+  precision and blame but not `guard-brand-bound`. The
+  `shengen_ts_version` field in the toolchain block is reserved and
+  currently unpopulated.
+- The **TypeScript derive path writes no discharge report** at all
+  (pre-existing), so `examples/shen-web-tools` has nothing for
+  `verify-report` to check.
 
 ### Goal
 

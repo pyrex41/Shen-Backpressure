@@ -85,6 +85,20 @@ The artifact is **dual-purpose**:
   Shen-Backpressure: spec hash, git commit, tool versions, per-rule
   premise tables, history, and a "How to read this report"
   appendix.
+- **Independently checkable.** `sb verify-report` re-derives every
+  claim in a committed report from the committed artifacts — it
+  re-runs the emitter and diffs the guards file byte for byte,
+  re-runs the sample tests, and re-evaluates the flow premises from a
+  freshly built index. It invokes no model and touches no network.
+  Producing the report needed a model, a solver and a loop; checking
+  it needs none of them. `sb sign-report` fills the signature field
+  (ed25519 by default, cosign keyless behind a flag) over a
+  documented canonical JSON form.
+- **Failures name a responsible party.** Every premise carries a
+  `precision` on the order `static > path-cover > sampled > runtime >
+  unproven`, and every counter-example a `blame` in `{spec, impl,
+  wrapper, lowering}` with the basis on which it was assigned.
+  `sb context` leads with it.
 
 The schema is locked at `schema_version: 1`
 ([design memo](thoughts/shared/research/2026-05-05-discharge-report-schema.md))
@@ -276,7 +290,7 @@ option when you only want the skills.
 ## Project Structure
 
 ```
-cmd/sb/                  Engine CLI (gen, gates, derive, context, loop, init)
+cmd/sb/                  Engine CLI (gen, gates, derive, context, verify-report, sign-report, loop, init)
 cmd/shengen/             Go codegen (production-wired)
 cmd/shengen-ts/          TypeScript codegen (production-wired, while-loop emission)
 cmd/shengen-py/          Python codegen (reference)
