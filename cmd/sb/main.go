@@ -49,6 +49,8 @@ func main() {
 		cmdIndex(os.Args[2:])
 	case "flow":
 		cmdFlow(os.Args[2:])
+	case "shen-check":
+		cmdShenCheck(os.Args[2:])
 	case "forgery":
 		cmdForgery(os.Args[2:])
 	case "mutate":
@@ -88,6 +90,7 @@ Commands:
   derive    Run spec-equivalence verification
   index     Build the resolved symbol graph (SCIP) for flow premises
   flow      Evaluate (flow ...) premises over the symbol graph
+  shen-check Typecheck the spec in a Shen host (gate 4, tc+, with the intrinsic prelude)
   forgery   Run the forgery corpus and check each declared outcome
   mutate    Measure the behavioral gate's kill rate over a mutant set
   policy   Run Cedar (shen-cedar) + Rego (shen-rego) runtime policy emitters + drift + opa/cedar validate; use --decidable for the Decidable-Shen-fragment (native terminating) tier

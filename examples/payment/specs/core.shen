@@ -49,12 +49,25 @@
 \* --- Derivation targets (consumed by shen-derive, not shengen) --- *\
 
 \* processable: starting from balance B0, is every running balance
-   non-negative after applying each transaction in order? *\
+   non-negative after applying each transaction in order?
+
+   `val` is the `amount` destructor: it takes an `amount` to the
+   `number` it wraps. It is therefore applied to `B0` and to the
+   `amount` field of each transaction, and NOT to the running balances
+   `scanl` produces — those are plain numbers, and the whole point of
+   the predicate is that one of them may be *negative*, which is
+   exactly what an `amount` may not be. Applying `val` to them (as
+   this define did until W6) type-checks in shen-derive's evaluator
+   only because the evaluator binds `val` to the identity function; it
+   is ill-typed under Shen's `tc +`, and gate 4 had never passed on
+   this spec as a result. Removing those two applications changes no
+   evaluated value — see W6 in
+   thoughts/shared/plans/2026-09-22-verifier-throughput-roadmap.md. *\
 
 (define processable
   {amount --> (list transaction) --> boolean}
-  B0 Txs -> (foldr (lambda X (lambda Acc (and (>= (val X) 0) Acc)))
+  B0 Txs -> (foldr (lambda X (lambda Acc (and (>= X 0) Acc)))
               true
-              (scanl (lambda B (lambda Tx (- (val B) (val (amount Tx)))))
+              (scanl (lambda B (lambda Tx (- B (val (amount Tx)))))
                      (val B0)
                      Txs)))

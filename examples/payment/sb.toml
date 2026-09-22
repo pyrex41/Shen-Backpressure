@@ -15,6 +15,14 @@ output = "internal/shenguard/guards_gen.go"
 [engine]
 relaxed = false
 
+# The Shen host for gate 4 (tc+) and for the Shen flow engine (W6).
+# `make shen-go` at the repo root builds the Go port to bin/shen; this
+# line points at it so the gate does not depend on PATH. $SHEN still
+# overrides it. With no host at all, gate 4 skips and the discharge
+# report records tc+ as UNVERIFIED rather than passed.
+[shen]
+bin = "../../bin/shen"
+
 # Gate topology — declared explicitly via the [[gates]] array of
 # tables (Wave-1 manifest format). Same five gates the engine would
 # synthesise from convention defaults; spelling them out here

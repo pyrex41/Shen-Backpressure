@@ -48,6 +48,8 @@ func main() {
 		cmdParse(os.Args[2:])
 	case "verify":
 		cmdVerify(os.Args[2:])
+	case "prelude":
+		cmdPrelude(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Printf("shen-derive %s\n", version)
 	case "help", "--help", "-h":
@@ -68,6 +70,7 @@ Commands:
   eval    <expr>           Evaluate an s-expression
   parse   <spec.shen>      Parse a .shen file and print its structure
   verify  <spec.shen>      Generate a spec-equivalence test (see "verify --help")
+  prelude <spec.shen>      Emit the typed Shen prelude for tc+ (see "prelude --help")
   version                  Print version
 
 The verify command:

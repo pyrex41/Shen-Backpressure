@@ -94,6 +94,11 @@ type Config struct {
 	Audit   string // tcb audit command (gate 5)
 	Relaxed bool   // run test+build in parallel
 
+	// ShenBin is the project's preferred Shen host binary, from
+	// `[shen] bin` in sb.toml. It is the second step of the host
+	// resolution order ($SHEN wins over it); see shenhost.go.
+	ShenBin string
+
 	// Manifest-defined gates (new [[gates]] format). When non-nil the gate
 	// engine uses these instead of synthesising from Gen/Build/Test/Check/Audit.
 	Gates []GateDef
@@ -259,6 +264,9 @@ type tomlConfigNew struct {
 	Engine struct {
 		Relaxed bool `toml:"relaxed"`
 	} `toml:"engine"`
+	Shen struct {
+		Bin string `toml:"bin"`
+	} `toml:"shen"`
 	Gates  []tomlGateDef `toml:"gates"`
 	Derive struct {
 		Dir       string           `toml:"dir"`
@@ -313,6 +321,9 @@ type tomlConfigLegacy struct {
 	Gates struct {
 		Relaxed bool `toml:"relaxed"`
 	} `toml:"gates"`
+	Shen struct {
+		Bin string `toml:"bin"`
+	} `toml:"shen"`
 	Derive struct {
 		Dir       string           `toml:"dir"`
 		PathCover bool             `toml:"path_cover"`
@@ -372,6 +383,7 @@ func LoadConfig() (*Config, error) {
 				tcNew.Commands.Test, tcNew.Commands.ShenCheck, tcNew.Commands.Audit)
 			cfg.Relaxed = tcNew.Engine.Relaxed
 			cfg.Brands = tcNew.Project.Brands
+			cfg.ShenBin = tcNew.Shen.Bin
 
 			cfg.Gates = make([]GateDef, len(tcNew.Gates))
 			for i, g := range tcNew.Gates {
@@ -407,6 +419,7 @@ func LoadConfig() (*Config, error) {
 				tcLegacy.Commands.Test, tcLegacy.Commands.ShenCheck, tcLegacy.Commands.Audit)
 			cfg.Relaxed = tcLegacy.Gates.Relaxed
 			cfg.Brands = tcLegacy.Project.Brands
+			cfg.ShenBin = tcLegacy.Shen.Bin
 
 			applyDerive(cfg, tcLegacy.Derive.Dir, tcLegacy.Derive.PathCover, tcLegacy.Derive.PathDepth, tcLegacy.Derive.Specs)
 			applyMutation(cfg, tcLegacy.Derive.Mutation)

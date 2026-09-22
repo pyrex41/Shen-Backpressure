@@ -8,6 +8,8 @@ demo/*/server
 bin/shengen
 bin/shen-derive
 bin/sb
+# The Shen host `make shen-go` builds (W6). Built, not vendored.
+bin/shen
 cmd/shengen/shengen
 cmd/sb/bin/
 cmd/sb/sb

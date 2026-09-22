@@ -23,6 +23,14 @@ output = "internal/shenguard/guards_gen.go"
 [engine]
 relaxed = false
 
+# The Shen host for gate 4 (tc+) and for the Shen flow engine (W6).
+# `make shen-go` at the repo root builds the Go port to bin/shen; this
+# line points at it so neither gate depends on PATH. $SHEN still
+# overrides it. With no host, gate 4 skips and `sb flow` runs the Go
+# engine alone.
+[shen]
+bin = "../../bin/shen"
+
 [[gates]]
 name = "shengen"
 kind = "command"
