@@ -276,7 +276,7 @@
    The same two premise forms the Go example uses, against a
    TypeScript tree. Nothing in the rule text is language-specific:
    `sb index` runs scip-typescript here instead of scip-go, and the
-   engine sees the same (def …) (ref …) (call …) facts.
+   engine sees the same (def …) (ref …) (calls …) facts.
 
    1. `mustSignedComplete` mints the "this tag block is signed and
       complete" proof. Only the resolver may mint it.

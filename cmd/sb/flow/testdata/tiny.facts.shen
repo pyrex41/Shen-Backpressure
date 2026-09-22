@@ -4,7 +4,7 @@
 
      (def sym file start-line start-col end-line end-col)
      (ref sym file line col enclosing-def-sym)
-     (call caller-sym callee-sym)
+     (calls caller-sym callee-sym)
 
    indexer: scip-go
    language: go
@@ -48,10 +48,10 @@
 (ref "scip-go gomod tiny 6b9dde09b3a9 `tiny/guard`/Access#" "guard/guard.go" 12 24 "scip-go gomod tiny 6b9dde09b3a9 `tiny/guard`/NewAccess().")
 (ref "scip-go gomod tiny 6b9dde09b3a9 `tiny/guard`/Access#" "guard/guard.go" 12 40 "scip-go gomod tiny 6b9dde09b3a9 `tiny/guard`/NewAccess().")
 (ref "scip-go gomod tiny 6b9dde09b3a9 `tiny/guard`/Access#ok." "guard/guard.go" 12 47 "scip-go gomod tiny 6b9dde09b3a9 `tiny/guard`/NewAccess().")
-(call "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/Check()." "scip-go gomod tiny 6b9dde09b3a9 `tiny/guard`/NewAccess().")
-(call "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/ForgeAccess()." "scip-go gomod tiny 6b9dde09b3a9 `tiny/guard`/NewAccess().")
-(call "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/HandleListBad()." "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/readRows().")
-(call "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/HandleListGood()." "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/Check().")
-(call "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/HandleListGood()." "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/readRows().")
-(call "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/HandleListGood()." "scip-go gomod tiny 6b9dde09b3a9 `tiny/guard`/Access#OK().")
-(call "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/readRows()." "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/Store#Query().")
+(calls "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/Check()." "scip-go gomod tiny 6b9dde09b3a9 `tiny/guard`/NewAccess().")
+(calls "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/ForgeAccess()." "scip-go gomod tiny 6b9dde09b3a9 `tiny/guard`/NewAccess().")
+(calls "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/HandleListBad()." "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/readRows().")
+(calls "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/HandleListGood()." "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/Check().")
+(calls "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/HandleListGood()." "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/readRows().")
+(calls "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/HandleListGood()." "scip-go gomod tiny 6b9dde09b3a9 `tiny/guard`/Access#OK().")
+(calls "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/readRows()." "scip-go gomod tiny 6b9dde09b3a9 `tiny/app`/Store#Query().")

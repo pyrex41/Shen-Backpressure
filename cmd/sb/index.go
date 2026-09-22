@@ -112,7 +112,7 @@ flat flow facts to %s:
 
   (def sym file start-line start-col end-line end-col)
   (ref sym file line col enclosing-def-sym)
-  (call caller-sym callee-sym)
+  (calls caller-sym callee-sym)
 
 Results are cached by tree hash; re-running without source changes is
 a no-op. When no indexer is on PATH the command reports that and exits

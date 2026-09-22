@@ -109,7 +109,7 @@ source tree
 .sb/index.scip           SCIP index — the resolved symbol graph
    |  minimal reader     (cmd/sb/internal/scip)
    v
-.sb/facts.shen           (def …) (ref …) (call …)
+.sb/facts.shen           (def …) (ref …) (calls …)
    |  engine
    v
 premise verdicts  ->  .sb/discharge_report.json
@@ -124,7 +124,7 @@ The fact vocabulary is three relations and nothing else:
 ```
 (def  sym file start-line start-col end-line end-col)
 (ref  sym file line col enclosing-def-sym)
-(call caller-sym callee-sym)
+(calls caller-sym callee-sym)
 ```
 
 Positions are zero-based, exactly as SCIP reports them; only the

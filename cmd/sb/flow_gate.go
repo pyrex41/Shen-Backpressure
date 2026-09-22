@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -45,6 +46,7 @@ func cmdFlow(args []string) {
 	fallback := fs.String("fallback", "", "legacy grep command to run when no SCIP indexer is available")
 	force := fs.Bool("force", false, "re-run the indexer even when cached facts are current")
 	noReport := fs.Bool("no-report", false, "evaluate and print, but do not record premises in the discharge report (used by `sb forgery`, whose staged tree is not the project)")
+	engine := fs.String("engine", "", "which engine evaluates the premises: go, shen, or both (default: both when a Shen host is available, go otherwise)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `sb flow — Evaluate (flow ...) premises over the resolved symbol graph
 
@@ -63,6 +65,16 @@ Discharged premises carry basis %q. Violations carry the
 file:line of the offending reference and the shortest violating path.
 With no indexer on PATH the -fallback command runs instead and the
 premises are recorded unproven with basis %q.
+
+Two engines evaluate the same rules (W6). -engine shen runs the Shen
+Prolog rules in sb/flow/stdlib.shen, which are the primary statement
+of what a flow premise means; -engine go runs their transcription in
+cmd/sb/flow, which is the one that produces file:line and the shortest
+violating path. -engine both runs each and FAILS if they disagree
+about any premise, which is what turns "the two engines implement the
+same rules" from a documented assumption into a checked one. The
+default is both when a Shen host is available and go otherwise; the
+report records which in the flow_engine field.
 
 Flags:
 `, DischargeReportPath, DischargeBasisFlow, DischargeBasisGrepFallback)
@@ -96,11 +108,41 @@ Flags:
 		os.Exit(runFlowFallback(cfg, decls, out, *fallback, *noReport))
 	}
 
+	mode, host, err := resolveFlowEngine(cfg, *engine)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sb flow: %v\n", err)
+		os.Exit(1)
+	}
+
 	results := flow.Evaluate(out.Facts, decls)
-	rules := flowRules(decls, results, out, flow.EngineGo)
+
+	// The Shen engine is asked the same questions and its verdicts are
+	// compared. A disagreement fails the gate before anything is
+	// recorded: a report that named one engine while the other
+	// disagreed would be worse than a report with no engine at all.
+	var disagreements []flow.EngineDisagreement
+	if mode == FlowEngineShen || mode == FlowEngineBoth {
+		verdicts, hostOut, shenErr := runShenFlowEngine(host, out.FactsPath, decls)
+		if shenErr != nil {
+			fmt.Fprintf(os.Stderr, "sb flow: Shen engine: %v\n", shenErr)
+			if s := strings.TrimSpace(hostOut); s != "" {
+				fmt.Fprintln(os.Stderr, s)
+			}
+			os.Exit(1)
+		}
+		disagreements = flow.CompareEngines(results, verdicts)
+		for _, v := range verdicts {
+			fmt.Fprintf(os.Stderr, "      shen: %s → %s\n", v.PremiseID, shenVerdictWord(v))
+		}
+	}
+
+	rules := flowRules(decls, results, out, mode)
 	if !*noReport {
 		if err := mergeFlowRules(rules); err != nil {
 			fmt.Fprintf(os.Stderr, "sb flow: warning: recording premises in %s: %v\n", DischargeReportPath, err)
+		}
+		if err := recordFlowEngine(mode, host); err != nil {
+			fmt.Fprintf(os.Stderr, "sb flow: warning: recording flow_engine in %s: %v\n", DischargeReportPath, err)
 		}
 	}
 
@@ -108,10 +150,126 @@ Flags:
 	for _, r := range results {
 		violations += len(r.Violations)
 	}
-	printFlowResults(results, out)
+	printFlowResults(results, out, mode, host)
+	if len(disagreements) > 0 {
+		fmt.Fprintf(os.Stderr,
+			"sb flow: FAIL — the Shen Prolog rules and the Go engine disagree about %d premise(s):\n",
+			len(disagreements))
+		for _, d := range disagreements {
+			fmt.Fprintf(os.Stderr, "      %s\n", d)
+		}
+		fmt.Fprintln(os.Stderr,
+			"      The rules in sb/flow/stdlib.shen are the primary statement of what a\n"+
+				"      flow premise means; cmd/sb/flow is a transcription of them. One of the\n"+
+				"      two is wrong, and no premise here is evidence until they agree.")
+		os.Exit(1)
+	}
 	if violations > 0 {
 		os.Exit(1)
 	}
+}
+
+// Flow engine modes. The strings are what the report's `flow_engine`
+// field carries, so they are part of the schema.
+const (
+	FlowEngineGo   = "go"
+	FlowEngineShen = "shen"
+	FlowEngineBoth = "both"
+)
+
+// resolveFlowEngine turns the -engine flag into a mode plus, when one
+// is needed, a resolved host.
+//
+// The default is `both` when a host is available and `go` when not.
+// Defaulting to `both` is the point of W6: the Shen rules are the
+// documented primary engine, and leaving them opt-in is how they went
+// four workstreams without executing. Asking for `shen` or `both`
+// explicitly with no host is an error rather than a silent downgrade,
+// because a caller who named the engine wants that engine.
+func resolveFlowEngine(cfg *Config, want string) (string, *ShenHost, error) {
+	host := ResolveShenHost(cfg)
+	switch want {
+	case "", FlowEngineBoth:
+		if host.Found() {
+			return FlowEngineBoth, host, nil
+		}
+		if want == FlowEngineBoth {
+			return "", nil, fmt.Errorf("-engine both needs a Shen host. %s", ShenInstallHint)
+		}
+		fmt.Fprintf(os.Stderr, "sb flow: no Shen host; running the Go engine alone. %s\n", ShenInstallHint)
+		return FlowEngineGo, nil, nil
+	case FlowEngineShen:
+		if !host.Found() {
+			return "", nil, fmt.Errorf("-engine shen needs a Shen host. %s", ShenInstallHint)
+		}
+		return FlowEngineShen, host, nil
+	case FlowEngineGo:
+		return FlowEngineGo, nil, nil
+	default:
+		return "", nil, fmt.Errorf("unknown -engine %q (want go, shen, or both)", want)
+	}
+}
+
+// runShenFlowEngine materialises the embedded Prolog stdlib and runs
+// it against the fact file.
+//
+// The stdlib is read from sb's embedded skilldata rather than from the
+// checkout, so `sb flow --engine shen` works from an installed binary
+// in a project that has no copy of sb/flow/. `make check-skilldata`
+// keeps the embedded copy equal to the canonical one.
+func runShenFlowEngine(host *ShenHost, factsPath string, decls []flow.Decl) ([]flow.ShenVerdict, string, error) {
+	data, err := skilldata.ReadFile("skilldata/flow/stdlib.shen")
+	if err != nil {
+		return nil, "", fmt.Errorf("reading the embedded Prolog stdlib: %w", err)
+	}
+	dir, err := os.MkdirTemp("", "sb-flow-stdlib-")
+	if err != nil {
+		return nil, "", err
+	}
+	defer os.RemoveAll(dir)
+	stdlib := filepath.Join(dir, "stdlib.shen")
+	if err := os.WriteFile(stdlib, data, 0o644); err != nil {
+		return nil, "", err
+	}
+	absFacts, err := filepath.Abs(factsPath)
+	if err != nil {
+		return nil, "", err
+	}
+	return flow.EvaluateShen(flow.ShenHostRunner{
+		Path:       host.Path,
+		StdlibPath: stdlib,
+		Timeout:    5 * time.Minute,
+	}, absFacts, decls)
+}
+
+func shenVerdictWord(v flow.ShenVerdict) string {
+	switch {
+	case v.Violation:
+		return "violated"
+	case v.Vacuous():
+		return "vacuous"
+	default:
+		return "discharged"
+	}
+}
+
+// recordFlowEngine stores which engine(s) ran, and which host, in the
+// discharge report. Additive and omitempty: a report from a run that
+// never had a flow gate marshals exactly as it did before W6.
+func recordFlowEngine(mode string, host *ShenHost) error {
+	r, err := loadDischarge(DischargeReportPath)
+	if err != nil || r == nil {
+		return err
+	}
+	r.FlowEngine = mode
+	if host.Found() {
+		if r.Toolchain == nil {
+			r.Toolchain = &DischargeToolchain{}
+		}
+		r.Toolchain.ShenHost = host.Name
+		r.Toolchain.ShenHostVersion = host.Version
+	}
+	return writeDischarge(DischargeReportPath, r)
 }
 
 // runFlowFallback executes the legacy grep gate, records every
@@ -408,7 +566,7 @@ func carryFlowRules(r *DischargeReport) {
 }
 
 // printFlowResults renders the human-facing gate output.
-func printFlowResults(results []flow.Result, out *IndexOutcome) {
+func printFlowResults(results []flow.Result, out *IndexOutcome, mode string, host *ShenHost) {
 	for _, res := range results {
 		status := "PASS"
 		switch {
@@ -425,5 +583,9 @@ func printFlowResults(results []flow.Result, out *IndexOutcome) {
 			}
 		}
 	}
-	fmt.Fprintf(os.Stderr, "sb flow: engine=%s index=%s facts=%s\n", flow.EngineGo, out.Indexer, out.FactsPath)
+	hostNote := ""
+	if host.Found() {
+		hostNote = " host=" + host.Name
+	}
+	fmt.Fprintf(os.Stderr, "sb flow: engine=%s%s index=%s facts=%s\n", mode, hostNote, out.Indexer, out.FactsPath)
 }

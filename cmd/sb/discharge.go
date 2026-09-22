@@ -62,6 +62,14 @@ type DischargeReport struct {
 	// does not move.
 	Evidence *DischargeEvidence `json:"evidence,omitempty"`
 
+	// FlowEngine names which engine evaluated the flow premises: "go",
+	// "shen", or "both" (W6). It matters because the two engines are
+	// two implementations of one rule set, and a report that does not
+	// say which one ran cannot be checked against the other. Empty on
+	// a project with no flow gate, and omitempty so a pre-W6 report
+	// marshals byte-identically.
+	FlowEngine string `json:"flow_engine,omitempty"`
+
 	Signature *DischargeSignature `json:"signature"`
 }
 
@@ -101,6 +109,13 @@ type DischargeToolchain struct {
 	ShengenTSVersion string            `json:"shengen_ts_version,omitempty"`
 	Z3Version        string            `json:"z3_version,omitempty"`
 	Indexers         []DischargeToolVersion `json:"indexers,omitempty"`
+
+	// ShenHost and ShenHostVersion name the Shen host that evaluated
+	// tc+ and/or the flow rules (W6). Absent when no host was
+	// available, which is a different statement from "the host was
+	// version unknown" and is why both are omitempty.
+	ShenHost        string `json:"shen_host,omitempty"`
+	ShenHostVersion string `json:"shen_host_version,omitempty"`
 }
 
 // DischargeToolVersion mirrors report.ToolVersion.
