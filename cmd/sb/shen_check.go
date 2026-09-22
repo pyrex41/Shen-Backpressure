@@ -41,7 +41,20 @@ const PreludeDir = ".sb"
 const (
 	preludeDeclaresName = "prelude.declares.shen"
 	preludeDefinesName  = "prelude.defines.shen"
+	// preludeEvalName carries runnable bodies for `val` and the field
+	// accessors, for W6.D's second oracle. Loaded instead of the
+	// declares, with the typechecker off.
+	preludeEvalName = "prelude.eval.shen"
 )
+
+// preludeEvalPath is the eval half of the prelude, absolute.
+func preludeEvalPath() string {
+	abs, err := filepath.Abs(filepath.Join(PreludeDir, preludeEvalName))
+	if err != nil {
+		return filepath.Join(PreludeDir, preludeEvalName)
+	}
+	return abs
+}
 
 // ShenCheckResult is what a tc+ run produced.
 type ShenCheckResult struct {

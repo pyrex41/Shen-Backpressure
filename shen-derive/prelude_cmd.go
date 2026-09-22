@@ -23,6 +23,11 @@ import (
 const (
 	PreludeDeclaresName = "prelude.declares.shen"
 	PreludeDefinesName  = "prelude.defines.shen"
+	// PreludeEvalName holds runnable bodies for `val` and the field
+	// accessors. Loaded *instead of* the declares, with the
+	// typechecker off, when a host has to evaluate a define — see
+	// W6.D's second oracle in cmd/sb/oracle.go.
+	PreludeEvalName = "prelude.eval.shen"
 )
 
 func cmdPrelude(args []string) {
@@ -85,8 +90,13 @@ Flags:
 		fmt.Fprintf(os.Stderr, "shen-derive prelude: %v\n", err)
 		os.Exit(1)
 	}
+	evalPath := filepath.Join(*outDir, PreludeEvalName)
+	if err := os.WriteFile(evalPath, []byte(p.Eval), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "shen-derive prelude: %v\n", err)
+		os.Exit(1)
+	}
 	if !*quiet {
-		fmt.Fprintf(os.Stderr, "shen-derive prelude: %s\nshen-derive prelude: %s\n", declPath, defPath)
+		fmt.Fprintf(os.Stderr, "shen-derive prelude: %s\nshen-derive prelude: %s\nshen-derive prelude: %s\n", declPath, defPath, evalPath)
 		for _, n := range p.Notes {
 			fmt.Fprintf(os.Stderr, "shen-derive prelude: GAP: %s\n", n)
 		}

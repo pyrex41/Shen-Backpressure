@@ -222,6 +222,10 @@ func cmdVerify(args []string) {
 	seed := fs.Int64("seed", 0, "RNG seed for random sampling (0 = deterministic boundary values only)")
 	randomDraws := fs.Int("random-draws", 0, "number of random primitive draws per type when --seed != 0 (default 8)")
 	reportOut := fs.String("report-out", "", "if non-empty, write a per-spec discharge report (JSON) to this path")
+	// W6.D — the sample table in Shen source form, so `sb derive` can
+	// re-ask a failing case of a live Shen host and tell a lowering
+	// bug from an implementation bug.
+	shenSamplesOut := fs.String("shen-samples-out", "", "if non-empty, write the sample table as Shen literals (JSON) to this path, for the Shen-host second oracle")
 	guardFile := fs.String("guard-file", "", "path to shengen-emitted guards file (used to populate code_references in the discharge report)")
 	brandTable := fs.String("brand-table", "", "path to a shengen --brand-table JSON file; premises paired by a GDP brand are recorded with the guard-brand-bound discharge basis (W5.4)")
 	pathCover := fs.Bool("path-cover", false, "add one concrete sample per feasible spec path (needs z3 on PATH; degrades to the sampler without it)")
@@ -334,6 +338,13 @@ func cmdVerify(args []string) {
 			os.Exit(1)
 		}
 		fmt.Fprintf(os.Stderr, "wrote %s (%d cases)\n", *out, len(h.Cases))
+	}
+
+	if *shenSamplesOut != "" {
+		if err := h.WriteShenSamples(*shenSamplesOut, specPath); err != nil {
+			fmt.Fprintf(os.Stderr, "write %s: %v\n", *shenSamplesOut, err)
+			os.Exit(1)
+		}
 	}
 
 	if h.PathStats != nil {

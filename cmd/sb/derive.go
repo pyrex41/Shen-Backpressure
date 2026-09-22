@@ -194,6 +194,16 @@ Flags:
 					runArgs = append(runArgs, "--falsifier-samples", abs)
 				}
 			}
+			// W6.D — the sample table as Shen literals, so a failing
+			// case can be re-asked of a live Shen host. Written
+			// unconditionally (it is cheap and deterministic) and read
+			// only when a host exists, so a project with no host
+			// behaves exactly as before.
+			if p, err := filepath.Abs(shenSamplesPath(spec.Func)); err == nil {
+				if err := os.MkdirAll(filepath.Dir(p), 0o755); err == nil {
+					runArgs = append(runArgs, "--shen-samples-out", p)
+				}
+			}
 			runDir = absDeriveDir
 			tempGlob = "shen-derive-*.go"
 		case "ts":
@@ -437,7 +447,18 @@ func finalizeDischargeReport(parts []*DischargeReport, cfg *Config, failures []p
 	// applied last: after the downgrade, after the counter-examples,
 	// and after the flow rules are carried across.
 	applyPrecision(r)
-	assignBlame(r, detectShenRuntimeHost(cfg))
+	shenHost := ResolveShenHost(cfg)
+	if shenHost.Found() {
+		r.Toolchain.ShenHost = shenHost.Name
+		r.Toolchain.ShenHostVersion = shenHost.Version
+	}
+	assignBlame(r, shenHost.Found())
+	// W6.D — the second oracle. assignBlame has already put `impl` on
+	// every behavioral counter-example, with basis evaluator-and-host
+	// when a host exists. That basis is a promise, and this is where
+	// it is kept: each failing case is re-evaluated on the host, and a
+	// case the two oracles read differently is re-blamed `lowering`.
+	applySecondOracle(cfg, r, shenHost)
 	computeDischargedSinceCommit(r)
 	if err := writeDischarge(DischargeReportPath, r); err != nil {
 		fmt.Fprintf(os.Stderr, "sb derive: write discharge report: %v\n", err)

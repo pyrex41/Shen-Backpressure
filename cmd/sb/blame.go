@@ -202,17 +202,23 @@ func ruleHasRuntimeVia(rule *DischargeRule) bool {
 	return false
 }
 
-// detectShenRuntimeHost reports whether a *live Shen host* backs this
-// project's runtime-via premises, which is the condition the blame
-// rules care about.
+// detectShenRuntimeHost reports whether a *live Shen host* is
+// available to act as a second oracle, which is the condition the
+// blame rules care about.
 //
-// detectShenRuntime (derive.go) answers a different question — which
-// runtime the report should name — and returns "shen-derive-eval" for
-// profile B, where the evaluator *is* the oracle. That is precisely
-// the case where there is no second opinion, so it does not count as
-// a host here.
+// Before W6 this was `detectShenRuntime(cfg) == "shen-sbcl"`, which
+// asks a different question entirely: detectShenRuntime scans the spec
+// for `:runtime-via` markers and names the runtime the *report* should
+// mention. A project could therefore be sitting next to a working Shen
+// host and still be told it had none, because its spec used
+// `:runtime-via :eval`; and a project that named a checker got
+// `evaluator-and-host` without anything having asked a host anything.
+//
+// The condition that matters is simply "can sb run the spec somewhere
+// other than its own evaluator", so that is what this asks now. What
+// the host is then actually asked is in oracle.go.
 func detectShenRuntimeHost(cfg *Config) bool {
-	return detectShenRuntime(cfg) == "shen-sbcl"
+	return ResolveShenHost(cfg).Found()
 }
 
 // blamedParties returns the distinct blame values in the report, in

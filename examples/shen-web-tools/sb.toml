@@ -5,6 +5,11 @@ pkg  = "shenguard"
 [paths]
 spec = "specs/core.shen"
 
+# The Shen host for gate 4 (tc+) and the Shen flow engine (W6).
+# `make shen-go` at the repo root builds the Go port to bin/shen.
+[shen]
+bin = "../../bin/shen"
+
 [engine]
 relaxed = false
 
