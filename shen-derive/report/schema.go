@@ -30,8 +30,57 @@ type Report struct {
 	Tools         ToolsInfo  `json:"tools"`
 	Rules         []Rule     `json:"rules"`
 	Summary       Summary    `json:"summary"`
-	Signature     *Signature `json:"signature"` // null in v0; reserved
+
+	// ---- W5 certificate block (additive, v1.x) -------------------
+	// Toolchain records exactly which binaries produced this report,
+	// so `sb verify-report` can say whether it is re-deriving with the
+	// same tools or merely with compatible ones. omitempty keeps
+	// pre-W5 reports byte-identical.
+	Toolchain *Toolchain `json:"toolchain,omitempty"`
+	// --------------------------------------------------------------
+
+	Signature *Signature `json:"signature"` // null until `sb sign-report`
 }
+
+// ---- W5 certificate block (additive, v1.x) ----------------------
+
+// Toolchain identifies the tools that produced a report. It is the
+// reproducibility half of the certificate: `sb gen` output is a pure
+// function of the spec bytes and the shengen binary, so recording the
+// binary's hash pins the function. Every field is optional — a report
+// produced without one of these tools simply omits it rather than
+// claiming a version it does not know.
+type Toolchain struct {
+	// Go is the Go toolchain that built the binaries, e.g. "go1.24.7".
+	Go string `json:"go,omitempty"`
+	// GOOS / GOARCH matter because the generated code is
+	// platform-independent but the binary hash is not.
+	GOOS   string `json:"goos,omitempty"`
+	GOARCH string `json:"goarch,omitempty"`
+	// ShengenVersion and ShengenSHA256 identify the emitter. The hash
+	// is over the binary bytes; with -trimpath it is stable across
+	// checkout locations.
+	ShengenVersion string `json:"shengen_version,omitempty"`
+	ShengenSHA256  string `json:"shengen_sha256,omitempty"`
+	// ShengenTSVersion is the TypeScript emitter's version, when the
+	// project targets TypeScript.
+	ShengenTSVersion string `json:"shengen_ts_version,omitempty"`
+	// Z3Version is recorded only when a solver actually answered, so
+	// an absent field means path-cover evidence was not prover-backed.
+	Z3Version string `json:"z3_version,omitempty"`
+	// Indexers are the SCIP indexers the flow gate used, in the order
+	// they ran. Absent when no flow premise was evaluated.
+	Indexers []ToolVersion `json:"indexers,omitempty"`
+}
+
+// ToolVersion is a named external tool and the version string it
+// reported. Recorded verbatim: sb does not parse it.
+type ToolVersion struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// -----------------------------------------------------------------
 
 // SpecInfo identifies the spec file(s) the report covers. v0 supports
 // a single spec but the slice shape is reserved for multi-spec
@@ -136,6 +185,23 @@ type Premise struct {
 	PathsFeasible *int `json:"paths_feasible,omitempty"`
 	PathsDead     *int `json:"paths_dead,omitempty"`
 
+	// ---- W5 certificate block (additive, v1.x) -------------------
+
+	// Precision names the strength of the evidence behind this
+	// premise, on the total order in PrecisionRank. It is derived
+	// from Discharge and DischargeBasis rather than supplied
+	// independently, so it can never disagree with them; it exists
+	// because "static vs sampled vs unproven" is the comparison a
+	// reader actually wants and neither field alone expresses it.
+	Precision string `json:"precision,omitempty"`
+
+	// BrandSignature is the generic constructor signature that binds
+	// this premise to its conclusion, e.g. "SafeTransfer[B]". Present
+	// only on premises with the guard-brand-bound basis.
+	BrandSignature string `json:"brand_signature,omitempty"`
+
+	// --------------------------------------------------------------
+
 	// RuntimeProfile is "A" | "B" | "C" | "D" for runtime-via premises,
 	// "" otherwise. Rendered in the audit report as the human-facing
 	// profile label (see RuntimeProfileLabel).
@@ -184,12 +250,116 @@ const (
 	// uninhabited rule.
 	BasisVacuousDatatype = "vacuous-datatype"
 
+	// BasisGuardBrandBound is emitted when W1's brand inference pairs
+	// this premise with the rule's conclusion (or with a sibling
+	// premise) through a shared phantom brand parameter. The claim is
+	// narrower and stronger than guard-type-at-boundary: not merely
+	// "a proof of the right type", but "a proof about this very
+	// value". A caller cannot satisfy it with evidence minted for a
+	// different subject, because the brand is an unexported type it
+	// cannot name. Additive (v1.x).
+	BasisGuardBrandBound = "guard-brand-bound"
+
 	// Runtime-via discharge bases (additive, v1).
 	BasisRuntimeViaWitness            = "runtime-via-witness"             // Profile A
 	BasisRuntimeViaEvaluator          = "runtime-via-evaluator"          // Profile B
 	BasisRuntimeViaSampledEquivalence = "runtime-via-sampled-equivalence" // Profile C
 	BasisRuntimeViaDBAttested         = "runtime-via-db-attested"        // Profile D
 )
+
+// ---- W5 certificate block (additive, v1.x) ----------------------
+
+// Precision values, strongest first. The order is total: a report
+// consumer can compare two premises by PrecisionRank and get a
+// well-defined answer about which rests on stronger evidence.
+const (
+	// PrecisionStatic — the target language's type system refuses to
+	// compile a violating program. No execution required.
+	PrecisionStatic = "static"
+	// PrecisionPathCover — a solver produced a concrete witness for
+	// every feasible path of the spec at the configured unroll depth,
+	// and the impl agreed on each. Bounded, but nothing inside the
+	// bound went unexercised.
+	PrecisionPathCover = "path-cover"
+	// PrecisionSampled — the impl agreed with the spec on a
+	// deterministic pool of inputs. Evidence, not proof.
+	PrecisionSampled = "sampled"
+	// PrecisionRuntime — the check happens in production, on the
+	// value actually in hand. Strong about that value, silent about
+	// every value the program never sees.
+	PrecisionRuntime = "runtime"
+	// PrecisionUnproven — nothing was established.
+	PrecisionUnproven = "unproven"
+)
+
+// PrecisionOrder lists the precision values strongest to weakest.
+var PrecisionOrder = []string{
+	PrecisionStatic,
+	PrecisionPathCover,
+	PrecisionSampled,
+	PrecisionRuntime,
+	PrecisionUnproven,
+}
+
+// PrecisionRank returns a premise precision's position in the total
+// order: 0 is strongest, larger is weaker. An unrecognised value
+// ranks below everything known, so a report written by a newer tool
+// degrades to "at least as weak as unproven" rather than to a panic.
+func PrecisionRank(p string) int {
+	for i, v := range PrecisionOrder {
+		if v == p {
+			return i
+		}
+	}
+	return len(PrecisionOrder)
+}
+
+// Blame values. Every counter-example names exactly one responsible
+// party, because the next question a reader has is "whose bug is
+// this?" and an unattributed failure makes them re-derive the answer
+// by hand.
+const (
+	// BlameSpec — the Shen spec is wrong or empty: a vacuous rule, a
+	// dead branch, a predicate that does not mean what its author
+	// intended.
+	BlameSpec = "spec"
+	// BlameImpl — the implementation disagrees with a spec that both
+	// evaluators read the same way. The ordinary case.
+	BlameImpl = "impl"
+	// BlameWrapper — a :runtime-via checker (or the generated wrapper
+	// around it) failed. The spec and the impl may both be right; the
+	// composition is not.
+	BlameWrapper = "wrapper"
+	// BlameLowering — the spec's own Go evaluator and the Shen host
+	// disagree about what the spec means. Neither the spec author nor
+	// the implementer is at fault: the translation is.
+	BlameLowering = "lowering"
+)
+
+// BlameBasis values explain how a blame assignment was reached, which
+// matters because the rules differ in strength.
+const (
+	// BlameBasisEvaluatorAndHost — the spec's Go evaluator and a live
+	// Shen host were both consulted and agreed, so a disagreement with
+	// the impl is the impl's.
+	BlameBasisEvaluatorAndHost = "evaluator-and-host"
+	// BlameBasisEvaluatorOnly — no Shen host was available, so only
+	// the Go evaluator spoke. `impl` is the assignment, but a lowering
+	// bug in the evaluator would produce the same evidence, and this
+	// basis says so out loud.
+	BlameBasisEvaluatorOnly = "evaluator-only"
+	// BlameBasisEvaluatorHostDisagree — the two oracles disagree; the
+	// lowering is at fault whatever the impl did.
+	BlameBasisEvaluatorHostDisagree = "evaluator-host-disagree"
+	// BlameBasisRuntimeVia — the failure came from a :runtime-via
+	// checker, which is wrapper code by construction.
+	BlameBasisRuntimeVia = "runtime-via"
+	// BlameBasisVacuous — an uninhabited datatype, which is a spec
+	// defect by construction.
+	BlameBasisVacuous = "vacuous-datatype"
+)
+
+// -----------------------------------------------------------------
 
 // RuntimeProfileLabel maps the internal profile letter to the
 // human-facing label used in the audit report. Empty profile ("")
@@ -220,6 +390,14 @@ type CounterExample struct {
 	ImplLineHint     *int              `json:"impl_line_hint"`
 	FirstSeenCommit  *string           `json:"first_seen_commit"`
 	Rationale        string            `json:"rationale"`
+
+	// ---- W5 certificate block (additive, v1.x) -------------------
+	// Blame names the responsible party (see the Blame* constants),
+	// and BlameBasis records which rule assigned it. Both omitempty:
+	// a pre-W5 report carries neither.
+	Blame      string `json:"blame,omitempty"`
+	BlameBasis string `json:"blame_basis,omitempty"`
+	// --------------------------------------------------------------
 }
 
 // Summary rolls up rule and premise counts for the whole report.
@@ -247,10 +425,38 @@ type Summary struct {
 	PremisesRuntimeAttestedDB      int `json:"premises_runtime_attested_db,omitempty"`
 }
 
-// Signature is the placeholder for a cryptographic signature over
-// the report's canonical bytes. Always null in v0.
+// Signature is a detached signature over the report's canonical
+// bytes. Written by `sb sign-report`; nil on an unsigned report.
+//
+// Canonical bytes are defined in cmd/sb/canonical.go and documented in
+// docs/TRUST-MODEL.md: the report with its own `signature` field
+// removed, marshalled as JSON with object keys sorted and no
+// insignificant whitespace. Removing the field is what makes the
+// signature a fixed point — the signer and the verifier hash the same
+// bytes even though one of them is holding a signed document.
 type Signature struct {
+	// Algorithm is "ed25519" for the key-file mode, or "cosign" for
+	// the keyless mode.
 	Algorithm string `json:"algorithm"`
-	KeyID     string `json:"key_id"`
-	Value     string `json:"value"`
+	// KeyID identifies the signer: the base64 public key for ed25519,
+	// or the certificate identity for cosign.
+	KeyID string `json:"key_id"`
+	// Value is the base64 signature (ed25519) or bundle (cosign).
+	Value string `json:"value"`
+
+	// ---- W5 certificate block (additive, v1.x) -------------------
+	// Canonicalization names the byte-derivation the signature covers,
+	// so a future change to it cannot be mistaken for a bad signature.
+	Canonicalization string `json:"canonicalization,omitempty"`
+	// SignedAt is an RFC3339 timestamp. Advisory: it is inside the
+	// signed bytes only in the sense that it is part of the signature
+	// object, which is excluded from them, so treat it as a hint.
+	SignedAt string `json:"signed_at,omitempty"`
+	// Mode is "key-file" or "cosign-keyless".
+	Mode string `json:"mode,omitempty"`
+	// --------------------------------------------------------------
 }
+
+// CanonicalizationV1 is the only canonicalization this release
+// produces: sorted keys, no whitespace, `signature` elided.
+const CanonicalizationV1 = "sb-canonical-json-v1"

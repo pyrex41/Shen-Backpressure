@@ -219,6 +219,7 @@ func cmdVerify(args []string) {
 	randomDraws := fs.Int("random-draws", 0, "number of random primitive draws per type when --seed != 0 (default 8)")
 	reportOut := fs.String("report-out", "", "if non-empty, write a per-spec discharge report (JSON) to this path")
 	guardFile := fs.String("guard-file", "", "path to shengen-emitted guards file (used to populate code_references in the discharge report)")
+	brandTable := fs.String("brand-table", "", "path to a shengen --brand-table JSON file; premises paired by a GDP brand are recorded with the guard-brand-bound discharge basis (W5.4)")
 	pathCover := fs.Bool("path-cover", false, "add one concrete sample per feasible spec path (needs z3 on PATH; degrades to the sampler without it)")
 	pathDepth := fs.Int("path-depth", 0, "list-unrolling depth for --path-cover (default 4)")
 	pathMaxPaths := fs.Int("path-max-paths", 0, "cap on enumerated paths for --path-cover (default 64)")
@@ -356,6 +357,16 @@ func cmdVerify(args []string) {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "discharge classify: %v\n", err)
 			os.Exit(1)
+		}
+		// W5.4 — when shengen emitted a brand table, upgrade every
+		// premise W1's inference pairs from "a value of the right
+		// type" to "a proof about the right subject".
+		if bt, err := report.LoadBrandTable(*brandTable); err != nil {
+			fmt.Fprintf(os.Stderr, "brand table %s: %v\n", *brandTable, err)
+			os.Exit(1)
+		} else if bt != nil {
+			n := report.ApplyBrandBinding(dischargeRules, bt, *guardFile)
+			fmt.Fprintf(os.Stderr, "brand binding: %d premise(s) discharged by proof binding\n", n)
 		}
 		var pathInfo *report.PathCoverInfo
 		if h.PathStats != nil {

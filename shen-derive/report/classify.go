@@ -29,6 +29,10 @@ func ClassifyDatatypes(sf *specfile.SpecFile, guardOutputPath string) ([]Rule, e
 			rules = append(rules, rule)
 		}
 	}
+	// W5.4 — precision is derived from the discharge and basis just
+	// assigned, so it is filled once here rather than threaded through
+	// every classification branch. See precision.go.
+	ApplyPrecision(rules)
 	return rules, nil
 }
 
@@ -235,6 +239,8 @@ func ClassifyDefineWithPaths(specPath string, def *specfile.Define, sampleCount 
 			)
 		}
 	}
+	// W5.4 — precision is derived; see precision.go.
+	prem.Precision = PrecisionFor(prem.Discharge, prem.DischargeBasis)
 	rule.Premises = append(rule.Premises, prem)
 	return rule
 }
@@ -262,6 +268,10 @@ func MarkVacuous(rules []Rule, ruleName, message string) bool {
 			p.DischargeBasis = BasisVacuousDatatype
 			p.Rationale = "the rule's datatype is uninhabited, so this premise is discharged only " +
 				"vacuously — it holds of no value at all. " + message
+			// W5.4 — a vacuous premise proves nothing at all, whatever
+			// it was classified as before the finding arrived.
+			p.Precision = PrecisionUnproven
+			p.BrandSignature = ""
 		}
 	}
 	return found
