@@ -63,7 +63,7 @@ func TestPatternMatches(t *testing.T) {
 		// Globs.
 		{"internal/handlers/Server#handle*", handler, true},
 		{"*ListResources*", handler, true},
-		{"*ListResources", handler, true},  // a trailing glob is not implied
+		{"*ListResources", handler, true}, // a trailing glob is not implied
 		{"*ListResource", handler, false}, // …so this does not match
 
 		{"*", handler, true},

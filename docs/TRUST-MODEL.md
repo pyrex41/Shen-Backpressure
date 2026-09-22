@@ -256,7 +256,32 @@ diffed by `tcb-audit`, so a reviewer can audit the output without
 auditing the emitter — but the relationship "input spec ⇒ correct
 output code" rests on the emitter being right.
 
-### 7. Your build pipeline
+### 7. The SCIP indexer (for flow premises)
+
+A premise discharged with basis `flow-analysis` — the
+`(constructor-only …)` and `(must-pass-through …)` forms described in
+`FLOW.md` — is trustworthy exactly as far as the index behind it is.
+A reference the indexer failed to record is a reference the premise
+never saw, so `scip-go` / `scip-typescript`, the minimal SCIP reader
+in `cmd/sb/internal/scip`, and whichever of the two flow engines ran
+(the Shen Prolog rules in `sb/flow/stdlib.shen`, or the Go evaluator
+in `cmd/sb/flow`) are all in the TCB for those premises. The reader
+treats a truncated index as a hard error rather than a partial decode,
+because an understated reference set would make a premise look
+discharged when it is not. The reason to accept the indexer at all is
+that it is not an independent opinion but a *reader of the compiler's
+own conclusion*: it runs after, and on top of, the language's type
+checker — `scip-go` through `go/packages`, `scip-typescript` through
+the TypeScript compiler API — so every import alias, embedded method
+and interface satisfaction is already resolved when the facts are
+emitted. That is exactly why an aliased import cannot evade a flow
+premise the way it evades a grep, and it is the same bargain the rest
+of this document makes with the target-language compiler. When no
+indexer is available the gate says so: the premises are recorded
+`unproven` with basis `grep-fallback`, and the legacy regex is
+reported as what it is.
+
+### 8. Your build pipeline
 
 If a CI step runs `sb gen` and uploads the result without first
 running `tcb-audit`, the published binary may contain

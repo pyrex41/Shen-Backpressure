@@ -270,3 +270,76 @@ func TestFlowGateIsWiredFromManifest(t *testing.T) {
 		}
 	}
 }
+
+// TestCarryFlowRulesAcrossDerive is the other half of the
+// report-sharing contract: the derive gate is always appended last
+// and rewrites the whole report, so it must carry the flow gate's
+// rules across rather than dropping them.
+func TestCarryFlowRulesAcrossDerive(t *testing.T) {
+	testRestoreCwd(t)
+	dir := t.TempDir()
+	t.Cleanup(func() { testRestoreCwd(t) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	onDisk := &DischargeReport{
+		SchemaVersion: 1,
+		Rules: []DischargeRule{
+			{
+				Name: "tenant-access-discipline", Kind: FlowRuleKind,
+				Status:          DischargeStatusDischarged,
+				CounterExamples: []DischargeCounter{},
+				Premises: []DischargePremise{{
+					ID: "constructor-only:x", Discharge: DischargeStatic, DischargeBasis: DischargeBasisFlow,
+				}},
+			},
+			{Name: "stale-derive-rule", Kind: "wrapper", CounterExamples: []DischargeCounter{}},
+		},
+	}
+	if err := writeDischarge(DischargeReportPath, onDisk); err != nil {
+		t.Fatal(err)
+	}
+
+	// What `sb derive` freshly computed: its own rules only.
+	fresh := &DischargeReport{
+		SchemaVersion: 1,
+		Rules: []DischargeRule{
+			{Name: "same-user?", Kind: "define", CounterExamples: []DischargeCounter{}},
+		},
+	}
+	carryFlowRules(fresh)
+
+	if len(fresh.Rules) != 2 {
+		t.Fatalf("got %d rules, want 2 (the derive rule plus the carried flow rule): %+v", len(fresh.Rules), fresh.Rules)
+	}
+	var carried bool
+	for _, r := range fresh.Rules {
+		if r.Kind == "wrapper" {
+			t.Error("a non-flow rule from the stale report was carried across")
+		}
+		if r.Name == "tenant-access-discipline" && r.Kind == FlowRuleKind {
+			carried = true
+		}
+	}
+	if !carried {
+		t.Error("the flow rule was not carried across")
+	}
+	if fresh.Summary.PremisesStatic != 1 || fresh.Spec.RuleCount != 2 {
+		t.Errorf("summary not recomputed: %+v rule_count=%d", fresh.Summary, fresh.Spec.RuleCount)
+	}
+
+	// A fresh flow rule under the same name must win over the stale one.
+	fresh2 := &DischargeReport{
+		SchemaVersion: 1,
+		Rules: []DischargeRule{{
+			Name: "tenant-access-discipline", Kind: FlowRuleKind,
+			Status:          DischargeStatusViolated,
+			CounterExamples: []DischargeCounter{},
+		}},
+	}
+	carryFlowRules(fresh2)
+	if len(fresh2.Rules) != 1 || fresh2.Rules[0].Status != DischargeStatusViolated {
+		t.Errorf("a stale flow rule overwrote a fresh one: %+v", fresh2.Rules)
+	}
+}
