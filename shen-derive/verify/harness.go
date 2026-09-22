@@ -6,9 +6,11 @@ import (
 	"math/rand"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/core"
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/specfile"
+	"github.com/pyrex41/Shen-Backpressure/shen-derive/symbolic"
 )
 
 // HarnessConfig holds everything needed to generate a spec-equivalence test.
@@ -45,12 +47,43 @@ type HarnessConfig struct {
 	// top of the boundary pool when Seed != 0. Default when Seed != 0 is
 	// 8. Ignored when Seed == 0.
 	RandomDraws int
+
+	// PathCover enables the third sample source: one concrete witness
+	// per feasible path of the spec, found by symbolically executing
+	// the spec body and asking an SMT solver for a model of each path
+	// condition (see shen-derive/symbolic). Off by default, which keeps
+	// behaviour byte-identical to the boundary-pool-plus-random-draws
+	// harness.
+	PathCover bool
+
+	// PathDepth is the list-unrolling bound for path enumeration.
+	// Zero means symbolic.DefaultDepth (4).
+	PathDepth int
+
+	// PathMaxPaths caps enumerated paths. Zero means
+	// symbolic.DefaultMaxPaths.
+	PathMaxPaths int
+
+	// PathTimeout bounds a single solver query. Zero means
+	// symbolic.DefaultSolverTimeout.
+	PathTimeout time.Duration
+
+	// PathSolver overrides solver discovery. Nil means "look for z3 on
+	// PATH"; tests inject a fake. When no solver is found the feature
+	// degrades: paths are still enumerated, feasibility is unknown, and
+	// the harness proceeds with the boundary pool alone.
+	PathSolver symbolic.Solver
 }
 
 // Harness is the prepared-but-not-yet-emitted verification bundle.
 type Harness struct {
 	Config *HarnessConfig
 	Cases  []Case
+
+	// PathStats is non-nil when PathCover was requested. It records the
+	// path counters even when the solver was absent, so the generated
+	// file and the discharge report can be honest about what ran.
+	PathStats *PathStats
 }
 
 // Case is one (input, expected output) pair.
@@ -59,6 +92,11 @@ type Case struct {
 	Args       []Sample   // one per parameter of the spec
 	Expected   core.Value // spec-evaluated output
 	ExpectedGo string     // Go literal for the expected value
+
+	// Provenance names the sample source. Empty for the deterministic
+	// boundary pool and its seeded random draws (so default output is
+	// unchanged); "path:<n>" for a witness of the spec's nth path.
+	Provenance string
 }
 
 // BuildHarness evaluates the spec on sampled inputs and records the
@@ -132,6 +170,42 @@ func BuildHarness(cfg *HarnessConfig) (*Harness, error) {
 			Expected:   val,
 			ExpectedGo: goLit,
 		})
+	}
+
+	// Third sample source: one witness per feasible spec path. Appended
+	// after the pool and deliberately not subject to MaxCases, so path
+	// coverage is never truncated by the pool's budget.
+	if cfg.PathCover {
+		rows, stats, err := runPathCover(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("path cover: %w", err)
+		}
+		h.PathStats = stats
+		for _, row := range rows {
+			val, err := evalSpec(cfg.Spec, row, base)
+			if err != nil {
+				// A witness the concrete evaluator cannot run is not
+				// evidence; drop it rather than emit a broken case.
+				stats.Warnings = append(stats.Warnings,
+					fmt.Sprintf("%s: eval spec on path witness: %v", row[0].Provenance, err))
+				stats.SamplesAdded--
+				continue
+			}
+			goLit, err := goLiteralFor(val, cfg.Spec.TypeSig.ReturnType, cfg.TypeTable)
+			if err != nil {
+				stats.Warnings = append(stats.Warnings,
+					fmt.Sprintf("%s: literal: %v", row[0].Provenance, err))
+				stats.SamplesAdded--
+				continue
+			}
+			h.Cases = append(h.Cases, Case{
+				Name:       strings.ReplaceAll(row[0].Provenance, ":", "_"),
+				Args:       row,
+				Expected:   val,
+				ExpectedGo: goLit,
+				Provenance: row[0].Provenance,
+			})
+		}
 	}
 	return h, nil
 }
@@ -399,6 +473,20 @@ func (h *Harness) Emit() (string, error) {
 		fmt.Fprintf(&b, "// Sampling seed: %d (--seed %d --random-draws %d)\n",
 			cfg.Seed, cfg.Seed, cfg.RandomDraws)
 	}
+	if h.PathStats != nil {
+		ps := h.PathStats
+		fmt.Fprintf(&b, "// Path cover: paths_total=%d paths_feasible=%d paths_dead=%d\n",
+			ps.Total, ps.Feasible, ps.Dead)
+		solver := ps.SolverName
+		if !ps.SolverAvailable || solver == "" {
+			solver = "none"
+		}
+		fmt.Fprintf(&b, "// Path cover solver: %s (list unroll depth %d, %d path sample(s) below)\n",
+			solver, ps.Depth, ps.SamplesAdded)
+		if ps.DegradedReason != "" {
+			fmt.Fprintf(&b, "// Path cover degraded: %s\n", ps.DegradedReason)
+		}
+	}
 	b.WriteString("//\n")
 	b.WriteString("// This file checks that " + cfg.ImplFunc + " matches the Shen spec\n")
 	b.WriteString("// by evaluating the spec on sampled inputs and comparing outputs.\n\n")
@@ -467,6 +555,11 @@ func (h *Harness) Emit() (string, error) {
 	fmt.Fprintf(&b, "\t}{\n")
 	for _, c := range h.Cases {
 		fmt.Fprintf(&b, "\t\t{\n")
+		if c.Provenance != "" {
+			// Provenance is emitted only for non-pool cases, so a run
+			// with path cover off is byte-identical to before.
+			fmt.Fprintf(&b, "\t\t\t// provenance: %s\n", c.Provenance)
+		}
 		fmt.Fprintf(&b, "\t\t\tname: %q,\n", c.Name)
 		for i, pname := range cfg.Spec.ParamNames {
 			fmt.Fprintf(&b, "\t\t\t%s: %s,\n", lowerFirst(pname), c.Args[i].GoExpr)

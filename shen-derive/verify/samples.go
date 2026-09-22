@@ -19,6 +19,11 @@ import (
 type Sample struct {
 	Value  core.Value // used by the spec evaluator
 	GoExpr string     // used by the generated Go test, e.g. "mustAmount(100)"
+
+	// Provenance names which sample source produced this value: empty
+	// for the deterministic boundary pool and its seeded random draws,
+	// "path:<n>" for a solver-produced witness of the spec's nth path.
+	Provenance string
 }
 
 // SampleCtx threads sampling options through the recursive GenSamples
