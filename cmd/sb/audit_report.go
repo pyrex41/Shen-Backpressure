@@ -139,8 +139,13 @@ func renderAuditMarkdown(r *DischargeReport, sourcePath string) string {
 	// Summary.
 	b.WriteString("\n## Summary\n\n")
 	s := r.Summary
-	fmt.Fprintf(&b, "- **Rules:** %d total — %d discharged, %d violated, %d unproven\n",
-		s.RuleCount, s.RulesDischarged, s.RulesViolated, s.RulesUnproven)
+	if s.RulesVacuous > 0 {
+		fmt.Fprintf(&b, "- **Rules:** %d total — %d discharged, %d violated, %d unproven, %d vacuous\n",
+			s.RuleCount, s.RulesDischarged, s.RulesViolated, s.RulesUnproven, s.RulesVacuous)
+	} else {
+		fmt.Fprintf(&b, "- **Rules:** %d total — %d discharged, %d violated, %d unproven\n",
+			s.RuleCount, s.RulesDischarged, s.RulesViolated, s.RulesUnproven)
+	}
 	if s.PremisesRuntimeEvaluator > 0 {
 		fmt.Fprintf(&b, "- **Premises:** %d total — %d static, %d runtime-evaluator, %d runtime-sampled, %d unproven\n",
 			s.PremisesTotal, s.PremisesStatic, s.PremisesRuntimeEvaluator, s.PremisesRuntimeSampled, s.PremisesUnproven)
@@ -151,6 +156,9 @@ func renderAuditMarkdown(r *DischargeReport, sourcePath string) string {
 
 	if s.RulesViolated > 0 {
 		b.WriteString("\n> :warning: **At least one rule is currently violated.** See per-rule sections below for counter-examples.\n")
+	}
+	if s.RulesVacuous > 0 {
+		b.WriteString("\n> :warning: **At least one rule is vacuous** — its datatype is uninhabited, so no value of that type can exist and every claim resting on it is empty. This is a spec defect, not an implementation defect. See the per-rule sections below.\n")
 	}
 
 	// Per-rule sections, alphabetised for stability.
@@ -176,8 +184,13 @@ func renderRuleSection(b *strings.Builder, rule DischargeRule) {
 		statusBadge = "❌ Violated"
 	case DischargeStatusUnproven:
 		statusBadge = "⚠️  Unproven"
+	case DischargeStatusVacuous:
+		statusBadge = "⛔ Vacuous (uninhabited datatype)"
 	}
 	fmt.Fprintf(b, "### `%s` — %s (%s)\n\n", rule.Name, rule.Kind, statusBadge)
+	if rule.VacuityMessage != "" {
+		fmt.Fprintf(b, "> **Uninhabited.** %s\n\n", rule.VacuityMessage)
+	}
 	if rule.HumanDescription != "" {
 		marker := ""
 		if rule.HumanDescriptionSource == ":doc" {
@@ -215,6 +228,27 @@ func renderRuleSection(b *strings.Builder, rule DischargeRule) {
 				}
 				fmt.Fprintf(b, "\n- `%s`: sampled %d cases (seed: %s); %d passed, %d failed.\n",
 					p.ID, p.SamplesPassed+p.SamplesFailed, seed, p.SamplesPassed, p.SamplesFailed)
+			}
+			// Path cover, when it ran, is the stronger claim: the
+			// sample set covers every feasible path of the spec, not
+			// just a boundary pool. Spell the counters out so a
+			// reader can see how much of the spec that is.
+			if p.PathsTotal != nil {
+				total, feasible, dead := *p.PathsTotal, 0, 0
+				if p.PathsFeasible != nil {
+					feasible = *p.PathsFeasible
+				}
+				if p.PathsDead != nil {
+					dead = *p.PathsDead
+				}
+				fmt.Fprintf(b,
+					"- `%s`: path cover — %d path(s) enumerated, %d feasible (one committed sample each), "+
+						"%d dead (unsatisfiable path condition), %d undecided.\n",
+					p.ID, total, feasible, dead, total-feasible-dead)
+				if dead > 0 {
+					fmt.Fprintf(b,
+						"  A dead path is a branch of the spec no input can reach — worth a look from the spec author.\n")
+				}
 			}
 			if len(p.CodeReferences) > 0 {
 				fmt.Fprintf(b, "- `%s` code references: %s\n",
@@ -345,6 +379,24 @@ it was discharged in the implementation under verification.
   returns the same value on every sampled input. A "discharged"
   premise here means *every sampled case agreed*. This is sampled
   evidence, not an exhaustive proof.
+
+- **Path cover** — when the premise's basis is
+  ` + "`prover-z3-path-cover`" + `, the evidence is stronger than a pool.
+  shen-derive symbolically executed the Shen spec, enumerated every
+  execution path (unrolling list recursion to a fixed depth), and used
+  the Z3 solver to produce one concrete input per *feasible* path.
+  Those inputs are committed as test cases alongside the boundary
+  pool. Paths whose condition is unsatisfiable are reported as dead:
+  branches of the spec no input can reach. This is still bounded
+  evidence — the list-unrolling depth is finite — but within that
+  bound no path of the spec goes unexercised.
+
+- **Vacuous** — the rule's datatype is uninhabited: the conjunction of
+  its verified premises has no solution, so no value of the type can
+  be constructed and every claim that consumes one is empty. This is
+  a defect in the spec rather than in the implementation, and it
+  fails the gate, because an uninhabited guard proves nothing while
+  looking like it proves everything.
 
 - **Unproven** — the tool could not confidently classify the premise
   in this release. Treat the premise as outside the verified

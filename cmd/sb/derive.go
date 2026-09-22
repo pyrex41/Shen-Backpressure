@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -119,10 +120,10 @@ Flags:
 		fmt.Fprintf(os.Stderr, "sb derive: [%s/%s] %s → %s\n", spec.Lang, spec.Func, spec.Path, spec.OutFile)
 
 		var (
-			runCmd    string
-			runArgs   []string
-			runDir    string
-			tempGlob  string
+			runCmd   string
+			runArgs  []string
+			runDir   string
+			tempGlob string
 		)
 		// Per-spec discharge report tempfile. Aggregated into
 		// .sb/discharge_report.json after `go test` runs.
@@ -159,6 +160,17 @@ Flags:
 			if absGuardFile != "" {
 				runArgs = append(runArgs, "--guard-file", absGuardFile)
 			}
+			if spec.PathCover {
+				// Path-complete sampling: one committed case per
+				// feasible path of the spec, on top of the boundary
+				// pool. shen-derive degrades to the pool alone when
+				// no z3 binary is on PATH, so this is safe to pass
+				// unconditionally once the spec opts in.
+				runArgs = append(runArgs, "--path-cover")
+				if spec.PathDepth > 0 {
+					runArgs = append(runArgs, "--path-depth", strconv.Itoa(spec.PathDepth))
+				}
+			}
 			runDir = absDeriveDir
 			tempGlob = "shen-derive-*.go"
 		case "ts":
@@ -189,6 +201,7 @@ Flags:
 				printDeriveCommand(runDir, runCmd, runArgs)
 			}
 			if err := runInDir(runDir, runCmd, runArgs...); err != nil {
+				exitIfVacuous(reportTmpPath, spec)
 				fmt.Fprintf(os.Stderr, "sb derive: regen %s: %v\n", spec.Func, err)
 				os.Exit(1)
 			}
@@ -215,6 +228,7 @@ Flags:
 			printDeriveCommand(runDir, runCmd, runArgs)
 		}
 		if err := runInDir(runDir, runCmd, runArgs...); err != nil {
+			exitIfVacuous(reportTmpPath, spec)
 			fmt.Fprintf(os.Stderr, "sb derive: regen %s: %v\n", spec.Func, err)
 			os.Exit(1)
 		}
@@ -316,6 +330,34 @@ Flags:
 	if testFailed {
 		os.Exit(1)
 	}
+}
+
+// exitIfVacuous inspects a per-spec partial report that shen-derive
+// wrote just before failing. When it names uninhabited datatypes, the
+// failure is not a tool error but a spec bug, so sb reports it in those
+// terms — with the rule names and the explanation from the report —
+// rather than relaying "exit status 1".
+func exitIfVacuous(reportPath string, spec DeriveSpec) {
+	pr, err := loadDischarge(reportPath)
+	if err != nil || pr == nil {
+		return
+	}
+	names := vacuousRules(pr)
+	if len(names) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"\nsb derive: %s declares %d uninhabited datatype(s): %s\n",
+		spec.Path, len(names), strings.Join(names, ", "))
+	for _, rule := range pr.Rules {
+		if rule.Status == DischargeStatusVacuous && rule.VacuityMessage != "" {
+			fmt.Fprintf(os.Stderr, "\n  %s: %s\n", rule.Name, rule.VacuityMessage)
+		}
+	}
+	fmt.Fprintln(os.Stderr,
+		"\nAn uninhabited guard type proves nothing: no program can construct a value of it, "+
+			"so every rule that consumes one is vacuously true. Fix the spec.")
+	os.Exit(1)
 }
 
 // finalizeDischargeReport merges per-spec partial reports, fills in
