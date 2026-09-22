@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"multi-tenant-api/internal/apibrand"
 	"multi-tenant-api/internal/shenguard"
 )
 
@@ -15,7 +16,7 @@ func TestMiddlewareValidToken(t *testing.T) {
 		t.Fatalf("NewToken: %v", err)
 	}
 
-	var gotHuman shenguard.HumanPrincipal
+	var gotHuman shenguard.HumanPrincipal[apibrand.API]
 	var gotOK bool
 
 	handler := Middleware(testSecret)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -15,16 +15,24 @@
 //
 // bin/show-bypass-attempts.sh does this for every .go.bak in this
 // directory.
+//
+// W1 NOTE (brands). The type is now `TenantAccess[B Brand]`, so the
+// literal names a brand. The rejection is unchanged and for the
+// original reason: the field names are not in scope.
 package bypass_attempts_demo
 
 import (
 	"multi-tenant-api/internal/shenguard"
 )
 
-func ForgeTenantAccess() shenguard.TenantAccess {
+// attemptBrand is a brand for this attempt. Declaring one is legal;
+// it buys nothing here.
+type attemptBrand struct{}
+
+func ForgeTenantAccess() shenguard.TenantAccess[attemptBrand] {
 	// Try to fabricate a TenantAccess that would let a non-member
 	// reach a handler that demands `verified.TenantAccess`.
-	return shenguard.TenantAccess{
+	return shenguard.TenantAccess[attemptBrand]{
 		principal: nil,
 		tenant:    shenguard.NewTenantId("t-acme"),
 		isMember:  true,

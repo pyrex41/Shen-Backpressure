@@ -1,0 +1,83 @@
+// Attempt #6: forge a TenantAccess with the EMPTY struct literal.
+//
+// Attempt #1 named the fields, and Go's visibility rules rejected it.
+// This attempt names none. `shenguard.TenantAccess{}` is a legal
+// expression from any package — unexported fields prevent you from
+// *naming* a field, they never prevented you from taking the zero
+// value — and the result is a value of the proof type that no
+// constructor ever checked: no principal, no tenant, `isMember` false,
+// and no DB membership query. Every handler that demands a
+// `verified.TenantAccess` accepts it.
+//
+// Outcome BEFORE W1 (`--no-brands`, the shape this file was written
+// against): **compiles and succeeds**. The forged value is
+// indistinguishable from a real one at the type level; the defence was
+// code review.
+//
+// Outcome AFTER W1 (`--brands`): **FAILS at compile**, twice over.
+//
+//  1. `shenguard.TenantAccess` is now `TenantAccess[B Brand]`, so the
+//     bare name is "cannot use generic type shenguard.TenantAccess[B
+//     shenguard.Brand] without instantiation". An attacker must name a
+//     brand, which is an explicit act recorded in the source.
+//
+//  2. Naming one does not help. Write the instantiated form —
+//
+//     type myBrand struct{}
+//     forged := shenguard.TenantAccess[myBrand]{}
+//     _ = forged.Tenant()
+//
+//     — and it compiles, but panics on the first read:
+//
+//     panic: shenguard: forged TenantAccess value: not produced by
+//     NewTenantAccess (zero value, empty literal, or a dropped
+//     constructor error)
+//
+//     because the generated struct's first field is an unexported
+//     `valid witness` whose zero value is not minted, and every
+//     accessor and every consuming constructor calls
+//     `mustBeMinted`. The forgery cannot be laundered by passing it to
+//     `NewResourceAccess` either — that constructor checks the witness
+//     of its `access` argument before anything else.
+//
+// The witness panic is a RUNTIME member of the TCB: see
+// ../../docs/TRUST-MODEL.md. It converts a silent forgery into a crash
+// at the point of use, which is the best Go's type system allows
+// against a zero value.
+//
+// To re-run this attempt directly:
+//
+//	cp bypass_attempts/06_empty_literal.go.bak /tmp/bypass.go
+//	# (placed in a package that imports shenguard)
+//	go build ./...
+//
+// bin/show-bypass-attempts.sh does this for every .go.bak in this
+// directory.
+package bypass_attempts_demo
+
+import (
+	"multi-tenant-api/internal/shenguard"
+)
+
+// ForgeEmptyTenantAccess returns a TenantAccess nobody checked.
+//
+// Note what is NOT written here: no field names, so nothing in this
+// function violates Go's visibility rules. That is the whole point of
+// the attempt.
+func ForgeEmptyTenantAccess() shenguard.TenantAccess {
+	return shenguard.TenantAccess{}
+}
+
+// ForgeEmptyResourceAccess does the same one tier up the chain, which
+// is the tier a handler actually consumes before touching the DB.
+func ForgeEmptyResourceAccess() shenguard.ResourceAccess {
+	return shenguard.ResourceAccess{}
+}
+
+// ReadForgedTenant reads a field off the forged value. Before W1 this
+// returns the zero TenantId (empty string) and the caller proceeds to
+// query the DB scoped to tenant "". After W1 this is where the witness
+// panic fires, if the attacker got this far by naming a brand.
+func ReadForgedTenant() string {
+	return ForgeEmptyTenantAccess().Tenant().Val()
+}

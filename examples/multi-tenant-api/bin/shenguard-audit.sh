@@ -41,6 +41,13 @@ fi
 # second-line defence against handlers that try to construct the lower-tier
 # guards directly.
 ALLOWED_CALLER="internal/verified/access.go"
+# cmd/cedar-verify is the differential policy harness: it builds dummy
+# principals and asks whether the guard constructors agree with Cedar
+# and Rego on the same samples, which means calling the raw
+# constructors on purpose, with both boolean outcomes. It is not on any
+# request path and it opens no DB. Allowed with that justification;
+# every other caller is a bypass.
+ALLOWED_HARNESS="cmd/cedar-verify/main.go"
 SCAN_DIRS=""
 [ -d internal ] && SCAN_DIRS="$SCAN_DIRS internal"
 [ -d cmd ] && SCAN_DIRS="$SCAN_DIRS cmd"
@@ -50,6 +57,8 @@ if [ -n "$SCAN_DIRS" ]; then
         case "$f" in
             "$ALLOWED_CALLER") continue ;;
             "./$ALLOWED_CALLER") continue ;;
+            "$ALLOWED_HARNESS") continue ;;
+            "./$ALLOWED_HARNESS") continue ;;
             */shenguard/*) continue ;;
             */bypass_attempts/*) continue ;;
             */bypass_harness/*) continue ;;

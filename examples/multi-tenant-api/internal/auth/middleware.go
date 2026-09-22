@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"multi-tenant-api/internal/apibrand"
 	"multi-tenant-api/internal/shenguard"
 )
 
@@ -65,24 +66,27 @@ func Middleware(secret []byte) func(http.Handler) http.Handler {
 // part of the type-system anchor: bypassing any of them is a
 // compile-time error in handler code (the parameter types demand
 // shenguard types, not raw strings).
-func buildPrincipal(result ParseResult) (shenguard.HumanPrincipal, error) {
+// The brand is apibrand.API: the principal leaves this function
+// through context.Value, which erases type parameters, so the HTTP
+// boundary has to name a concrete brand. See internal/apibrand.
+func buildPrincipal(result ParseResult) (shenguard.HumanPrincipal[apibrand.API], error) {
 	iss, err := shenguard.NewJwtIssuer(result.Claims.Iss)
 	if err != nil {
-		return shenguard.HumanPrincipal{}, err
+		return shenguard.HumanPrincipal[apibrand.API]{}, err
 	}
 	aud, err := shenguard.NewJwtAudience(result.Claims.Aud)
 	if err != nil {
-		return shenguard.HumanPrincipal{}, err
+		return shenguard.HumanPrincipal[apibrand.API]{}, err
 	}
 	userID := shenguard.NewUserId(result.Claims.Sub)
 
-	claims, err := shenguard.NewParsedClaims(userID, result.Exp, iss, aud)
+	claims, err := shenguard.NewParsedClaims[apibrand.API](userID, result.Exp, iss, aud)
 	if err != nil {
-		return shenguard.HumanPrincipal{}, err
+		return shenguard.HumanPrincipal[apibrand.API]{}, err
 	}
 	verifiedJwt, err := shenguard.NewVerifiedJwt(claims, result.Signature)
 	if err != nil {
-		return shenguard.HumanPrincipal{}, err
+		return shenguard.HumanPrincipal[apibrand.API]{}, err
 	}
 
 	// W2.1 hardening: the structural premise (= User (head (head Jwt)))
@@ -93,22 +97,22 @@ func buildPrincipal(result ParseResult) (shenguard.HumanPrincipal, error) {
 	// cannot construct an AuthenticatedUser.
 	authUser, err := shenguard.NewAuthenticatedUser(verifiedJwt, userID)
 	if err != nil {
-		return shenguard.HumanPrincipal{}, err
+		return shenguard.HumanPrincipal[apibrand.API]{}, err
 	}
 	return shenguard.NewHumanPrincipal(authUser), nil
 }
 
 // PrincipalFromContext retrieves the AuthenticatedPrincipal from the request context.
 // Returns nil and false if not present.
-func PrincipalFromContext(ctx context.Context) (shenguard.AuthenticatedPrincipal, bool) {
-	u, ok := ctx.Value(authUserKey).(shenguard.AuthenticatedPrincipal)
+func PrincipalFromContext(ctx context.Context) (shenguard.AuthenticatedPrincipal[apibrand.API], bool) {
+	u, ok := ctx.Value(authUserKey).(shenguard.AuthenticatedPrincipal[apibrand.API])
 	return u, ok
 }
 
 // HumanFromContext retrieves the HumanPrincipal from the request context.
 // Returns the zero value and false if the principal is not a HumanPrincipal.
-func HumanFromContext(ctx context.Context) (shenguard.HumanPrincipal, bool) {
-	u, ok := ctx.Value(authUserKey).(shenguard.HumanPrincipal)
+func HumanFromContext(ctx context.Context) (shenguard.HumanPrincipal[apibrand.API], bool) {
+	u, ok := ctx.Value(authUserKey).(shenguard.HumanPrincipal[apibrand.API])
 	return u, ok
 }
 

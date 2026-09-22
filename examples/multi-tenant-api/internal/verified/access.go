@@ -42,18 +42,29 @@ import (
 // the carried tenant. Re-exports shenguard.TenantAccess so handlers
 // can import only the verified package and ignore shenguard at the
 // type level.
-type TenantAccess = shenguard.TenantAccess
+//
+// B is the GDP brand of the proof chain (W1): the principal, this
+// tenant proof and any ResourceAccess derived from it all carry the
+// same brand, which is what makes a proof from another chain a compile
+// error rather than a silent cross-tenant read.
+type TenantAccess[B shenguard.Brand] = shenguard.TenantAccess[B]
 
 // ResourceAccess is a proof that the carried tenant owns the carried
 // resource. Re-exports shenguard.ResourceAccess for the same reason
-// as TenantAccess.
-type ResourceAccess = shenguard.ResourceAccess
+// as TenantAccess, at the same brand.
+type ResourceAccess[B shenguard.Brand] = shenguard.ResourceAccess[B]
 
 // CheckTenantAccess derives the user-id from the principal (the W2.1
 // fix), runs a SQL membership query, and asks shenguard to construct
 // a TenantAccess. Returns an error if the principal is not a human
 // (services use a different membership path) or if the membership
 // row is missing.
+//
+// The brand parameter B must be named explicitly at the call site
+// (`CheckTenantAccess[apibrand.API](...)`): Go does not infer type
+// arguments from an interface-typed argument, and
+// `authenticated-principal` is a Shen sum type, which lowers to a
+// generic interface.
 //
 // TCB: this function's correctness rests on (a) the SQL query
 // being exact, (b) `principal.Auth().User().Val()` returning the
@@ -70,10 +81,10 @@ type ResourceAccess = shenguard.ResourceAccess
 // parameter dropped and the user-id read directly from the principal,
 // the type system now enforces that the SQL query is keyed by the
 // authenticated user.
-func CheckTenantAccess(db *sql.DB, principal shenguard.AuthenticatedPrincipal, tenantID shenguard.TenantId) (TenantAccess, error) {
-	userID, ok := userIDFromPrincipal(principal)
+func CheckTenantAccess[B shenguard.Brand](db *sql.DB, principal shenguard.AuthenticatedPrincipal[B], tenantID shenguard.TenantId) (TenantAccess[B], error) {
+	userID, ok := userIDFromPrincipal[B](principal)
 	if !ok {
-		return shenguard.TenantAccess{}, fmt.Errorf("service principals not supported by CheckTenantAccess")
+		return shenguard.TenantAccess[B]{}, fmt.Errorf("service principals not supported by CheckTenantAccess")
 	}
 
 	var exists int
@@ -82,13 +93,13 @@ func CheckTenantAccess(db *sql.DB, principal shenguard.AuthenticatedPrincipal, t
 		userID, tenantID.Val(),
 	).Scan(&exists)
 	if err != nil {
-		return shenguard.TenantAccess{}, fmt.Errorf("check tenant membership: %w", err)
+		return shenguard.TenantAccess[B]{}, fmt.Errorf("check tenant membership: %w", err)
 	}
 
 	isMember := exists > 0
-	access, err := shenguard.NewTenantAccess(principal, tenantID, isMember)
+	access, err := shenguard.NewTenantAccess[B](principal, tenantID, isMember)
 	if err != nil {
-		return shenguard.TenantAccess{}, fmt.Errorf("tenant access denied: %s is not a member of tenant %s", userID, tenantID.Val())
+		return shenguard.TenantAccess[B]{}, fmt.Errorf("tenant access denied: %s is not a member of tenant %s", userID, tenantID.Val())
 	}
 	return access, nil
 }
@@ -99,20 +110,20 @@ func CheckTenantAccess(db *sql.DB, principal shenguard.AuthenticatedPrincipal, t
 // it comes from the TenantAccess proof.
 //
 // TCB: the SQL query must be exact. Read it before trusting the chain.
-func CheckResourceAccess(db *sql.DB, access TenantAccess, resourceID shenguard.ResourceId) (ResourceAccess, error) {
+func CheckResourceAccess[B shenguard.Brand](db *sql.DB, access TenantAccess[B], resourceID shenguard.ResourceId) (ResourceAccess[B], error) {
 	var exists int
 	err := db.QueryRow(
 		"SELECT COUNT(*) FROM resources WHERE id = ? AND tenant_id = ?",
 		resourceID.Val(), access.Tenant().Val(),
 	).Scan(&exists)
 	if err != nil {
-		return shenguard.ResourceAccess{}, fmt.Errorf("check resource ownership: %w", err)
+		return shenguard.ResourceAccess[B]{}, fmt.Errorf("check resource ownership: %w", err)
 	}
 
 	isOwned := exists > 0
 	ra, err := shenguard.NewResourceAccess(access, resourceID, isOwned)
 	if err != nil {
-		return shenguard.ResourceAccess{}, fmt.Errorf("resource access denied: resource %s is not owned by tenant %s", resourceID.Val(), access.Tenant().Val())
+		return shenguard.ResourceAccess[B]{}, fmt.Errorf("resource access denied: resource %s is not owned by tenant %s", resourceID.Val(), access.Tenant().Val())
 	}
 	return ra, nil
 }
@@ -125,8 +136,8 @@ func CheckResourceAccess(db *sql.DB, access TenantAccess, resourceID shenguard.R
 // inside the JWT (enforced at construction by
 // `(= User (head (head Jwt))) : verified`). So the string returned
 // here is, by type, the JWT's `sub` claim.
-func userIDFromPrincipal(principal shenguard.AuthenticatedPrincipal) (string, bool) {
-	human, ok := principal.(shenguard.HumanPrincipal)
+func userIDFromPrincipal[B shenguard.Brand](principal shenguard.AuthenticatedPrincipal[B]) (string, bool) {
+	human, ok := principal.(shenguard.HumanPrincipal[B])
 	if !ok {
 		return "", false
 	}

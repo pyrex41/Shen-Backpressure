@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"multi-tenant-api/internal/apibrand"
 	"multi-tenant-api/internal/auth"
 	"multi-tenant-api/internal/shenguard"
 	"multi-tenant-api/internal/verified"
@@ -97,7 +98,7 @@ func (s *Server) handleListResources(w http.ResponseWriter, r *http.Request) {
 	tenantID := shenguard.NewTenantId(r.PathValue("tid"))
 	// W2.1: CheckTenantAccess no longer takes a separate `userID string`
 	// parameter. The user-id comes from `principal` inside the wrapper.
-	access, err := verified.CheckTenantAccess(s.DB, principal, tenantID)
+	access, err := verified.CheckTenantAccess[apibrand.API](s.DB, principal, tenantID)
 	if err != nil {
 		_ = auth.LogAccess(s.DB, userID, tenantID.Val(), "", "list_resources", false)
 		http.Error(w, err.Error(), http.StatusForbidden)
@@ -148,7 +149,7 @@ func (s *Server) handleGetResource(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromHuman(r)
 
 	tenantID := shenguard.NewTenantId(r.PathValue("tid"))
-	access, err := verified.CheckTenantAccess(s.DB, principal, tenantID)
+	access, err := verified.CheckTenantAccess[apibrand.API](s.DB, principal, tenantID)
 	if err != nil {
 		_ = auth.LogAccess(s.DB, userID, tenantID.Val(), r.PathValue("rid"), "get_resource", false)
 		http.Error(w, err.Error(), http.StatusForbidden)
@@ -194,7 +195,7 @@ func (s *Server) handleCreateResource(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromHuman(r)
 
 	tenantID := shenguard.NewTenantId(r.PathValue("tid"))
-	access, err := verified.CheckTenantAccess(s.DB, principal, tenantID)
+	access, err := verified.CheckTenantAccess[apibrand.API](s.DB, principal, tenantID)
 	if err != nil {
 		_ = auth.LogAccess(s.DB, userID, tenantID.Val(), "", "create_resource", false)
 		http.Error(w, err.Error(), http.StatusForbidden)

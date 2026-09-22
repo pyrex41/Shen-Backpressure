@@ -1,0 +1,152 @@
+// Attempt #7: apply Alice's TenantAccess proof to Bob's resource —
+// an UNPAIRED proof.
+//
+// Attempt #2 showed that "token-A with user-B" is refused, because the
+// `authenticated-user` rule carries the cross-field premise
+// `(= User (head (head Jwt)))` and the generated constructor checks it.
+// That fix was per-spec: someone had to notice the sharing and write
+// the premise. This attempt exploits the sharing nobody wrote a premise
+// for.
+//
+// Two complete, individually valid proof chains are built below — one
+// for Alice's tenant, one for Bob's. Every constructor is called with
+// honest arguments and every premise passes. Then the two chains are
+// crossed: Alice's `TenantAccess` is handed to `NewResourceAccess`
+// together with a resource id from Bob's tenant, and `isOwned` true.
+// Nothing in the spec relates the `Access` premise to the `Resource`
+// premise, so nothing checks it.
+//
+// Outcome BEFORE W1 (`--no-brands`, the shape this file was written
+// against): **compiles and succeeds**. `NewResourceAccess(aliceAccess,
+// bobResource, true)` returns a ResourceAccess whose `Access` says
+// "Alice may act in tenant acme" and whose `Resource` is Bob's. A
+// handler that trusts the pair reads across the tenant boundary. This
+// is the same class as the token-A/user-B bug, one tier up, and the
+// per-spec fix would be yet another hand-written premise.
+//
+// Outcome AFTER W1 (`--brands`): **FAILS at compile**. The brand
+// inference reads the sharing structure out of the sequents —
+// parsed-claims mints a brand, and verified-jwt, authenticated-user,
+// human-principal, tenant-access and resource-access all inherit it —
+// so the generated signature is
+//
+//	func NewResourceAccess[B Brand](
+//	        access TenantAccess[B],
+//	        resource ResourceId,
+//	        isOwned bool) (ResourceAccess[B], error)
+//
+// Two things now stop this file:
+//
+//  1. As written, it does not compile at all: `NewParsedClaims` mints a
+//     brand that appears only in its result type, so Go cannot infer it
+//     and the call must name one — "in call to shenguard.NewParsedClaims,
+//     cannot infer B". Forging now requires saying, in source, which
+//     proof chain you claim to be in.
+//
+//  2. Say it, honestly, and the crossing is the error. With
+//
+//     type aliceBrand struct{}
+//     type bobBrand struct{}
+//
+//     Alice's chain is built at `aliceBrand` and Bob's at `bobBrand`,
+//     and the crossed call fails:
+//
+//     shenguard.NewResourceAccess(aliceAccess, bobResource, true)
+//     // cannot use aliceAccess (variable of struct type
+//     // shenguard.TenantAccess[aliceBrand]) as
+//     // shenguard.TenantAccess[bobBrand] value
+//
+//     No premise was written for this. The binding came out of the
+//     spec's existing sharing structure.
+//
+// WHAT THIS DOES NOT CATCH. Brands are declared by the caller, so an
+// attacker who builds both chains at the SAME brand gets a pair the
+// compiler accepts again. What brands buy is that the two chains can no
+// longer be crossed silently: keeping them apart is now the default
+// (each mint site names its brand, and a brand declared inside a
+// request scope cannot be named anywhere else), and crossing them is an
+// explicit, greppable act. Go has no existential types, so there is no
+// way to make the constructor itself mint a brand the caller cannot
+// name. See ../../docs/TRUST-MODEL.md.
+//
+// To re-run this attempt directly:
+//
+//	cp bypass_attempts/07_unpaired_proof.go.bak /tmp/bypass.go
+//	# (placed in a package that imports shenguard)
+//	go build ./...
+//
+// bin/show-bypass-attempts.sh does this for every .go.bak in this
+// directory.
+package bypass_attempts_demo
+
+import (
+	"fmt"
+
+	"multi-tenant-api/internal/shenguard"
+)
+
+// buildPrincipal walks the honest chain for one user: claims → verified
+// JWT → authenticated user → human principal. Every premise passes.
+func buildPrincipal(userID string) (shenguard.HumanPrincipal, error) {
+	uid := shenguard.NewUserId(userID)
+	iss, err := shenguard.NewJwtIssuer("multi-tenant-api")
+	if err != nil {
+		return shenguard.HumanPrincipal{}, err
+	}
+	aud, err := shenguard.NewJwtAudience("users")
+	if err != nil {
+		return shenguard.HumanPrincipal{}, err
+	}
+	claims, err := shenguard.NewParsedClaims(uid, 9999999999, iss, aud)
+	if err != nil {
+		return shenguard.HumanPrincipal{}, err
+	}
+	jwt, err := shenguard.NewVerifiedJwt(claims, userID+"-signature")
+	if err != nil {
+		return shenguard.HumanPrincipal{}, err
+	}
+	authUser, err := shenguard.NewAuthenticatedUser(jwt, uid)
+	if err != nil {
+		return shenguard.HumanPrincipal{}, err
+	}
+	return shenguard.NewHumanPrincipal(authUser), nil
+}
+
+// ForgeUnpairedResourceAccess builds two honest chains and crosses
+// them: Alice's tenant access plus a resource that belongs to Bob's
+// tenant. Returns the forged proof's own account of itself.
+func ForgeUnpairedResourceAccess() (string, error) {
+	alice, err := buildPrincipal("u-alice")
+	if err != nil {
+		return "", fmt.Errorf("setup alice: %w", err)
+	}
+	bob, err := buildPrincipal("u-bob")
+	if err != nil {
+		return "", fmt.Errorf("setup bob: %w", err)
+	}
+
+	// Each principal's own, legitimate tenant access.
+	aliceAccess, err := shenguard.NewTenantAccess(alice, shenguard.NewTenantId("t-acme"), true)
+	if err != nil {
+		return "", fmt.Errorf("setup alice access: %w", err)
+	}
+	bobAccess, err := shenguard.NewTenantAccess(bob, shenguard.NewTenantId("t-globex"), true)
+	if err != nil {
+		return "", fmt.Errorf("setup bob access: %w", err)
+	}
+
+	// A resource in Bob's tenant, reached with Bob's access — honest.
+	bobResource := shenguard.NewResourceId("r-globex-payroll")
+	if _, err := shenguard.NewResourceAccess(bobAccess, bobResource, true); err != nil {
+		return "", fmt.Errorf("setup bob resource: %w", err)
+	}
+
+	// THE FORGERY: Alice's access, Bob's resource. No premise in
+	// specs/core.shen relates the two, so no constructor objects.
+	forged, err := shenguard.NewResourceAccess(aliceAccess, bobResource, true)
+	if err != nil {
+		return "", fmt.Errorf("unexpected: %w", err)
+	}
+	return fmt.Sprintf("forged ResourceAccess: tenant=%s resource=%s",
+		forged.Access().Tenant().Val(), forged.Resource().Val()), nil
+}

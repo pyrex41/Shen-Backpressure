@@ -33,6 +33,11 @@
 // The second arrow is enforced by the grep gate, not by Go's type
 // system. That's the structural-versus-TCB boundary called out in
 // docs/TRUST-MODEL.md.
+//
+// W1 NOTE (brands). Brands bind a proof to its subject; they say
+// nothing about the provenance of a boolean the caller supplies. This
+// attempt takes a real, minted TenantAccess and therefore still
+// compiles and still succeeds. It is the grep gate that catches it.
 package bypass_attempts_demo
 
 import (
@@ -41,15 +46,19 @@ import (
 	"multi-tenant-api/internal/shenguard"
 )
 
+// attemptBrand is this attempt's GDP brand. Each .go.bak is staged
+// alone, so every file that needs a brand declares its own.
+type attemptBrand struct{}
+
 // ForgeResourceAccess tries to construct a ResourceAccess for a
 // resource the caller does not own, by passing isOwned=true directly.
 // Compiles AND succeeds at runtime — this is the bypass the
 // `verified` package is the only defence against.
-func ForgeResourceAccess(access shenguard.TenantAccess) (shenguard.ResourceAccess, error) {
+func ForgeResourceAccess(access shenguard.TenantAccess[attemptBrand]) (shenguard.ResourceAccess[attemptBrand], error) {
 	resourceID := shenguard.NewResourceId("r-not-mine")
 	ra, err := shenguard.NewResourceAccess(access, resourceID, true)
 	if err != nil {
-		return shenguard.ResourceAccess{}, fmt.Errorf("unexpected: %w", err)
+		return shenguard.ResourceAccess[attemptBrand]{}, fmt.Errorf("unexpected: %w", err)
 	}
 	return ra, nil
 }
