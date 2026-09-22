@@ -9,6 +9,7 @@
 
 - [The one-sentence version](#the-one-sentence-version)
 - [What's structurally enforced](#whats-structurally-enforced)
+- [Proof binding: GDP brands](#proof-binding-gdp-brands)
 - [What's runtime-checked](#whats-runtime-checked)
 - [What's sampled](#whats-sampled)
 - [What's assumed (the TCB)](#whats-assumed-the-tcb)
@@ -85,6 +86,130 @@ that would violate them.
   validating constructor and
   `examples/shen-web-tools/runtime/guards_gen.ts:17-29` for the TS
   equivalent.
+
+## Proof binding: GDP brands
+
+Opt-in, via `shengen --brands` / `shengen-ts --brands`. Two examples
+use it today (`examples/payment`, `examples/multi-tenant-api`); it is
+not the default.
+
+The three structural guarantees above answer "was this value checked?"
+They do not answer "was it checked *about the value I am using it
+with*?" In the payment spec, `safe-transfer` takes a `transaction` and
+a `balance-checked`, and the pre-brand constructor
+
+```go
+func NewSafeTransfer(tx Transaction, check BalanceChecked) SafeTransfer
+```
+
+never checks that `check` is the check for `tx`. Any balance proof
+pairs with any transaction. The same hole one tier up in the
+multi-tenant chain lets Alice's `TenantAccess` be paired with a
+resource in Bob's tenant — see
+`examples/multi-tenant-api/bypass_attempts/07_unpaired_proof.go.bak`,
+which compiled and succeeded before brands existed.
+
+Brands close it with a phantom type parameter, the encoding from
+*Ghosts of Departed Proofs*:
+
+```go
+func NewSafeTransfer[B Brand](tx Transaction[B], check BalanceChecked[B]) SafeTransfer[B]
+```
+
+Nothing new is written in the spec. `shengen` reads the brand
+structure out of the sharing already present in the sequents: a
+premise of proof type introduces a brand, two premises unify when one
+reaches the other along a nested field path or a verified premise
+mentions both, and the conclusion is parameterized by the brands that
+survive. The inference and its golden tables live in
+`cmd/shengen/brand_inference.go` and its test.
+
+### What brands guarantee
+
+- **Pairing is a compile error.** A proof at brand `A` cannot be
+  passed where a proof at brand `B` is expected. This is checked by
+  the target language's type checker, on every input, with no runtime
+  cost — the brand parameter is phantom and erased.
+- **The guarantee is inferred, not asserted.** It comes from the
+  spec's existing structure, so it cannot drift from the spec the way
+  a hand-written cross-field premise can.
+- **It composes along the chain.** In the multi-tenant spec one brand
+  threads `parsed-claims → verified-jwt → authenticated-user →
+  authenticated-principal → tenant-access → resource-access`, so a
+  `ResourceAccess[B]` is evidence about the specific JWT that `B` came
+  from.
+
+### What brands do NOT guarantee
+
+- **Brand freshness is a caller discipline.** Go and TypeScript have
+  no existential types, so a constructor cannot mint a brand its
+  caller is unable to name. A caller who builds two proof chains at
+  the *same* brand gets a pair the compiler accepts again. What brands
+  buy is that keeping chains apart is the default — every mint site
+  names a brand, and a brand declared inside a scope (a local type in
+  Go, a `unique symbol` in TypeScript) cannot be named outside it —
+  and that crossing them is an explicit, greppable act.
+- **Some boundaries erase them.** A value that crosses `context.Value`
+  in Go, or a `JSON.parse` in TypeScript, has lost its type
+  parameters; recovering it needs a concrete brand. That is why
+  `examples/multi-tenant-api/internal/apibrand` pins one brand for the
+  whole server: within that process, brands do not distinguish two
+  concurrent requests. Library code there stays generic, so a caller
+  with its own brand still gets the pairing.
+- **They say nothing about provenance.** A brand binds a proof to a
+  value. It does not make a boolean the caller supplied true — see
+  `bypass_attempts/05_inject_isowned_true.go.bak`, still caught by the
+  `Check*` wrapper discipline and its grep gate, not by the type
+  system.
+- **They do not stop `unsafe`.** `unsafe.Pointer` can set the brand's
+  neighbours as easily as any other field
+  (`bypass_attempts/03_reflection_escape.go.bak`).
+
+### The witness panic is a runtime member of the TCB
+
+Unexported fields stop a caller from *naming* a field. They never
+stopped the empty literal: `shenguard.BalanceChecked{}` names no
+field, so it was always legal from any package, and it produced a
+proof value no constructor had ever checked. The same value came back
+alongside every constructor error, so a dropped `err` forged a proof
+too.
+
+With `--brands`, every generated type's first field is an unexported
+`valid witness` whose zero value is not minted, and every accessor and
+every consuming constructor calls `mustBeMinted`:
+
+```
+panic: shenguard: forged BalanceChecked value: not produced by
+NewBalanceChecked (zero value, empty literal, or a dropped
+constructor error)
+```
+
+In TypeScript the same role is played by a `_witness` property and a
+thrown `Error`; there the forgery it catches is structural rather than
+a zero value (`Object.create(T.prototype)`, a deserialized object, or
+a cast through `unknown`).
+
+**This is a runtime check, and therefore part of the TCB, in two
+ways.** First, it converts a silent forgery into a loud crash at the
+point of first use — a crash, not a rejection, and in a server that
+means a panicking request (or a panicking process, if nothing
+recovers). Second, its correctness rests on the emitter having put a
+`mustBeMinted` call on *every* accessor and *every* consuming
+constructor: one missing call is a silent hole. That is what
+`bin/shenguard-audit.sh --brands` checks — it rejects a generated file
+in which any wrapper type has lost its witness field — and what the
+regen-and-diff step of the same gate checks for the calls.
+
+Two consequences worth stating plainly:
+
+- A forged value that is never read never panics. The witness catches
+  use, not existence.
+- The panic is the *best* Go allows against a zero value. A
+  constructor that returned `*T` or `(T, bool)` would make the failure
+  a compile-time matter, at the cost of changing every call site; the
+  roadmap took the witness route deliberately
+  (`thoughts/shared/plans/2026-09-22-verifier-throughput-roadmap.md`,
+  "Decisions taken in this plan").
 
 ## What's runtime-checked
 
@@ -256,7 +381,18 @@ diffed by `tcb-audit`, so a reviewer can audit the output without
 auditing the emitter — but the relationship "input spec ⇒ correct
 output code" rests on the emitter being right.
 
-### 7. Your build pipeline
+### 7. The witness panic (with `--brands`)
+
+The generated `mustBeMinted` check is a runtime member of the TCB: it
+is what makes an empty-literal or dropped-error forgery loud instead of
+silent, and it only works if the emitter placed it on every accessor
+and every consuming constructor. `bin/shenguard-audit.sh --brands`
+enforces the witness field's presence and diffs the whole file against
+a fresh emitter run. See [Proof binding: GDP
+brands](#proof-binding-gdp-brands) for what the panic does and does not
+buy.
+
+### 8. Your build pipeline
 
 If a CI step runs `sb gen` and uploads the result without first
 running `tcb-audit`, the published binary may contain

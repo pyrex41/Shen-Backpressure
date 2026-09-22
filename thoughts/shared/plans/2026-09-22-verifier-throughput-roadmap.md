@@ -73,6 +73,51 @@ Verified in the tree at the commit above:
 
 ## W1. Proof binding: GDP brands in shengen
 
+### Status (W1 implemented, default flip deferred)
+
+Steps 1–5 and 7's documentation are done; `--brands` is **opt-in** and
+the default is unchanged.
+
+| Step | State |
+|------|-------|
+| 1. `brand_inference.go` + golden tables | done |
+| 2. Go emitter behind `--brands`; payment regenerated | done |
+| 3. Bypass attempts 06, 07; multi-tenant regenerated | done |
+| 4. shengen-ts + tests | done; shen-web-tools NOT migrated (see gaps) |
+| 5. `tcb-audit` rejects a missing witness | done (`bin/shenguard-audit.sh --brands`) |
+| 6. Make `--brands` the default | **DEFERRED** |
+| 7. TRUST-MODEL section, examples regenerated | done except the audit reports (see gaps) |
+
+**Step 6 is deferred deliberately.** Flipping the default changes the
+generated output of every project that has not threaded brands through
+its own signatures, which is a breaking change for consumers outside
+this repo, and the migration is not mechanical: a value that crosses
+`context.Value`, a `JSON.parse`, or any other type-erasing boundary
+needs a concrete brand chosen by hand (see
+`examples/multi-tenant-api/internal/apibrand`), and a constructor whose
+premise is a Shen sum type needs explicit instantiation because Go
+infers nothing from an interface-typed argument. Flip it after W4's
+forgery gate exists, so the flip is protected by a measured corpus
+rather than by two hand-written attempts.
+
+Gaps recorded at implementation time:
+
+- `examples/shen-web-tools` is not migrated to `--brands`. Its 762-line
+  generated module is consumed by six hand-written TypeScript modules
+  with their own tests, and the environment has no `node_modules` for
+  it. `examples/payment/reference/guards_gen_branded.ts` is the
+  committed TypeScript reference instead.
+- Python and Rust reference emitters are untouched; the plan's `NewType`
+  and `PhantomData` lowering is not implemented.
+- The committed `transcript/discharge_report.json` and
+  `transcript/audit_report.md` are not refreshed, so payment's report
+  does not yet carry a `guard-brand-bound` discharge basis. That needs
+  `sb gates` plus a schema-level decision about the new basis token.
+- shen-derive does not run the brand inference, so its generated
+  harness writes unparameterized type names. payment routes the derive
+  gate through `internal/guardcompat`, which pins one shared brand; the
+  package documents what that gives up.
+
 ### Goal
 
 Make "this proof belongs to that value" a type error in every
@@ -144,6 +189,7 @@ silent forgery into a loud crash at first use.
 5. Extend `tcb-audit` allowlist checks to reject any generated file
    that lacks the witness field on a wrapper type.
 6. Make `--brands` the default; keep `--no-brands` for one release.
+   **Deferred — see Status above.**
 7. Regenerate all examples; refresh audit reports; add a section to
    `docs/TRUST-MODEL.md` naming the witness panic as a runtime
    member of the TCB.
