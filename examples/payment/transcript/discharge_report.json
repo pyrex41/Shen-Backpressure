@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-28T18:16:32Z",
+  "generated_at": "2026-09-22T04:52:40Z",
   "spec": {
     "files": [
       {
@@ -11,8 +11,8 @@
     "rule_count": 7
   },
   "impl": {
-    "git_commit": "643ba55f2850fcfb411f3b1b1d8c2477f67547a4",
-    "git_dirty": true,
+    "git_commit": "22d7a3e149ce95f82655b3c53c701383ccf32062",
+    "git_dirty": false,
     "target_languages": [
       "go"
     ]
@@ -40,7 +40,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "X is typed string; the target language's type system rejects non-string values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:22"
+            "internal/shenguard/guards_gen.go:54"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -48,7 +48,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
       "counter_examples": []
     },
     {
@@ -66,7 +66,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Id is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:96"
+            "internal/shenguard/guards_gen.go:142"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -79,7 +79,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Balance is typed amount; values of that type can only be constructed via shengen's guarded constructor, which enforces all of amount's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:96"
+            "internal/shenguard/guards_gen.go:142"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -87,7 +87,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
       "counter_examples": []
     },
     {
@@ -105,7 +105,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "X is typed number; the target language's type system rejects non-number values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:33"
+            "internal/shenguard/guards_gen.go:68"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -118,7 +118,7 @@
           "discharge_basis": "runtime-via-evaluator",
           "rationale": "amount is evaluated at runtime by the shen-derive evaluator against the spec expression (\u003e= X 0); the spec and the runtime check are the same source.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:33"
+            "internal/shenguard/guards_gen.go:68"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -127,7 +127,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
       "counter_examples": []
     },
     {
@@ -145,7 +145,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Bal is typed number; the target language's type system rejects non-number values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:74"
+            "internal/shenguard/guards_gen.go:117"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -158,7 +158,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Tx is typed transaction; values of that type can only be constructed via shengen's guarded constructor, which enforces all of transaction's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:74"
+            "internal/shenguard/guards_gen.go:117"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -171,7 +171,7 @@
           "discharge_basis": "guard-constructor-validates",
           "rationale": "shengen's generated constructor for balance-invariant rejects inputs that do not satisfy (\u003e= Bal (head Tx)), so this premise holds for any value of type balance-invariant reachable in the impl.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:74"
+            "internal/shenguard/guards_gen.go:117"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -179,7 +179,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
       "counter_examples": []
     },
     {
@@ -194,15 +194,18 @@
           "id": "processable.oracle-spec-equiv",
           "expression": "spec(processable) ≡ impl(Processable) on sampled inputs",
           "discharge": "runtime-sample",
-          "discharge_basis": "shen-derive-sampled",
-          "rationale": "shen-derive evaluated the spec on 35 sampled cases (deterministic-default) and emitted a Go test asserting impl returns the same value on each.",
-          "samples_passed": 35,
+          "discharge_basis": "prover-z3-path-cover",
+          "rationale": "shen-derive symbolically executed the spec (list unroll depth 4), enumerated 10 path(s), and used z3 to find a concrete witness for each of the 9 feasible one(s) (1 dead, 0 undecided). Those 9 witness(es) plus the boundary pool make up the 44 committed cases; the emitted Go test asserts impl returns the spec's value on each.",
+          "samples_passed": 44,
           "samples_failed": 0,
-          "sample_seed": "deterministic-default"
+          "sample_seed": "deterministic-default",
+          "paths_total": 10,
+          "paths_feasible": 9,
+          "paths_dead": 1
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "discharged_since_commit": "22d7a3e149ce95f82655b3c53c701383ccf32062",
       "counter_examples": []
     },
     {
@@ -220,7 +223,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Tx is typed transaction; values of that type can only be constructed via shengen's guarded constructor, which enforces all of transaction's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:115"
+            "internal/shenguard/guards_gen.go:165"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -233,7 +236,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Check is typed balance-checked; values of that type can only be constructed via shengen's guarded constructor, which enforces all of balance-checked's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:115"
+            "internal/shenguard/guards_gen.go:165"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -241,7 +244,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
       "counter_examples": []
     },
     {
@@ -259,7 +262,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Amount is typed amount; values of that type can only be constructed via shengen's guarded constructor, which enforces all of amount's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:51"
+            "internal/shenguard/guards_gen.go:89"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -272,7 +275,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "From is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:51"
+            "internal/shenguard/guards_gen.go:89"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -285,7 +288,7 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "To is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:51"
+            "internal/shenguard/guards_gen.go:89"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
@@ -293,7 +296,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
       "counter_examples": []
     }
   ],
@@ -307,6 +310,60 @@
     "premises_runtime_sampled": 1,
     "premises_unproven": 0,
     "premises_runtime_evaluator": 1
+  },
+  "evidence": {
+    "mutation_score": {
+      "score": 1,
+      "caught": 3,
+      "survived": 0,
+      "equivalent": 0,
+      "invalid": 0,
+      "total": 3,
+      "timeout": "1m0s",
+      "measured_at": "2026-09-22T04:52:41Z",
+      "operators": [
+        {
+          "operator": "cmp-flip",
+          "caught": 1,
+          "survived": 0,
+          "equivalent": 0,
+          "invalid": 0
+        },
+        {
+          "operator": "off-by-one",
+          "caught": 1,
+          "survived": 0,
+          "equivalent": 0,
+          "invalid": 0
+        },
+        {
+          "operator": "zero-return",
+          "caught": 1,
+          "survived": 0,
+          "equivalent": 0,
+          "invalid": 0
+        }
+      ],
+      "specs": [
+        {
+          "spec": "processable",
+          "impl_func": "Processable",
+          "test": "TestSpec_Processable",
+          "score": 1,
+          "caught": 3,
+          "survived": 0,
+          "equivalent": 0,
+          "invalid": 0
+        }
+      ]
+    },
+    "forgery": {
+      "total": 3,
+      "as_declared": 3,
+      "succeeding": 0,
+      "measured_at": "2026-09-22T04:52:41Z",
+      "corpus": "forgeries"
+    }
   },
   "signature": null
 }

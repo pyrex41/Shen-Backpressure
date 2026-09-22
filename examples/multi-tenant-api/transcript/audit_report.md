@@ -1,8 +1,8 @@
 # Discharge Report — Audit Rendering
 
-Generated 2026-09-22T04:16:23Z. Source artifact: `.sb/discharge_report.json` (schema_version=1).
+Generated 2026-09-22T04:52:57Z. Source artifact: `.sb/discharge_report.json` (schema_version=1).
 
-**Implementation commit:** `76467fdd14e9b455808a1593b9b10d28289eeacb`
+**Implementation commit:** `22d7a3e149ce95f82655b3c53c701383ccf32062` (working tree dirty)
 
 **Spec files:**
 
@@ -21,8 +21,41 @@ Generated 2026-09-22T04:16:23Z. Source artifact: `.sb/discharge_report.json` (sc
 
 ## Summary
 
-- **Rules:** 17 total — 17 discharged, 0 violated, 0 unproven
-- **Premises:** 36 total — 35 static, 1 runtime-sampled, 0 unproven
+- **Rules:** 17 total — 16 discharged, 1 violated, 0 unproven
+- **Premises:** 36 total — 34 static, 1 runtime-sampled, 1 unproven
+
+> :warning: **At least one rule is currently violated.** See per-rule sections below for counter-examples.
+
+## Gate Strength
+
+A discharge says a gate passed. This section says how much that is worth, by breaking the software on purpose and counting what the gates noticed.
+
+### Mutation score — 100.0%
+
+`sb mutate` applied a fixed operator set to each implementation package and ran **only** the committed spec test against every mutant. 2 of 2 live mutants were caught, with 0 marked equivalent by the author and 0 excluded as invalid (the mutated package did not compile, which is evidence about Go and not about the test).
+
+Measured 2026-09-22T04:52:57Z; per-mutant timeout 1m0s. A mutant that times out counts as caught: the gate's verdict on it was still "not this implementation".
+
+| Spec | Impl | Test | Score | Caught | Survived | Equivalent | Invalid |
+|---|---|---|---:|---:|---:|---:|---:|
+| `same-user?` | `SameUser` | `TestSpec_SameUser` | 100.0% | 2 | 0 | 0 | 0 |
+
+**Per operator.** A column of survivors under one operator names the shape of the blind spot, not just its size.
+
+| Operator | Caught | Survived | Equivalent | Invalid |
+|---|---:|---:|---:|---:|
+| `cmp-flip` | 1 | 0 | 0 | 0 |
+| `zero-return` | 1 | 0 | 0 | 0 |
+
+No survivors: every mutant this operator set produced was either caught by the spec test or marked equivalent.
+
+
+### Forgery corpus
+
+`sb forgery` staged 9 program(s) from `forgeries` and ran the check each one's header declares. 9 produced their declared outcome. 1 succeeded — that is, obtained or used a guard value the proof chain never justified.
+
+A succeeding forgery is not necessarily a defect: the corpus deliberately carries the ones that document a limit of the trust model, so that a **new** success shows up as a gate failure rather than as prose nobody re-reads. See `docs/TRUST-MODEL.md`.
+
 
 ## Rules
 
@@ -41,7 +74,7 @@ Spec:
   [Jwt User] : authenticated-user;)
 ```
 
-Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
@@ -51,9 +84,9 @@ Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 | `authenticated-user.field-user` | `User : user-id` | static | guard-type-at-boundary | User is typed user-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of user-id's premises transitively. |
 | `authenticated-user.verified-user-head-head-jwt` | `(= User (head (head Jwt))) : verified` | static | guard-constructor-validates | shengen's generated constructor for authenticated-user rejects inputs that do not satisfy (= User (head (head Jwt))), so this premise holds for any value of type authenticated-user reachable in the impl. |
 
-- `authenticated-user.field-jwt` code references: `internal/shenguard/guards_gen.go:135`
-- `authenticated-user.field-user` code references: `internal/shenguard/guards_gen.go:135`
-- `authenticated-user.verified-user-head-head-jwt` code references: `internal/shenguard/guards_gen.go:135`
+- `authenticated-user.field-jwt` code references: `internal/shenguard/guards_gen.go:190`
+- `authenticated-user.field-user` code references: `internal/shenguard/guards_gen.go:190`
+- `authenticated-user.verified-user-head-head-jwt` code references: `internal/shenguard/guards_gen.go:190`
 
 ### `human-principal` — wrapper (✅ Discharged)
 
@@ -68,7 +101,7 @@ Spec:
   Auth : authenticated-principal;)
 ```
 
-Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
@@ -76,7 +109,7 @@ Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 |---|---|---|---|---|
 | `human-principal.field-auth` | `Auth : authenticated-user` | static | guard-type-at-boundary | Auth is typed authenticated-user; values of that type can only be constructed via shengen's guarded constructor, which enforces all of authenticated-user's premises transitively. |
 
-- `human-principal.field-auth` code references: `internal/shenguard/guards_gen.go:190`
+- `human-principal.field-auth` code references: `internal/shenguard/guards_gen.go:255`
 
 ### `jwt-audience` — constrained (✅ Discharged)
 
@@ -92,7 +125,7 @@ Spec:
   X : jwt-audience;)
 ```
 
-Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
@@ -101,8 +134,8 @@ Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 | `jwt-audience.field-x` | `X : string` | static | guard-type-at-boundary | X is typed string; the target language's type system rejects non-string values at construction. |
 | `jwt-audience.verified-not-x` | `(not (= X "")) : verified` | static | guard-constructor-validates | shengen's generated constructor for jwt-audience rejects inputs that do not satisfy (not (= X "")), so this premise holds for any value of type jwt-audience reachable in the impl. |
 
-- `jwt-audience.field-x` code references: `internal/shenguard/guards_gen.go:69`
-- `jwt-audience.verified-not-x` code references: `internal/shenguard/guards_gen.go:69`
+- `jwt-audience.field-x` code references: `internal/shenguard/guards_gen.go:113`
+- `jwt-audience.verified-not-x` code references: `internal/shenguard/guards_gen.go:113`
 
 ### `jwt-issuer` — constrained (✅ Discharged)
 
@@ -118,7 +151,7 @@ Spec:
   X : jwt-issuer;)
 ```
 
-Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
@@ -127,8 +160,8 @@ Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 | `jwt-issuer.field-x` | `X : string` | static | guard-type-at-boundary | X is typed string; the target language's type system rejects non-string values at construction. |
 | `jwt-issuer.verified-not-x` | `(not (= X "")) : verified` | static | guard-constructor-validates | shengen's generated constructor for jwt-issuer rejects inputs that do not satisfy (not (= X "")), so this premise holds for any value of type jwt-issuer reachable in the impl. |
 
-- `jwt-issuer.field-x` code references: `internal/shenguard/guards_gen.go:55`
-- `jwt-issuer.verified-not-x` code references: `internal/shenguard/guards_gen.go:55`
+- `jwt-issuer.field-x` code references: `internal/shenguard/guards_gen.go:96`
+- `jwt-issuer.verified-not-x` code references: `internal/shenguard/guards_gen.go:96`
 
 ### `parsed-claims` — guarded (✅ Discharged)
 
@@ -147,7 +180,7 @@ Spec:
   [Sub Exp Iss Aud] : parsed-claims;)
 ```
 
-Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
@@ -159,11 +192,11 @@ Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 | `parsed-claims.field-aud` | `Aud : jwt-audience` | static | guard-type-at-boundary | Aud is typed jwt-audience; values of that type can only be constructed via shengen's guarded constructor, which enforces all of jwt-audience's premises transitively. |
 | `parsed-claims.verified-exp-0` | `(> Exp 0) : verified` | static | guard-constructor-validates | shengen's generated constructor for parsed-claims rejects inputs that do not satisfy (> Exp 0), so this premise holds for any value of type parsed-claims reachable in the impl. |
 
-- `parsed-claims.field-sub` code references: `internal/shenguard/guards_gen.go:83`
-- `parsed-claims.field-exp` code references: `internal/shenguard/guards_gen.go:83`
-- `parsed-claims.field-iss` code references: `internal/shenguard/guards_gen.go:83`
-- `parsed-claims.field-aud` code references: `internal/shenguard/guards_gen.go:83`
-- `parsed-claims.verified-exp-0` code references: `internal/shenguard/guards_gen.go:83`
+- `parsed-claims.field-sub` code references: `internal/shenguard/guards_gen.go:130`
+- `parsed-claims.field-exp` code references: `internal/shenguard/guards_gen.go:130`
+- `parsed-claims.field-iss` code references: `internal/shenguard/guards_gen.go:130`
+- `parsed-claims.field-aud` code references: `internal/shenguard/guards_gen.go:130`
+- `parsed-claims.verified-exp-0` code references: `internal/shenguard/guards_gen.go:130`
 
 ### `resource-access` — guarded (✅ Discharged)
 
@@ -181,7 +214,7 @@ Spec:
   [Access Resource IsOwned] : resource-access;)
 ```
 
-Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
@@ -192,10 +225,10 @@ Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 | `resource-access.field-isowned` | `IsOwned : boolean` | static | guard-type-at-boundary | IsOwned is typed boolean; the target language's type system rejects non-boolean values at construction. |
 | `resource-access.verified-isowned-true` | `(= IsOwned true) : verified` | static | guard-constructor-validates | shengen's generated constructor for resource-access rejects inputs that do not satisfy (= IsOwned true), so this premise holds for any value of type resource-access reachable in the impl. |
 
-- `resource-access.field-access` code references: `internal/shenguard/guards_gen.go:250`
-- `resource-access.field-resource` code references: `internal/shenguard/guards_gen.go:250`
-- `resource-access.field-isowned` code references: `internal/shenguard/guards_gen.go:250`
-- `resource-access.verified-isowned-true` code references: `internal/shenguard/guards_gen.go:250`
+- `resource-access.field-access` code references: `internal/shenguard/guards_gen.go:324`
+- `resource-access.field-resource` code references: `internal/shenguard/guards_gen.go:324`
+- `resource-access.field-isowned` code references: `internal/shenguard/guards_gen.go:324`
+- `resource-access.verified-isowned-true` code references: `internal/shenguard/guards_gen.go:324`
 
 ### `resource-access-discipline` — flow (✅ Discharged)
 
@@ -209,8 +242,6 @@ Spec:
                     internal/verified/CheckResourceAccess
                     cmd/cedar-verify/computeGuardAllow))
 ```
-
-Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 **Premises**
 
@@ -232,7 +263,7 @@ Spec:
   X : resource-id;)
 ```
 
-Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
@@ -240,7 +271,7 @@ Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 |---|---|---|---|---|
 | `resource-id.field-x` | `X : string` | static | guard-type-at-boundary | X is typed string; the target language's type system rejects non-string values at construction. |
 
-- `resource-id.field-x` code references: `internal/shenguard/guards_gen.go:44`
+- `resource-id.field-x` code references: `internal/shenguard/guards_gen.go:82`
 
 ### `same-user?` — define (✅ Discharged)
 
@@ -254,7 +285,7 @@ Spec:
   A B -> ...)
 ```
 
-Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
@@ -280,7 +311,7 @@ Spec:
   [Service Secret] : service-credential;)
 ```
 
-Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
@@ -290,9 +321,9 @@ Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 | `service-credential.field-secret` | `Secret : string` | static | guard-type-at-boundary | Secret is typed string; the target language's type system rejects non-string values at construction. |
 | `service-credential.verified-not-secret` | `(not (= Secret "")) : verified` | static | guard-constructor-validates | shengen's generated constructor for service-credential rejects inputs that do not satisfy (not (= Secret "")), so this premise holds for any value of type service-credential reachable in the impl. |
 
-- `service-credential.field-service` code references: `internal/shenguard/guards_gen.go:168`
-- `service-credential.field-secret` code references: `internal/shenguard/guards_gen.go:168`
-- `service-credential.verified-not-secret` code references: `internal/shenguard/guards_gen.go:168`
+- `service-credential.field-service` code references: `internal/shenguard/guards_gen.go:230`
+- `service-credential.field-secret` code references: `internal/shenguard/guards_gen.go:230`
+- `service-credential.verified-not-secret` code references: `internal/shenguard/guards_gen.go:230`
 
 ### `service-id` — wrapper (✅ Discharged)
 
@@ -307,7 +338,7 @@ Spec:
   X : service-id;)
 ```
 
-Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
@@ -315,7 +346,7 @@ Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 |---|---|---|---|---|
 | `service-id.field-x` | `X : string` | static | guard-type-at-boundary | X is typed string; the target language's type system rejects non-string values at construction. |
 
-- `service-id.field-x` code references: `internal/shenguard/guards_gen.go:157`
+- `service-id.field-x` code references: `internal/shenguard/guards_gen.go:216`
 
 ### `service-principal` — wrapper (✅ Discharged)
 
@@ -330,7 +361,7 @@ Spec:
   Cred : authenticated-principal;)
 ```
 
-Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
@@ -338,7 +369,7 @@ Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 |---|---|---|---|---|
 | `service-principal.field-cred` | `Cred : service-credential` | static | guard-type-at-boundary | Cred is typed service-credential; values of that type can only be constructed via shengen's guarded constructor, which enforces all of service-credential's premises transitively. |
 
-- `service-principal.field-cred` code references: `internal/shenguard/guards_gen.go:207`
+- `service-principal.field-cred` code references: `internal/shenguard/guards_gen.go:275`
 
 ### `tenant-access` — guarded (✅ Discharged)
 
@@ -356,7 +387,7 @@ Spec:
   [Principal Tenant IsMember] : tenant-access;)
 ```
 
-Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
@@ -367,12 +398,12 @@ Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 | `tenant-access.field-ismember` | `IsMember : boolean` | static | guard-type-at-boundary | IsMember is typed boolean; the target language's type system rejects non-boolean values at construction. |
 | `tenant-access.verified-ismember-true` | `(= IsMember true) : verified` | static | guard-constructor-validates | shengen's generated constructor for tenant-access rejects inputs that do not satisfy (= IsMember true), so this premise holds for any value of type tenant-access reachable in the impl. |
 
-- `tenant-access.field-principal` code references: `internal/shenguard/guards_gen.go:224`
-- `tenant-access.field-tenant` code references: `internal/shenguard/guards_gen.go:224`
-- `tenant-access.field-ismember` code references: `internal/shenguard/guards_gen.go:224`
-- `tenant-access.verified-ismember-true` code references: `internal/shenguard/guards_gen.go:224`
+- `tenant-access.field-principal` code references: `internal/shenguard/guards_gen.go:295`
+- `tenant-access.field-tenant` code references: `internal/shenguard/guards_gen.go:295`
+- `tenant-access.field-ismember` code references: `internal/shenguard/guards_gen.go:295`
+- `tenant-access.verified-ismember-true` code references: `internal/shenguard/guards_gen.go:295`
 
-### `tenant-access-discipline` — flow (✅ Discharged)
+### `tenant-access-discipline` — flow (❌ Violated)
 
 Flow discipline: only internal/verified/CheckTenantAccess and cmd/cedar-verify/computeGuardAllow may reference the constructor internal/shenguard/NewTenantAccess and every call path from *ListResources* to DB#Query* references internal/verified/CheckTenantAccess first. *(auto-generated from rule structure; not reviewed by spec author)*
 
@@ -388,15 +419,49 @@ Spec:
                      DB#Query*))
 ```
 
-Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
-
 **Premises**
 
 | ID | Expression | Discharge | Basis | Rationale |
 |---|---|---|---|---|
-| `constructor-only:internal/shenguard/NewTenantAccess` | `(constructor-only internal/shenguard/NewTenantAccess                     internal/verified/CheckTenantAccess                     cmd/cedar-verify/computeGuardAllow)` | static | flow-analysis | Resolved references to internal/shenguard/NewTenantAccess, 3 references in all, are confined to internal/verified/CheckTenantAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go. |
+| `constructor-only:internal/shenguard/NewTenantAccess` | `(constructor-only internal/shenguard/NewTenantAccess                     internal/verified/CheckTenantAccess                     cmd/cedar-verify/computeGuardAllow)` | unproven | flow-analysis | Of 4 resolved references to internal/shenguard/NewTenantAccess, 1 lie outside internal/verified/CheckTenantAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go. |
 | `must-pass-through:*ListResources*→DB#Query*` | `(must-pass-through *ListResources*                      internal/verified/CheckTenantAccess                      DB#Query*)` | static | flow-analysis | Every call path from 1 definition matching *ListResources* to a call of DB#Query* passes through a reference to internal/verified/CheckTenantAccess. Engine: go-datalog; index: scip-go. |
 
+- `constructor-only:internal/shenguard/NewTenantAccess` code references: `internal/forgery_harness/08_aliased_import.go:79:12`
+
+**Counter-examples**
+
+#### Case `constructor-only:internal/shenguard/NewTenantAccess@internal/forgery_harness/08_aliased_import.go:79:12`
+
+Input:
+
+```
+enclosing = multi-tenant-api/internal/forgery_harness/ForgeTenantAccessViaAlias
+premise = constructor-only:internal/shenguard/NewTenantAccess
+reference = internal/forgery_harness/08_aliased_import.go:79:12
+symbol = multi-tenant-api/internal/shenguard/NewTenantAccess
+```
+
+Spec output (Shen oracle):
+
+```shen
+no such reference exists
+```
+
+Impl output (`multi-tenant-api/internal/forgery_harness/ForgeTenantAccessViaAlias`):
+
+```
+reference exists at internal/forgery_harness/08_aliased_import.go:79:12
+```
+
+Impl file: `internal/forgery_harness/08_aliased_import.go`:79
+
+Reproduce:
+
+```sh
+go test -run 'TestSpec_multi-tenant-api/internal/forgery_harness/ForgeTenantAccessViaAlias/constructor-only:internal/shenguard/NewTenantAccess@internal/forgery_harness/08_aliased_import.go:79:12' -v
+```
+
+> multi-tenant-api/internal/forgery_harness/ForgeTenantAccessViaAlias references multi-tenant-api/internal/shenguard/NewTenantAccess, which only internal/verified/CheckTenantAccess, cmd/cedar-verify/computeGuardAllow may construct. The reference resolves to the constructor symbol even through an aliased import, so renaming the import does not evade this premise.
 
 ### `tenant-id` — wrapper (✅ Discharged)
 
@@ -411,7 +476,7 @@ Spec:
   X : tenant-id;)
 ```
 
-Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
@@ -419,7 +484,7 @@ Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 |---|---|---|---|---|
 | `tenant-id.field-x` | `X : string` | static | guard-type-at-boundary | X is typed string; the target language's type system rejects non-string values at construction. |
 
-- `tenant-id.field-x` code references: `internal/shenguard/guards_gen.go:33`
+- `tenant-id.field-x` code references: `internal/shenguard/guards_gen.go:68`
 
 ### `user-id` — wrapper (✅ Discharged)
 
@@ -434,7 +499,7 @@ Spec:
   X : user-id;)
 ```
 
-Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
@@ -442,7 +507,7 @@ Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 |---|---|---|---|---|
 | `user-id.field-x` | `X : string` | static | guard-type-at-boundary | X is typed string; the target language's type system rejects non-string values at construction. |
 
-- `user-id.field-x` code references: `internal/shenguard/guards_gen.go:22`
+- `user-id.field-x` code references: `internal/shenguard/guards_gen.go:54`
 
 ### `verified-jwt` — guarded (✅ Discharged)
 
@@ -459,7 +524,7 @@ Spec:
   [Claims Sig] : verified-jwt;)
 ```
 
-Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
@@ -469,9 +534,9 @@ Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 | `verified-jwt.field-sig` | `Sig : string` | static | guard-type-at-boundary | Sig is typed string; the target language's type system rejects non-string values at construction. |
 | `verified-jwt.verified-not-sig` | `(not (= Sig "")) : verified` | static | guard-constructor-validates | shengen's generated constructor for verified-jwt rejects inputs that do not satisfy (not (= Sig "")), so this premise holds for any value of type verified-jwt reachable in the impl. |
 
-- `verified-jwt.field-claims` code references: `internal/shenguard/guards_gen.go:113`
-- `verified-jwt.field-sig` code references: `internal/shenguard/guards_gen.go:113`
-- `verified-jwt.verified-not-sig` code references: `internal/shenguard/guards_gen.go:113`
+- `verified-jwt.field-claims` code references: `internal/shenguard/guards_gen.go:165`
+- `verified-jwt.field-sig` code references: `internal/shenguard/guards_gen.go:165`
+- `verified-jwt.verified-not-sig` code references: `internal/shenguard/guards_gen.go:165`
 
 
 ## How to Read This Report
@@ -493,6 +558,24 @@ it was discharged in the implementation under verification.
   returns the same value on every sampled input. A "discharged"
   premise here means *every sampled case agreed*. This is sampled
   evidence, not an exhaustive proof.
+
+- **Path cover** — when the premise's basis is
+  `prover-z3-path-cover`, the evidence is stronger than a pool.
+  shen-derive symbolically executed the Shen spec, enumerated every
+  execution path (unrolling list recursion to a fixed depth), and used
+  the Z3 solver to produce one concrete input per *feasible* path.
+  Those inputs are committed as test cases alongside the boundary
+  pool. Paths whose condition is unsatisfiable are reported as dead:
+  branches of the spec no input can reach. This is still bounded
+  evidence — the list-unrolling depth is finite — but within that
+  bound no path of the spec goes unexercised.
+
+- **Vacuous** — the rule's datatype is uninhabited: the conjunction of
+  its verified premises has no solution, so no value of the type can
+  be constructed and every claim that consumes one is empty. This is
+  a defect in the spec rather than in the implementation, and it
+  fails the gate, because an uninhabited guard proves nothing while
+  looking like it proves everything.
 
 - **Unproven** — the tool could not confidently classify the premise
   in this release. Treat the premise as outside the verified

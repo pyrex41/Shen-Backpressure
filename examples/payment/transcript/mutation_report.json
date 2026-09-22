@@ -1,0 +1,88 @@
+{
+  "mutation_score": {
+    "score": 1,
+    "caught": 3,
+    "survived": 0,
+    "equivalent": 0,
+    "invalid": 0,
+    "total": 3,
+    "timeout": "1m0s",
+    "measured_at": "2026-09-22T04:52:41Z",
+    "operators": [
+      {
+        "operator": "cmp-flip",
+        "caught": 1,
+        "survived": 0,
+        "equivalent": 0,
+        "invalid": 0
+      },
+      {
+        "operator": "off-by-one",
+        "caught": 1,
+        "survived": 0,
+        "equivalent": 0,
+        "invalid": 0
+      },
+      {
+        "operator": "zero-return",
+        "caught": 1,
+        "survived": 0,
+        "equivalent": 0,
+        "invalid": 0
+      }
+    ],
+    "specs": [
+      {
+        "spec": "processable",
+        "impl_func": "Processable",
+        "test": "TestSpec_Processable",
+        "score": 1,
+        "caught": 3,
+        "survived": 0,
+        "equivalent": 0,
+        "invalid": 0
+      }
+    ]
+  },
+  "mutants": [
+    {
+      "id": "zero-return:internal/derived/processable.go:29:95",
+      "operator": "zero-return",
+      "file": "internal/derived/processable.go",
+      "line": 29,
+      "col": 95,
+      "before": "func Processable body",
+      "after": "return false",
+      "outcome": "caught",
+      "detail": "--- FAIL: TestSpec_Processable (0.00s)\n          --- FAIL: TestSpec_Processable/case_00 (0.00s)\n              processable_spec_test.go:309: case_00: spec says true, impl returned false\n          --- FAIL: TestSpec_Processable/case_01 (0.00s)\n      …",
+      "spec": "processable",
+      "impl_func": "Processable"
+    },
+    {
+      "id": "cmp-flip:internal/derived/processable.go:33:14",
+      "operator": "cmp-flip",
+      "file": "internal/derived/processable.go",
+      "line": 33,
+      "col": 14,
+      "before": "\u003c",
+      "after": "\u003c=",
+      "outcome": "caught",
+      "detail": "--- FAIL: TestSpec_Processable (0.00s)\n          --- FAIL: TestSpec_Processable/case_01 (0.00s)\n              processable_spec_test.go:309: case_01: spec says true, impl returned false\n          --- FAIL: TestSpec_Processable/case_09 (0.00s)\n      …",
+      "spec": "processable",
+      "impl_func": "Processable"
+    },
+    {
+      "id": "off-by-one:internal/derived/processable.go:33:16",
+      "operator": "off-by-one",
+      "file": "internal/derived/processable.go",
+      "line": 33,
+      "col": 16,
+      "before": "0",
+      "after": "1",
+      "outcome": "caught",
+      "detail": "--- FAIL: TestSpec_Processable (0.00s)\n          --- FAIL: TestSpec_Processable/case_01 (0.00s)\n              processable_spec_test.go:309: case_01: spec says true, impl returned false\n          --- FAIL: TestSpec_Processable/case_09 (0.00s)\n      …",
+      "spec": "processable",
+      "impl_func": "Processable"
+    }
+  ]
+}
