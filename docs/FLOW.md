@@ -137,35 +137,65 @@ indexer resolved receivers, imports and aliases before we saw them.
 
 ## The engines
 
-There are two, and the report always says which one ran.
+There are two, they are compared against each other, and the report
+says which ran in its `flow_engine` field and in every premise's
+rationale.
 
 **`sb/flow/stdlib.shen` — Shen's embedded Prolog. Primary.** The rules
 are written once, in the same language as the spec. Facts are asserted
-by *loading* `.sb/facts.shen`: `def`, `ref` and `call` are Shen
+by *loading* `.sb/facts.shen`: `def`, `ref` and `calls` are Shen
 functions that push onto three globals, so no parser ships with the
-fact file. On top sit `reaches/2`, `unsanctioned-caller` and the
-`must-pass-through` violation search. Running them needs a Shen host
-(`shen-sbcl`, the same one gate 4 uses).
+fact file. On top sit `reaches/2`, `ctor-reference`,
+`unsanctioned-caller` and the `must-pass-through` violation search.
+Running them needs a Shen host — any port; `make shen-go` at the
+repository root builds one into `bin/shen`.
 
-**`cmd/sb/flow` — Go. Fallback.** An equivalent evaluator for
-environments with no Shen host, which is what runs in this
-repository's own tests and what produced every committed transcript.
-It reports itself as `go-datalog` in the discharge report's rationale.
+**`cmd/sb/flow` — Go.** A transcription of the same rules. It is the
+engine that produces a violation's `file:line` and shortest violating
+path, because Shen's `prolog?` answers satisfiability rather than
+enumerating solutions. It is also the only engine when no host is
+installed.
 
-**This is a trust assumption, and a real gap.** The two engines are
-two implementations of one set of rules, and only the Go one is
-exercised automatically here. `cmd/sb/flow/stdlib_test.go` checks the
-Shen file structurally — balanced forms, terminated clauses, every
-promised predicate defined — and will run it for real against the
-fixture facts under `SB_FLOW_SHEN=1` with `shen-sbcl` on PATH. That
-execution is opt-in rather than automatic so a Shen-equipped clone
-does not go red for a path this repository's CI never exercises.
-Closing the gap means running both engines on every gate and
-diffing the verdicts.
+### `--engine`
+
+```
+sb flow --engine go      # the Go evaluator alone
+sb flow --engine shen    # the Prolog rules alone
+sb flow --engine both    # both, and fail if they disagree  (default with a host)
+```
+
+`both` asks each engine two questions per premise — did it range over
+anything (the vacuity question), and is there a counterexample — and
+fails the gate on any disagreement, naming the premise and each
+engine's verdict. The default is `both` when a host resolves and `go`
+when none does; asking for `shen` or `both` explicitly with no host is
+an error rather than a silent downgrade.
+
+This is what closes the gap this section used to record. "The two
+engines implement the same rules" was a standing trust assumption that
+nothing could falsify, because the Shen rules had never executed — the
+file defined `(define call …)`, and `call` is a Shen system function,
+so loading it failed on the first fact predicate. Running it turned up
+three further bugs, each of which would have made a premise pass for
+the wrong reason: a `glob?` clause missing for an exhausted pattern
+(which aborted the run on any real fact base), a `drop-descriptor-tail`
+that removed one character instead of the whole `().` suffix (which
+made every pattern match nothing and every verdict a silent vacuous
+pass), and side conditions written `(is V (f …)) (when V)`, a form that
+always fails. The rename to `calls` is the reason the fact vocabulary
+changed; `sb index`'s reader still accepts a `(call …)` fact so a
+cached fact file from an older run still loads.
+
+`cmd/sb/flow/stdlib_test.go` now runs the Shen engine whenever a host
+resolves, with no opt-in: a load test, an end-to-end verdict test
+against the fixture facts, and an agreement test between the two
+engines. The `SB_FLOW_SHEN=1` opt-in is gone — an opt-in on a test
+whose only job is to execute something is a way of not executing it.
 
 The documented escape hatch for scale is a third engine: emit Soufflé
 from the same rule text. Shen's Prolog over a few thousand facts is
-fine; a monorepo will not be.
+fine; a monorepo will not be, and `sb flow` reports a host timeout
+with exactly that advice.
 
 ## Degradation
 
@@ -194,6 +224,14 @@ run  = "./bin/shenguard-audit.sh --grep-only"   # fallback only
 fallback command, and may be omitted when there is no legacy grep to
 fall back to. The fixed five-gate shape is untouched: `flow` is an
 additional manifest gate, like `shen-derive` and the policy gates.
+
+The host the Shen engine uses is the project's, from the same
+`[shen] bin` that gate 4 reads:
+
+```toml
+[shen]
+bin = "../../bin/shen"   # what `make shen-go` builds; $SHEN overrides it
+```
 
 ## The TCB implication
 

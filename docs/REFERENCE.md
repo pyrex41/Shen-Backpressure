@@ -37,6 +37,7 @@ The five-gate shape is fixed; additional gates are declared in the
 | `command` (default) | the shell | the command to run; a non-zero exit fails the gate |
 | `derive` | `sb derive` | ignored — auto-appended when `[[derive.specs]]` is present |
 | `flow` | `sb flow` | the **fallback** grep, used only when no SCIP indexer is on PATH |
+| `command` for gate 4 | `bin/shen-check.sh`, i.e. `sb shen-check` | the script; the host and the intrinsic prelude are `sb`'s business |
 | `forgery` | `sb forgery` | the legacy regex a `grep-miss-flow-catch` forgery must slip past; empty reuses the `flow` gate's |
 
 ```toml
@@ -411,6 +412,7 @@ Never invokes a model; never touches the network.
 | sampled evidence | the committed shen-derive tests are re-run |
 | path cover | the report's counters match the committed test header (needs `z3`) |
 | flow premises | re-evaluated from a **freshly built** index, never the `.sb/` cache |
+| shen typecheck | `tc +` re-run over the spec plus the generated intrinsic prelude in a live Shen host (needs one; see `README.md` → Shen Host) |
 | toolchain | compared against the binaries present now |
 | signature | with `--require-sig` |
 
@@ -471,6 +473,63 @@ carries a `blame` in `{spec, impl, wrapper, lowering}` with a
 leads its discharge section with the blamed party — the single most
 useful bit for the next prompt. The vocabulary is defined in
 `docs/TRUST-MODEL.md`.
+
+With a Shen host present, `sb derive` re-evaluates each failing case's
+inputs on the host and compares with shen-derive's Go evaluator:
+agreement keeps `impl` and upgrades the basis to
+`evaluator-and-host`, disagreement rewrites the blame to `lowering`.
+The counter-example's `input` map then carries a `shen_goal` — the
+exact expression the host was asked — so the comparison can be redone
+by hand. Without a host every behavioral counter-example is `impl`
+with basis `evaluator-only`.
+
+## `sb shen-check` — gate 4
+
+```
+sb shen-check [--spec PATH] [--no-prelude] [--timeout DURATION]
+```
+
+Resolves a Shen host (`$SHEN`, then `[shen] bin` in `sb.toml`, then
+`shen-sbcl` / `shen-scheme` / `shen` on `PATH`), asks `shen-derive`
+for the typed prelude that declares the evaluator's intrinsics, and
+runs
+
+```
+<host> eval -q -l .sb/prelude.declares.shen -e '(tc +)' \
+       -l .sb/prelude.defines.shen -l <spec>
+```
+
+Note the flag form: `-q` belongs to the `eval` subcommand, not to the
+launcher. Exit 0 on a clean typecheck, 1 on a type error (or on
+`maximum inferences exceeded`, which is a failure to decide rather
+than a pass), and 2 when no host is available — in which case nothing
+was checked and `sb verify-report` records the claim `UNVERIFIED`.
+`--no-prelude` runs `tc +` over the bare spec, which is only a
+complete check for a spec with no `(define …)` blocks.
+
+## `shen-derive prelude` — the intrinsic prelude
+
+```
+shen-derive prelude [--out-dir DIR] --spec SPEC.shen
+```
+
+Writes three files: `prelude.declares.shen` (typed `declare` forms for
+`val` and the accessors, loaded *before* `(tc +)` because Shen's
+`declare` cannot run under the typechecker), `prelude.defines.shen`
+(real Shen definitions of the list combinators the spec uses, loaded
+*after* it so the host checks them), and `prelude.eval.shen`
+(runnable bodies, for the second-oracle evaluation path). Only the
+intrinsics a given spec actually mentions are emitted. Intrinsics the
+generator cannot type are reported as `GAP:` comments and on stderr;
+the exit status stays 0, because a gap is a fact about the spec and
+the tc+ run is where it becomes a failure.
+
+## `shen-derive verify --shen-samples-out`
+
+Writes the sample table a second time, as Shen literals, so `sb
+derive` can re-ask a failing case of a live host. Values with no
+faithful Shen literal (a closure, a string containing a quote) are
+omitted and listed under `skipped` rather than approximated.
 
 ### `shengen --brand-table`
 

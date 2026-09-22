@@ -57,10 +57,10 @@ sixth when `shen-derive` is configured):
 | 1. shengen | `sb gen` | Regenerates guard types from spec. Catches stale types. |
 | 2. test | `go test ./...` (or `npm test`) | Tests against regenerated types. Catches runtime invariant violations. |
 | 3. build | `go build ./...` (or `npx tsc --noEmit`) | Compiles against regenerated types. Catches type signature mismatches. |
-| 4. shen tc+ | `bin/shen-check.sh` | Verifies spec internal consistency. Catches contradictory rules. |
+| 4. shen tc+ | `bin/shen-check.sh` (i.e. `sb shen-check`) | Loads the spec, plus the generated prelude that types `shen-derive`'s evaluator intrinsics, into a Shen host with the typechecker on. Catches contradictory rules and an ill-typed `(define …)`. Needs a host — see **Shen Host**. |
 | 5. tcb audit | `bin/shenguard-audit.sh` | Re-runs shengen, diffs output, rejects unexpected files in `shenguard/`. |
 | 6. shen-derive | `sb derive` | Regenerates committed spec-equivalence tests, fails on drift, then runs them. Active when `[[derive.specs]]` is configured. |
-| +. flow | `sb flow` | Evaluates the spec's `(flow …)` premises over the resolved symbol graph (SCIP). Catches a handler that reaches a sink with no proof on the path, and a raw constructor call the grep gate's regex cannot see through an aliased import. Gate kind `flow`. |
+| +. flow | `sb flow` | Evaluates the spec's `(flow …)` premises over the resolved symbol graph (SCIP). Catches a handler that reaches a sink with no proof on the path, and a raw constructor call the grep gate's regex cannot see through an aliased import. With a Shen host it runs both engines (`--engine both`, the default) and also catches the two disagreeing. Gate kind `flow`. |
 | +. forgery | `sb forgery` | Stages every `*.go.bak` in `forgeries/` and runs the check its header declares. Catches an outcome that no longer matches its declaration — including a forgery that starts *succeeding*. Gate kind `forgery`. |
 
 Gate topology is declared in `sb.toml`. The legacy fixed five-gate
@@ -376,23 +376,72 @@ thoughts/                Research notes, reviews, handoffs (incl. tag-resolver
                          shared/research/2026-05-05-*)
 ```
 
-## Shen Runtime (Gate 4)
+## Shen Host
 
-Gate 4 (`shen tc+`) needs a Shen runtime. `bin/shen-check.sh`
-auto-detects the supported backends:
+Three things in this repository need a live Shen: gate 4 (`tc +`), the
+Shen Prolog flow engine, and the second oracle that lets a failing
+behavioral case be blamed on the implementation rather than on the
+lowering. All three resolve a host the same way, in this order:
+
+1. `$SHEN` — an explicit path to any port's launcher
+2. `[shen] bin` in `sb.toml` — the project's own choice
+3. `shen-sbcl`, `shen-scheme`, then `shen` on `PATH`
+
+Each candidate must answer `--version`, which is also what the
+discharge report's toolchain block records. `sb shen-check` is the
+implementation; `bin/shen-check.sh` delegates to it.
+
+### Installing one
+
+The fastest route needs no Lisp or Scheme toolchain:
+
+```bash
+make shen-go          # clones and builds the Go port into bin/shen
+```
+
+`shen-go` needs Go 1.27, and the target passes `GOTOOLCHAIN=auto` so
+that toolchain is fetched without disturbing the pinned `go1.24.7`
+that builds `sb`, `shengen` and `shen-derive` reproducibly. The clone
+lives in `~/.cache/shen-backpressure/shen-go` by default
+(`SHEN_GO_CACHE` overrides it). Both examples' `sb.toml` already point
+`[shen] bin` at `../../bin/shen`, so nothing else is needed.
 
 | Backend | Startup | Compute | Install |
 |---------|---------|---------|---------|
-| **shen-sbcl** (default) | 0.06s | 1× | `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl` |
+| **shen-go** | 0.3s | interpreted + AOT | `make shen-go` |
+| **shen-sbcl** | 0.06s | 1× | `brew tap Shen-Language/homebrew-shen && brew install shen-sbcl` |
 | **shen-scheme** | 0.44s | 1.6× faster | Build from [shen-scheme](https://github.com/Shen-Language/shen-scheme) (`brew install chezscheme`, then `make`, then `cp bin/shen-scheme /usr/local/bin/`) |
 
-For gate loops and CI, `shen-sbcl` wins — startup dominates on small
-specs. For large specs with heavy typechecking, `shen-scheme`'s faster
-compute may matter. Override with `SHEN=/path/to/binary
-bin/shen-check.sh`.
+For gate loops and CI, `shen-sbcl` has the fastest startup, which
+dominates on small specs. For large specs with heavy typechecking,
+`shen-scheme`'s faster compute may matter. `shen-go` is the one that
+installs from a single `make` target on a machine that already has Go.
 
-`shengen` itself does not need a Shen runtime; it parses `.shen`
-files as text.
+### Without a host
+
+Nothing breaks, and nothing is silently claimed either:
+
+- gate 4 skips, and `sb verify-report` reports the tc+ claim
+  `UNVERIFIED` rather than `PASS`;
+- `sb flow` runs the Go engine alone and says so, and the report's
+  `flow_engine` is `go` rather than `both`;
+- every behavioral counter-example carries
+  `blame_basis: evaluator-only`, meaning one oracle spoke and a
+  lowering bug is indistinguishable from an implementation bug.
+
+`shengen` itself never needs a Shen host; it parses `.shen` files as
+text.
+
+### The intrinsic prelude
+
+A spec's `(define …)` bodies are not plain Shen. They call
+`shen-derive`'s evaluator intrinsics: `val` (the wrapper destructor),
+one accessor per composite field, and list combinators Shen's kernel
+does not have. `shen-derive prelude` emits typed declarations for
+exactly the ones a given spec uses, and `sb shen-check` loads them
+around `(tc +)`. The tc+ claim is therefore "well-typed **given these
+intrinsic signatures**", and the prelude is a TCB member — see
+[docs/TRUST-MODEL.md](docs/TRUST-MODEL.md).
 
 ## Two Tools, One Spec File
 

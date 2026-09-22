@@ -22,7 +22,10 @@ not by the proposer's intelligence. Every workstream below either
 makes the verifier return more bits per gate run, or brings a new
 class of property under a verifier at all.
 
-Five workstreams, ordered by value divided by risk:
+Six workstreams, ordered by value divided by risk. W6 was not in the
+original five; it was added once it became clear that all five had
+recorded the same blocking gap — no Shen host — and that several of
+their claims had therefore never been executed at all.
 
 | # | Workstream | Theory | Closes |
 |---|-----------|--------|--------|
@@ -31,6 +34,7 @@ Five workstreams, ordered by value divided by risk:
 | W3 | Flow premises over SCIP facts | Noninterference (VSI), Datalog code analysis | Grep gates; "every handler asks for a proof" |
 | W4 | Falsifier + gate strength | Incorrectness logic, mutation analysis, fuzz corpora | Unmeasured gate strength; manual bypass attempts |
 | W5 | Certificates | Proof-carrying code, gradual verification with blame | Report is not independently checkable; failures do not assign blame |
+| W6 | shen-go as the Shen host | Differential testing; two oracles for one spec | Gate 4 red everywhere; W3's Prolog engine never executed; W5's `lowering` blame unreachable |
 
 Each workstream ships behind config so existing examples keep passing
 until they opt in. Every workstream ends with the payment and
@@ -589,12 +593,21 @@ New in the reports:
 
 Gaps recorded at implementation time:
 
-- **Blame is `evaluator-only` everywhere**, because no Shen host is
+- ~~**Blame is `evaluator-only` everywhere**, because no Shen host is
   installed. The `lowering` blame value is implemented and unit-tested
   but cannot be produced in this environment: distinguishing a
   lowering bug from an implementation bug requires a second oracle.
   Wiring a host makes `AssignBlame` return `evaluator-and-host` (or
-  `lowering`) with no further code change.
+  `lowering`) with no further code change.~~
+  **Closed by W6.D**, though the last sentence was wrong on both
+  counts. `detectShenRuntimeHost` was asking about the spec's
+  `:runtime-via` markers rather than about a host, and
+  `evaluator-and-host` was a label rather than a measurement: nothing
+  consulted a second oracle, so the basis promised something the code
+  never did. W6 makes the promise good — each failing case is
+  re-evaluated on the host and compared — and the `lowering` path now
+  fires against a live host in
+  `TestSecondOracleDisagreesAndBlamesLowering`.
 - **Path-cover re-derivation compares counters rather than re-running
   the solver.** `sb derive` already diffs the committed test file
   against a fresh regeneration, so re-solving inside `verify-report`
@@ -666,6 +679,179 @@ which is the single most useful bit for the next prompt.
 
 Reproducibility across Go minor versions is real but manageable with
 a pinned toolchain. Estimated 2 weeks.
+
+---
+
+## W6. shen-go as the Shen host
+
+### Status (W6 implemented)
+
+Every workstream W1–W5 recorded the same gap in different words: *no
+Shen host in this container*. Gate 4 was red in every example, the W3
+Prolog rules had never executed, and W5's `lowering` blame value was
+unreachable. W6 installs a host — the Go port, which builds from one
+`make` target on a machine that already has Go — and then finds out
+what four workstreams of unexecuted claims were hiding.
+
+| Step | State |
+|------|-------|
+| A. One host resolver; `make shen-go`; corrected `eval -q` flag form | done |
+| B. Gate 4 green on both examples, with a typed intrinsic prelude | done |
+| C. W3's Shen Prolog engine executed; `sb flow --engine go\|shen\|both` | done |
+| D. W5's second oracle; the `lowering` blame path fired | done |
+| E. `sb verify-report` re-runs tc+ through the host | done |
+| F. Both examples' transcripts refreshed | done |
+| G. Docs | done |
+
+#### What was actually broken
+
+Nothing here was a missing feature. Every item was a claim the
+documentation made that no execution had ever tested.
+
+| Claim | What running it showed |
+|---|---|
+| "gate 4 runs `tc +` on the spec" | The invocation was written `shen -q -e '(tc +)' -l spec`. `-q` is a flag of the `eval` subcommand; no Shen port accepts that form. The gate would have failed with a host installed. |
+| "gate 4 passes on the examples" | It had never passed on `examples/payment`. `(define processable …)` calls `val`, the `amount` accessor and `scanl` — shen-derive evaluator intrinsics, not Shen functions — so tc+ rejected the spec on sight. |
+| `sb/flow/stdlib.shen` is "the primary engine" | It could not be loaded: it defined `(define call …)`, and `call` is a Shen system function of arity 5. |
+| "the two flow engines implement the same rules" | Unfalsifiable while one of them could not run. Running it found three further bugs in the Shen rules, below. |
+| `blame_basis: evaluator-and-host` | `detectShenRuntimeHost` was `detectShenRuntime(cfg) == "shen-sbcl"`, which reports what the *spec's* `:runtime-via` markers say. A project beside a working host was told it had none; a project naming a checker got the two-oracle basis with nothing having asked a host anything. |
+
+#### The prelude, and one real spec bug
+
+A spec's `(define …)` bodies are not plain Shen. `shen-derive prelude`
+emits typed declarations for exactly the intrinsics a given spec uses,
+derived from its own type table, in three files — declares (axioms,
+loaded before `(tc +)`, since Shen's `declare` cannot run under the
+typechecker), combinator definitions (loaded after it, so the host
+checks them), and runnable bodies for the second oracle. The tc+ claim
+becomes "well-typed **given these intrinsic signatures**", and
+`docs/TRUST-MODEL.md` §5b names the prelude as a TCB member with the
+signature table and the evaluator code each row is derived from.
+
+The prelude did not make payment's spec pass on its own, and it should
+not have. `processable` applied `val` — the `amount` destructor — to
+the running balances `scanl` produces. Those are plain numbers, and
+the whole point of the predicate is that one of them may be
+*negative*, which is exactly what an `amount` may not be. shen-derive's
+evaluator tolerates it because it binds `val` to the identity
+function; Shen's types do not. Removing the two applications is a
+semantics-preserving fix: `sb derive` regenerates
+`processable_spec_test.go` byte-identically and all 44 cases still
+pass. The alternative — widening `val`'s declared type until the
+mistake typechecked — would have been the prelude covering for the
+spec, which is the failure mode this whole workstream exists to avoid.
+`shen-derive/prelude` pins the other direction too: a deliberately
+ill-typed define is still rejected, in a real host.
+
+#### Four bugs in the Prolog rules, found by running them once
+
+| Bug | Effect had the others been fixed alone |
+|---|---|
+| `(define call …)`; `call` is a system function | The file does not load. |
+| `glob?` had no clause for an exhausted pattern with input left over — reached whenever a premise pattern is a strict prefix of a symbol, i.e. on every real fact base | The `*` clause's guard evaluates `(pos "" 0)` and the host aborts the run. |
+| `drop-descriptor-tail` dropped one character per guard instead of the whole `().` suffix; `descriptor-part` ignored backtick quoting | A method symbol canonicalises to `pkg/NewAccess()`, no pattern matches anything, **every verdict is a silent vacuous pass**. |
+| Every side condition written `(is V (f …)) (when V)`; both negations written `(when (not (prolog? (p X Y))))` | The first form always fails, so every guarded predicate is unsatisfiable. The second hands the helper *fresh* variables — `prolog?` reads uppercase symbols in its goal as new ones — and the run dies on `mustString`. |
+
+The third is the instructive one: the first two are loud, and the
+third is the kind of bug that makes a gate green for the wrong reason.
+
+#### Results
+
+| Example | Gates before | Gates after | `verify-report` |
+|---|---|---|---|
+| `examples/payment` | 6/7 | **7/7** | OK, `shen typecheck` PASS |
+| `examples/multi-tenant-api` | 10/11 | **11/11** | OK, `shen typecheck` PASS |
+
+- **The two flow engines agree on real facts.** multi-tenant's three
+  premises and shen-web-tools' two were each evaluated by the Shen
+  Prolog rules and by the Go engine, over `scip-go` and
+  `scip-typescript` indexes respectively, with no disagreement. That
+  is also the first evidence for W3's "same rule text, two languages"
+  claim that does not come from the Go side alone.
+- **The `lowering` path fires**, in
+  `TestSecondOracleDisagreesAndBlamesLowering`, against a live host.
+- `examples/shen-web-tools`' spec typechecks under `tc +` as well; the
+  example had no `bin/shen-check.sh` at all, so its gate 4 had never
+  run. One was added.
+
+Gaps recorded at implementation time:
+
+- **`val` is declarable at one type per spec.** Shen has no
+  overloading, so the generator declares it at the spec's unique
+  *constrained* wrapper (the single-field datatype carrying a
+  `verified` premise — an unconstrained wrapper is a transparent alias
+  the spec never needs to destructure). A spec with two constrained
+  wrappers gets a `GAP:` comment and no declaration, and gate 4 then
+  fails on the first `val`. Neither example is affected. The clean fix
+  is per-wrapper destructor names in the spec language, which is a
+  spec-format change and not this workstream's.
+- **The Shen engine returns verdicts, not violations.** `prolog?`
+  answers satisfiability, so the Go engine remains the one that
+  produces `file:line` and the shortest violating path. `--engine
+  both` compares verdicts, which is the part that says the two decide
+  the same thing; it would not catch the two agreeing on *which*
+  premise fails while disagreeing about *where*.
+- **Shen's Prolog will not scale.** It is a backtracking search over a
+  list-shaped fact base. `sb flow` reports a host timeout with the
+  documented escape hatch (emit Soufflé from the same rule text)
+  rather than hanging, but nothing here makes the primary engine
+  usable on a monorepo.
+- **The lowering disagreement is staged, not naturally occurring.**
+  The unit test forces it on the evaluator's side of the record,
+  because the alternative is shipping an evaluator with a real bug in
+  it. No genuine divergence between the two oracles exists in either
+  example — which is the outcome you want and also means the path has
+  been exercised rather than observed.
+- **shen-go is not vendored.** `make shen-go` clones and builds it, so
+  a fully air-gapped runner needs `SHEN_GO_CACHE` pre-populated or a
+  host installed some other way.
+- `examples/shen-web-tools` is still missing `bin/shengen-codegen.sh`,
+  so its gate 1 cannot run. Pre-existing and out of scope here.
+
+### Goal
+
+Give the repository a Shen host, and find out which of the claims that
+depended on one were true.
+
+### Design
+
+One resolver (`cmd/sb/shenhost.go`): `$SHEN`, then `[shen] bin` in
+`sb.toml`, then `shen-sbcl` / `shen-scheme` / `shen` on `PATH`, each
+confirmed by `--version` so a wrapper script pointing at a missing
+runtime does not count. `make shen-go` builds the Go port into
+`bin/shen` with `GOTOOLCHAIN=auto`, which lets shen-go's Go 1.27
+requirement coexist with this repository's pinned `go1.24.7`. The host
+and its version go in every report's toolchain block, unconditionally:
+gate 4 is one of the fixed five, so every report makes a tc+ claim and
+should say which typechecker backed it.
+
+The second oracle needs the failing case's inputs as Shen text, which
+the generated Go test does not carry — its cases are Go constructor
+calls. `shen-derive verify --shen-samples-out` writes them again as
+Shen literals, refusing values it cannot render faithfully rather than
+approximating them.
+
+### Steps
+
+1. `cmd/sb/shenhost.go`, `[shen] bin`, `make shen-go`, one
+   `bin/shen-check.sh` the examples delegate to.
+2. `shen-derive/prelude` + `shen-derive prelude` + `sb shen-check`;
+   host test over both example specs, plus the ill-typed negative.
+3. `calls` rename end to end; the Shen engine driver;
+   `sb flow --engine`; `flow_engine` in the report.
+4. `core.ShenLiteral`, the sample sidecar, `cmd/sb/oracle.go`,
+   `detectShenRuntimeHost` asking about the host.
+5. `verifyShenTypecheck` in `sb verify-report`; host rows in the audit
+   report's toolchain section.
+6. Transcripts refreshed; docs.
+
+### Acceptance
+
+- Gate 4 green on both examples, and an ill-typed define still red.
+- `sb flow --engine both` green on real facts in both languages.
+- A `lowering` blame produced by a real host.
+- `sb verify-report` OK on both committed reports with `shen
+  typecheck` PASS.
 
 ---
 

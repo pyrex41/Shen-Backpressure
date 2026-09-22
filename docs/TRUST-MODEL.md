@@ -373,18 +373,75 @@ classic case: `OR user_id IS NULL` accidentally introduced by a
 schema change), the chain reports membership where there isn't any.
 The SQL queries are in the TCB.
 
-### 5. The Shen runtime (when present)
+### 5. The Shen host (when present)
 
-In `examples/shen-web-tools/`, the SBCL backend loads a live Shen
-runtime at boot
-(`examples/shen-web-tools/backend/shen-interop.lisp:23-50`) and
-type-checks the spec files with `tc +`. If the Shen runtime mis-checks
-a spec, every gate that depends on that spec is suspect. We rely on
-shen-sbcl being a correct Shen implementation; that's an external
-dependency we don't verify.
+Three things consult a live Shen: gate 4's `tc +`, the Prolog flow
+engine, and the second oracle behind `blame_basis:
+evaluator-and-host`. If the host mis-checks or mis-evaluates a spec,
+every claim that rests on it is suspect. We rely on the port being a
+correct Shen implementation; that is an external dependency we do not
+verify. This repository's own runs use the Go port (`make shen-go`),
+which passes the official kernel suite 134/134 — evidence, not proof,
+and the same kind of evidence we would accept from shen-sbcl.
 
-For the Go and TypeScript demos, the Shen runtime only runs at
-build time (Gate 4: `shen tc+`) and is not in the runtime TCB.
+In `examples/shen-web-tools/`, the SBCL backend additionally loads a
+live Shen at boot
+(`examples/shen-web-tools/backend/shen-interop.lisp:23-50`), which
+puts the host in that example's *runtime* TCB. For the Go demos the
+host runs only at build time and is not in the runtime TCB.
+
+A host's *absence* is not a hole in the TCB, it is a smaller set of
+claims: gate 4 skips, `sb verify-report` reports tc+ `UNVERIFIED`
+rather than `PASS`, flow runs one engine, and every counter-example
+falls back to `blame_basis: evaluator-only`.
+
+### 5b. The intrinsic prelude (gate 4's stated premise)
+
+A spec's `(define …)` bodies call names that are not Shen functions.
+`shen-derive`'s evaluator supplies them — `val`, one accessor per
+composite field, and list combinators Shen's kernel lacks — and
+without a matching declaration `tc +` rejects any spec that uses one.
+That is why gate 4 had never passed on `examples/payment` since its
+`processable` define was added.
+
+`shen-derive prelude` emits the declarations, derived from the spec's
+own type table, and `sb shen-check` loads them around `(tc +)`. **The
+tc+ claim is therefore "the spec is well-typed *given these intrinsic
+signatures*", and the signatures are TCB.** A signature that did not
+match the evaluator would let a spec pass gate 4 while meaning
+something else to every other gate.
+
+What is trusted, and what is checked:
+
+| Emitted as | Content | Status |
+|---|---|---|
+| `prelude.declares.shen` | `(declare val [W --> B])` for the spec's constrained wrapper; `(declare <field> [<composite> --> <type>])` per used accessor | **Axioms.** Loaded before `(tc +)` because Shen's `declare` cannot run under the typechecker. Not checked by anything. |
+| `prelude.defines.shen` | real Shen definitions of `foldr`, `foldl`, `scanl`, `unfoldr`, `compose`, `!=` — whichever the spec uses | **Checked.** Loaded after `(tc +)`, so the host typechecks them; a mistake here is caught, not trusted. |
+| `prelude.eval.shen` | runnable bodies: `val` as the identity function, each accessor as `(nth i+1 …)` | Used only by the second oracle, with the typechecker off. Its correspondence to `verify.buildBaseEnv` is the thing that makes the two oracles read one spec. |
+
+Each declaration is derived from the evaluator's code, and the mapping
+is exact rather than convenient:
+
+- `val` is the identity function in the evaluator
+  (`shen-derive/verify/harness.go`, `buildBaseEnv`), because a wrapper
+  value *is* its base value at evaluation time. Its declared Shen type
+  is therefore `wrapper --> base`.
+- an accessor projects one field of a composite, so its type is
+  `composite --> field-type`.
+
+Two limits are recorded rather than papered over. Shen has no
+overloading, so a spec with more than one constrained wrapper gets no
+`val` declaration at all and a `GAP:` comment saying why; gate 4 then
+fails on the first `val`, loudly, instead of passing under a signature
+nobody chose. And nothing is declared speculatively: an intrinsic the
+spec does not mention gets no signature, because a signature in the
+TCB that buys no evidence is a standing invitation for a spec to start
+relying on it silently.
+
+The prelude does not weaken tc+. `shen-derive/prelude`'s test suite
+pins the negative half: a deliberately ill-typed define — one that
+returns `(val (amount Tx))`, a number, where it declares a string — is
+still rejected, in a real host, with `type error in rule 1`.
 
 ### 6. The shengen emitter itself
 
@@ -688,12 +745,24 @@ and a `blame_basis` saying how the assignment was reached:
 | `wrapper` | A `:runtime-via` checker, or the generated wrapper around it, failed. The spec and the impl may both be right; the composition is not. |
 | `lowering` | The spec's Go evaluator and the Shen host disagree about what the spec *means*. Neither the spec author nor the implementer is at fault: the translation is. |
 
-**Read `blame_basis` before acting on `blame`.** With no Shen host
-installed — which is this repository's situation — "the spec says X"
-means "the Go evaluator says X", and a lowering bug produces evidence
-identical to an implementation bug. Those counter-examples are
-recorded as `impl` with `blame_basis: evaluator-only`, which says so
-out loud instead of asserting a confidence nobody has.
+**Read `blame_basis` before acting on `blame`.** It says how many
+oracles spoke:
+
+| `blame_basis` | Means |
+|---|---|
+| `evaluator-and-host` | Both oracles were asked. `sb derive` re-evaluated the failing case's inputs on a live Shen host and compared with `shen-derive`'s Go evaluator. The counter-example's `input` carries the `shen_goal` it asked, so the comparison can be redone by hand. |
+| `evaluator-only` | No host was available. "The spec says X" means "the Go evaluator says X", and a lowering bug produces evidence identical to an implementation bug. The blame is still `impl`, because that is the likelier of the two, but the basis says the confidence is not there. |
+| `flow-analysis` | A resolved symbol graph found the violation, not an oracle about a define's value. |
+| `vacuous`, `runtime-via` | Structural: the rule is uninhabited, or a `:runtime-via` checker failed. |
+
+Until W6 there was no Shen host anywhere in this repository, so
+`evaluator-and-host` was a label nothing earned and `lowering` was
+unreachable. With a host (`make shen-go`) the second oracle actually
+runs: agreement leaves the blame on the implementation and records the
+host's answer in the rationale, and disagreement moves it to
+`lowering` and says which oracle said what. A `lowering` finding means
+the counter-example says *nothing* about the implementation yet — two
+readings of one spec differ, and that has to be settled first.
 
 The schema reserves `runtime-assertion` and `prover` for future use.
 
