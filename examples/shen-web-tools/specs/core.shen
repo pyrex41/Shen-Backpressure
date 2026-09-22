@@ -270,3 +270,37 @@
   (= Kind "partial") : verified;
   =================================
   [Kind Root Children Missing] : tag-resolve-outcome;)
+
+\* --- Flow premises (consumed by `sb flow`, ignored by shengen-ts / shen-derive-ts) ---
+
+   The same two premise forms the Go example uses, against a
+   TypeScript tree. Nothing in the rule text is language-specific:
+   `sb index` runs scip-typescript here instead of scip-go, and the
+   engine sees the same (def …) (ref …) (call …) facts.
+
+   1. `mustSignedComplete` mints the "this tag block is signed and
+      complete" proof. Only the resolver may mint it.
+
+   2. The resolver may not reach that constructor without consulting
+      `isBlockSignatureValid` — the stub-HMAC predicate that is the
+      declassifier for the signed outcome. This is the noninterference
+      half: the proof-minting call is the sink, and signature
+      validation is what sanctions reaching it.
+
+   A caveat worth stating plainly: the fact base records that a
+   definition references the proof, not that it does so *before* the
+   sink on every execution. Ordering within a body is outside what a
+   reference graph can say; see ../../docs/FLOW.md.
+
+   As in the Go example, the forms live inside a Shen comment so that
+   gate 4's `shen tc+` does not meet an undefined `flow` symbol. sb's
+   parser reads them either way.
+
+(flow signed-complete-discipline
+  (constructor-only guards_gen.ts/mustSignedComplete
+                    tag_resolver.ts/ResolveTagBlockChildren)
+  (must-pass-through tag_resolver.ts/ResolveTagBlockChildren
+                     tag_resolver.ts/isBlockSignatureValid
+                     guards_gen.ts/mustSignedComplete))
+
+*\

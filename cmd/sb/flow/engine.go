@@ -123,12 +123,12 @@ func evalConstructorOnly(fs *FactSet, p ConstructorOnly) Result {
 	case len(res.Violations) == 0:
 		res.Discharged = true
 		res.Rationale = fmt.Sprintf(
-			"All %s to %s lie inside %s.",
-			plural(res.Considered, "resolved reference"), p.Ctor.String(), joinPatterns(p.Allowed))
+			"Resolved references to %s, %s in all, are confined to %s.",
+			p.Ctor.String(), plural(res.Considered, "reference"), joinPatterns(p.Allowed))
 	default:
 		res.Rationale = fmt.Sprintf(
-			"%d of %s to %s lie outside %s.",
-			len(res.Violations), plural(res.Considered, "resolved reference"), p.Ctor.String(), joinPatterns(p.Allowed))
+			"Of %s to %s, %d lie outside %s.",
+			plural(res.Considered, "resolved reference"), p.Ctor.String(), len(res.Violations), joinPatterns(p.Allowed))
 	}
 	return res
 }
@@ -164,12 +164,12 @@ func evalMustPassThrough(fs *FactSet, p MustPassThrough) Result {
 	case len(res.Violations) == 0:
 		res.Discharged = true
 		res.Rationale = fmt.Sprintf(
-			"Every call path from the %s matching %s to a call of %s passes through a reference to %s.",
+			"Every call path from %s matching %s to a call of %s passes through a reference to %s.",
 			plural(res.Considered, "definition"), p.Source.String(), p.Sink.String(), p.Proof.String())
 	default:
 		res.Rationale = fmt.Sprintf(
-			"%d of %s matching %s reach %s without a reference to %s.",
-			len(res.Violations), plural(res.Considered, "definition"), p.Source.String(), p.Sink.String(), p.Proof.String())
+			"Of %s matching %s, %d reach %s without a reference to %s.",
+			plural(res.Considered, "definition"), p.Source.String(), len(res.Violations), p.Sink.String(), p.Proof.String())
 	}
 	return res
 }

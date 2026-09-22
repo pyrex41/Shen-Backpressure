@@ -1,8 +1,8 @@
 # Discharge Report — Audit Rendering
 
-Generated 2026-09-22T04:07:06Z. Source artifact: `.sb/discharge_report.json` (schema_version=1).
+Generated 2026-09-22T04:11:10Z. Source artifact: `.sb/discharge_report.json` (schema_version=1).
 
-**Implementation commit:** `81799ef61ae94d18f916ac660c7a82744f8f120a` (working tree dirty)
+**Implementation commit:** `faf5445ebd1c381f6cdc0dde87142d778b5cde69` (working tree dirty)
 
 **Spec files:**
 
@@ -216,7 +216,7 @@ Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 | ID | Expression | Discharge | Basis | Rationale |
 |---|---|---|---|---|
-| `constructor-only:internal/shenguard/NewResourceAccess` | `(constructor-only internal/shenguard/NewResourceAccess                     internal/verified/CheckResourceAccess                     cmd/cedar-verify/computeGuardAllow)` | static | flow-analysis | All 2 resolved references to internal/shenguard/NewResourceAccess lie inside internal/verified/CheckResourceAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go. |
+| `constructor-only:internal/shenguard/NewResourceAccess` | `(constructor-only internal/shenguard/NewResourceAccess                     internal/verified/CheckResourceAccess                     cmd/cedar-verify/computeGuardAllow)` | static | flow-analysis | Resolved references to internal/shenguard/NewResourceAccess, 2 references in all, are confined to internal/verified/CheckResourceAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go. |
 
 
 ### `resource-id` — wrapper (✅ Discharged)
@@ -394,8 +394,8 @@ Continuously discharged since commit `81799ef61ae94d18f916ac660c7a82744f8f120a`.
 
 | ID | Expression | Discharge | Basis | Rationale |
 |---|---|---|---|---|
-| `constructor-only:internal/shenguard/NewTenantAccess` | `(constructor-only internal/shenguard/NewTenantAccess                     internal/verified/CheckTenantAccess                     cmd/cedar-verify/computeGuardAllow)` | static | flow-analysis | All 3 resolved references to internal/shenguard/NewTenantAccess lie inside internal/verified/CheckTenantAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go. |
-| `must-pass-through:*ListResources*→DB#Query*` | `(must-pass-through *ListResources*                      internal/verified/CheckTenantAccess                      DB#Query*)` | static | flow-analysis | Every call path from the 1 definitions matching *ListResources* to a call of DB#Query* passes through a reference to internal/verified/CheckTenantAccess. Engine: go-datalog; index: scip-go. |
+| `constructor-only:internal/shenguard/NewTenantAccess` | `(constructor-only internal/shenguard/NewTenantAccess                     internal/verified/CheckTenantAccess                     cmd/cedar-verify/computeGuardAllow)` | static | flow-analysis | Resolved references to internal/shenguard/NewTenantAccess, 3 references in all, are confined to internal/verified/CheckTenantAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go. |
+| `must-pass-through:*ListResources*→DB#Query*` | `(must-pass-through *ListResources*                      internal/verified/CheckTenantAccess                      DB#Query*)` | static | flow-analysis | Every call path from 1 definition matching *ListResources* to a call of DB#Query* passes through a reference to internal/verified/CheckTenantAccess. Engine: go-datalog; index: scip-go. |
 
 
 ### `tenant-id` — wrapper (✅ Discharged)

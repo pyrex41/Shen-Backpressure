@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T04:07:06Z",
+  "generated_at": "2026-09-22T04:11:10Z",
   "spec": {
     "files": [
       {
@@ -11,7 +11,7 @@
     "rule_count": 17
   },
   "impl": {
-    "git_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+    "git_commit": "faf5445ebd1c381f6cdc0dde87142d778b5cde69",
     "git_dirty": true,
     "target_languages": [
       "go"
@@ -337,7 +337,7 @@
           "expression": "(constructor-only internal/shenguard/NewResourceAccess\n                    internal/verified/CheckResourceAccess\n                    cmd/cedar-verify/computeGuardAllow)",
           "discharge": "static",
           "discharge_basis": "flow-analysis",
-          "rationale": "All 2 resolved references to internal/shenguard/NewResourceAccess lie inside internal/verified/CheckResourceAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go.",
+          "rationale": "Resolved references to internal/shenguard/NewResourceAccess, 2 references in all, are confined to internal/verified/CheckResourceAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go.",
           "samples_passed": 0,
           "samples_failed": 0,
           "sample_seed": null
@@ -578,7 +578,7 @@
           "expression": "(constructor-only internal/shenguard/NewTenantAccess\n                    internal/verified/CheckTenantAccess\n                    cmd/cedar-verify/computeGuardAllow)",
           "discharge": "static",
           "discharge_basis": "flow-analysis",
-          "rationale": "All 3 resolved references to internal/shenguard/NewTenantAccess lie inside internal/verified/CheckTenantAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go.",
+          "rationale": "Resolved references to internal/shenguard/NewTenantAccess, 3 references in all, are confined to internal/verified/CheckTenantAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go.",
           "samples_passed": 0,
           "samples_failed": 0,
           "sample_seed": null
@@ -588,7 +588,7 @@
           "expression": "(must-pass-through *ListResources*\n                     internal/verified/CheckTenantAccess\n                     DB#Query*)",
           "discharge": "static",
           "discharge_basis": "flow-analysis",
-          "rationale": "Every call path from the 1 definitions matching *ListResources* to a call of DB#Query* passes through a reference to internal/verified/CheckTenantAccess. Engine: go-datalog; index: scip-go.",
+          "rationale": "Every call path from 1 definition matching *ListResources* to a call of DB#Query* passes through a reference to internal/verified/CheckTenantAccess. Engine: go-datalog; index: scip-go.",
           "samples_passed": 0,
           "samples_failed": 0,
           "sample_seed": null

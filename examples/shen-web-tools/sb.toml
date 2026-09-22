@@ -44,6 +44,23 @@ kind = "command"
 # dedicated package the way internal/shenguard/ is in the Go examples.
 run  = "../../bin/shenguard-audit.sh --lang ts --no-isolation-check specs/core.shen shenguard runtime/guards_gen.ts"
 
+# Gate 5+ — flow premises over a resolved symbol graph (W3).
+#
+# Identical in shape to the Go example's flow gate: `sb flow` runs
+# `sb index`, which picks scip-typescript for a lang="ts" project, and
+# evaluates the (flow ...) forms in specs/core.shen over the resulting
+# facts. The premise text is the same in both examples — only the
+# indexer differs.
+#
+# No `run` field: this example never had a grep gate for the raw
+# constructors, so there is nothing to fall back to. Without a SCIP
+# indexer on PATH the premises are simply recorded unproven with basis
+# "grep-fallback" and the gate passes, which is the honest outcome.
+# See ../../docs/FLOW.md.
+[[gates]]
+name = "flow"
+kind = "flow"
+
 # Gate 6 — spec-equivalence verification via shen-derive-ts.
 #
 # Each [[derive.specs]] entry pins one hand-written TS implementation
