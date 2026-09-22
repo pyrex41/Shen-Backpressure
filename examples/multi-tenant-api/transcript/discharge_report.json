@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T04:16:23Z",
+  "generated_at": "2026-09-22T04:51:24Z",
   "spec": {
     "files": [
       {
@@ -11,8 +11,8 @@
     "rule_count": 17
   },
   "impl": {
-    "git_commit": "76467fdd14e9b455808a1593b9b10d28289eeacb",
-    "git_dirty": false,
+    "git_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
+    "git_dirty": true,
     "target_languages": [
       "go"
     ]
@@ -20,7 +20,7 @@
   "tools": {
     "sb_version": "0.3.0",
     "shen_derive_version": "0.3.0",
-    "shengen_version": "",
+    "shengen_version": "shengen 0.3.0",
     "shen_runtime": null,
     "shen_runtime_available": false
   },
@@ -37,14 +37,17 @@
           "id": "authenticated-user.field-jwt",
           "expression": "Jwt : verified-jwt",
           "discharge": "static",
-          "discharge_basis": "guard-type-at-boundary",
-          "rationale": "Jwt is typed verified-jwt; values of that type can only be constructed via shengen's guarded constructor, which enforces all of verified-jwt's premises transitively.",
+          "discharge_basis": "guard-brand-bound",
+          "rationale": "shengen's brand inference gives AuthenticatedUser[B] a phantom brand parameter shared with this premise, so `NewAuthenticatedUser` accepts only evidence minted for the same subject. The premise `Jwt : verified-jwt` is therefore discharged by proof binding, not merely by type: a proof of the right type about the wrong value is a compile error, because the brand is an unexported type the caller cannot name. (Rule authenticated-user.)",
           "code_references": [
-            "internal/shenguard/guards_gen.go:135"
+            "internal/shenguard/guards_gen.go:190",
+            "internal/shenguard/guards_gen.go:NewAuthenticatedUser"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static",
+          "brand_signature": "AuthenticatedUser[B]"
         },
         {
           "id": "authenticated-user.field-user",
@@ -53,11 +56,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "User is typed user-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of user-id's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:135"
+            "internal/shenguard/guards_gen.go:190"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "authenticated-user.verified-user-head-head-jwt",
@@ -66,15 +70,16 @@
           "discharge_basis": "guard-constructor-validates",
           "rationale": "shengen's generated constructor for authenticated-user rejects inputs that do not satisfy (= User (head (head Jwt))), so this premise holds for any value of type authenticated-user reachable in the impl.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:135"
+            "internal/shenguard/guards_gen.go:190"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
       "counter_examples": []
     },
     {
@@ -89,18 +94,21 @@
           "id": "human-principal.field-auth",
           "expression": "Auth : authenticated-user",
           "discharge": "static",
-          "discharge_basis": "guard-type-at-boundary",
-          "rationale": "Auth is typed authenticated-user; values of that type can only be constructed via shengen's guarded constructor, which enforces all of authenticated-user's premises transitively.",
+          "discharge_basis": "guard-brand-bound",
+          "rationale": "shengen's brand inference gives HumanPrincipal[B] a phantom brand parameter shared with this premise, so `NewHumanPrincipal` accepts only evidence minted for the same subject. The premise `Auth : authenticated-user` is therefore discharged by proof binding, not merely by type: a proof of the right type about the wrong value is a compile error, because the brand is an unexported type the caller cannot name. (Rule human-principal.)",
           "code_references": [
-            "internal/shenguard/guards_gen.go:190"
+            "internal/shenguard/guards_gen.go:255",
+            "internal/shenguard/guards_gen.go:NewHumanPrincipal"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static",
+          "brand_signature": "HumanPrincipal[B]"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
       "counter_examples": []
     },
     {
@@ -118,11 +126,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "X is typed string; the target language's type system rejects non-string values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:69"
+            "internal/shenguard/guards_gen.go:113"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "jwt-audience.verified-not-x",
@@ -131,15 +140,16 @@
           "discharge_basis": "guard-constructor-validates",
           "rationale": "shengen's generated constructor for jwt-audience rejects inputs that do not satisfy (not (= X \"\")), so this premise holds for any value of type jwt-audience reachable in the impl.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:69"
+            "internal/shenguard/guards_gen.go:113"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
       "counter_examples": []
     },
     {
@@ -157,11 +167,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "X is typed string; the target language's type system rejects non-string values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:55"
+            "internal/shenguard/guards_gen.go:96"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "jwt-issuer.verified-not-x",
@@ -170,15 +181,16 @@
           "discharge_basis": "guard-constructor-validates",
           "rationale": "shengen's generated constructor for jwt-issuer rejects inputs that do not satisfy (not (= X \"\")), so this premise holds for any value of type jwt-issuer reachable in the impl.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:55"
+            "internal/shenguard/guards_gen.go:96"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
       "counter_examples": []
     },
     {
@@ -196,11 +208,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Sub is typed user-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of user-id's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:83"
+            "internal/shenguard/guards_gen.go:130"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "parsed-claims.field-exp",
@@ -209,11 +222,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Exp is typed number; the target language's type system rejects non-number values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:83"
+            "internal/shenguard/guards_gen.go:130"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "parsed-claims.field-iss",
@@ -222,11 +236,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Iss is typed jwt-issuer; values of that type can only be constructed via shengen's guarded constructor, which enforces all of jwt-issuer's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:83"
+            "internal/shenguard/guards_gen.go:130"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "parsed-claims.field-aud",
@@ -235,11 +250,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Aud is typed jwt-audience; values of that type can only be constructed via shengen's guarded constructor, which enforces all of jwt-audience's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:83"
+            "internal/shenguard/guards_gen.go:130"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "parsed-claims.verified-exp-0",
@@ -248,15 +264,16 @@
           "discharge_basis": "guard-constructor-validates",
           "rationale": "shengen's generated constructor for parsed-claims rejects inputs that do not satisfy (\u003e Exp 0), so this premise holds for any value of type parsed-claims reachable in the impl.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:83"
+            "internal/shenguard/guards_gen.go:130"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
       "counter_examples": []
     },
     {
@@ -271,14 +288,17 @@
           "id": "resource-access.field-access",
           "expression": "Access : tenant-access",
           "discharge": "static",
-          "discharge_basis": "guard-type-at-boundary",
-          "rationale": "Access is typed tenant-access; values of that type can only be constructed via shengen's guarded constructor, which enforces all of tenant-access's premises transitively.",
+          "discharge_basis": "guard-brand-bound",
+          "rationale": "shengen's brand inference gives ResourceAccess[B] a phantom brand parameter shared with this premise, so `NewResourceAccess` accepts only evidence minted for the same subject. The premise `Access : tenant-access` is therefore discharged by proof binding, not merely by type: a proof of the right type about the wrong value is a compile error, because the brand is an unexported type the caller cannot name. (Rule resource-access.)",
           "code_references": [
-            "internal/shenguard/guards_gen.go:250"
+            "internal/shenguard/guards_gen.go:324",
+            "internal/shenguard/guards_gen.go:NewResourceAccess"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static",
+          "brand_signature": "ResourceAccess[B]"
         },
         {
           "id": "resource-access.field-resource",
@@ -287,11 +307,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Resource is typed resource-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of resource-id's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:250"
+            "internal/shenguard/guards_gen.go:324"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "resource-access.field-isowned",
@@ -300,11 +321,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "IsOwned is typed boolean; the target language's type system rejects non-boolean values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:250"
+            "internal/shenguard/guards_gen.go:324"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "resource-access.verified-isowned-true",
@@ -313,15 +335,16 @@
           "discharge_basis": "guard-constructor-validates",
           "rationale": "shengen's generated constructor for resource-access rejects inputs that do not satisfy (= IsOwned true), so this premise holds for any value of type resource-access reachable in the impl.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:250"
+            "internal/shenguard/guards_gen.go:324"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
       "counter_examples": []
     },
     {
@@ -340,11 +363,12 @@
           "rationale": "Resolved references to internal/shenguard/NewResourceAccess, 2 references in all, are confined to internal/verified/CheckResourceAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go.",
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
       "counter_examples": []
     },
     {
@@ -362,15 +386,16 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "X is typed string; the target language's type system rejects non-string values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:44"
+            "internal/shenguard/guards_gen.go:82"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
       "counter_examples": []
     },
     {
@@ -389,11 +414,12 @@
           "rationale": "shen-derive evaluated the spec on 9 sampled cases (deterministic-default) and emitted a Go test asserting impl returns the same value on each.",
           "samples_passed": 9,
           "samples_failed": 0,
-          "sample_seed": "deterministic-default"
+          "sample_seed": "deterministic-default",
+          "precision": "sampled"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
       "counter_examples": []
     },
     {
@@ -411,11 +437,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Service is typed service-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of service-id's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:168"
+            "internal/shenguard/guards_gen.go:230"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "service-credential.field-secret",
@@ -424,11 +451,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Secret is typed string; the target language's type system rejects non-string values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:168"
+            "internal/shenguard/guards_gen.go:230"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "service-credential.verified-not-secret",
@@ -437,15 +465,16 @@
           "discharge_basis": "guard-constructor-validates",
           "rationale": "shengen's generated constructor for service-credential rejects inputs that do not satisfy (not (= Secret \"\")), so this premise holds for any value of type service-credential reachable in the impl.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:168"
+            "internal/shenguard/guards_gen.go:230"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
       "counter_examples": []
     },
     {
@@ -463,15 +492,16 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "X is typed string; the target language's type system rejects non-string values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:157"
+            "internal/shenguard/guards_gen.go:216"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
       "counter_examples": []
     },
     {
@@ -486,18 +516,21 @@
           "id": "service-principal.field-cred",
           "expression": "Cred : service-credential",
           "discharge": "static",
-          "discharge_basis": "guard-type-at-boundary",
-          "rationale": "Cred is typed service-credential; values of that type can only be constructed via shengen's guarded constructor, which enforces all of service-credential's premises transitively.",
+          "discharge_basis": "guard-brand-bound",
+          "rationale": "shengen's brand inference gives ServicePrincipal[B] a phantom brand parameter shared with this premise, so `NewServicePrincipal` accepts only evidence minted for the same subject. The premise `Cred : service-credential` is therefore discharged by proof binding, not merely by type: a proof of the right type about the wrong value is a compile error, because the brand is an unexported type the caller cannot name. (Rule service-principal.)",
           "code_references": [
-            "internal/shenguard/guards_gen.go:207"
+            "internal/shenguard/guards_gen.go:275",
+            "internal/shenguard/guards_gen.go:NewServicePrincipal"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static",
+          "brand_signature": "ServicePrincipal[B]"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
       "counter_examples": []
     },
     {
@@ -512,14 +545,17 @@
           "id": "tenant-access.field-principal",
           "expression": "Principal : authenticated-principal",
           "discharge": "static",
-          "discharge_basis": "guard-type-at-boundary",
-          "rationale": "Principal is typed authenticated-principal; values of that type can only be constructed via shengen's guarded constructor, which enforces all of authenticated-principal's premises transitively.",
+          "discharge_basis": "guard-brand-bound",
+          "rationale": "shengen's brand inference gives TenantAccess[B] a phantom brand parameter shared with this premise, so `NewTenantAccess` accepts only evidence minted for the same subject. The premise `Principal : authenticated-principal` is therefore discharged by proof binding, not merely by type: a proof of the right type about the wrong value is a compile error, because the brand is an unexported type the caller cannot name. (Rule tenant-access.)",
           "code_references": [
-            "internal/shenguard/guards_gen.go:224"
+            "internal/shenguard/guards_gen.go:295",
+            "internal/shenguard/guards_gen.go:NewTenantAccess"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static",
+          "brand_signature": "TenantAccess[B]"
         },
         {
           "id": "tenant-access.field-tenant",
@@ -528,11 +564,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Tenant is typed tenant-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of tenant-id's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:224"
+            "internal/shenguard/guards_gen.go:295"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "tenant-access.field-ismember",
@@ -541,11 +578,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "IsMember is typed boolean; the target language's type system rejects non-boolean values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:224"
+            "internal/shenguard/guards_gen.go:295"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "tenant-access.verified-ismember-true",
@@ -554,15 +592,16 @@
           "discharge_basis": "guard-constructor-validates",
           "rationale": "shengen's generated constructor for tenant-access rejects inputs that do not satisfy (= IsMember true), so this premise holds for any value of type tenant-access reachable in the impl.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:224"
+            "internal/shenguard/guards_gen.go:295"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
       "counter_examples": []
     },
     {
@@ -581,7 +620,8 @@
           "rationale": "Resolved references to internal/shenguard/NewTenantAccess, 3 references in all, are confined to internal/verified/CheckTenantAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go.",
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "must-pass-through:*ListResources*→DB#Query*",
@@ -591,11 +631,12 @@
           "rationale": "Every call path from 1 definition matching *ListResources* to a call of DB#Query* passes through a reference to internal/verified/CheckTenantAccess. Engine: go-datalog; index: scip-go.",
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
       "counter_examples": []
     },
     {
@@ -613,15 +654,16 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "X is typed string; the target language's type system rejects non-string values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:33"
+            "internal/shenguard/guards_gen.go:68"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
       "counter_examples": []
     },
     {
@@ -639,15 +681,16 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "X is typed string; the target language's type system rejects non-string values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:22"
+            "internal/shenguard/guards_gen.go:54"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
       "counter_examples": []
     },
     {
@@ -662,14 +705,17 @@
           "id": "verified-jwt.field-claims",
           "expression": "Claims : parsed-claims",
           "discharge": "static",
-          "discharge_basis": "guard-type-at-boundary",
-          "rationale": "Claims is typed parsed-claims; values of that type can only be constructed via shengen's guarded constructor, which enforces all of parsed-claims's premises transitively.",
+          "discharge_basis": "guard-brand-bound",
+          "rationale": "shengen's brand inference gives VerifiedJwt[B] a phantom brand parameter shared with this premise, so `NewVerifiedJwt` accepts only evidence minted for the same subject. The premise `Claims : parsed-claims` is therefore discharged by proof binding, not merely by type: a proof of the right type about the wrong value is a compile error, because the brand is an unexported type the caller cannot name. (Rule verified-jwt.)",
           "code_references": [
-            "internal/shenguard/guards_gen.go:113"
+            "internal/shenguard/guards_gen.go:165",
+            "internal/shenguard/guards_gen.go:NewVerifiedJwt"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static",
+          "brand_signature": "VerifiedJwt[B]"
         },
         {
           "id": "verified-jwt.field-sig",
@@ -678,11 +724,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Sig is typed string; the target language's type system rejects non-string values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:113"
+            "internal/shenguard/guards_gen.go:165"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "verified-jwt.verified-not-sig",
@@ -691,15 +738,16 @@
           "discharge_basis": "guard-constructor-validates",
           "rationale": "shengen's generated constructor for verified-jwt rejects inputs that do not satisfy (not (= Sig \"\")), so this premise holds for any value of type verified-jwt reachable in the impl.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:113"
+            "internal/shenguard/guards_gen.go:165"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "discharged_since_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
       "counter_examples": []
     }
   ],
@@ -712,6 +760,23 @@
     "premises_static": 35,
     "premises_runtime_sampled": 1,
     "premises_unproven": 0
+  },
+  "toolchain": {
+    "go": "go1.24.7",
+    "goos": "linux",
+    "goarch": "amd64",
+    "shengen_version": "shengen 0.3.0",
+    "shengen_sha256": "7befa4e04aae02284ef53274876dfd6401e38c9aa6ef6196c76debf8c169259b",
+    "indexers": [
+      {
+        "name": "scip-go",
+        "version": "0.2.7"
+      },
+      {
+        "name": "scip-typescript",
+        "version": "0.4.0"
+      }
+    ]
   },
   "signature": null
 }

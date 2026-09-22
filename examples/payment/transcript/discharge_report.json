@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-28T18:16:32Z",
+  "generated_at": "2026-09-22T04:51:35Z",
   "spec": {
     "files": [
       {
@@ -11,7 +11,7 @@
     "rule_count": 7
   },
   "impl": {
-    "git_commit": "643ba55f2850fcfb411f3b1b1d8c2477f67547a4",
+    "git_commit": "65a24daad14dd78f13886c4a6f376aeef1febc25",
     "git_dirty": true,
     "target_languages": [
       "go"
@@ -20,7 +20,7 @@
   "tools": {
     "sb_version": "0.3.0",
     "shen_derive_version": "0.3.0",
-    "shengen_version": "",
+    "shengen_version": "shengen 0.3.0",
     "shen_runtime": "shen-derive-eval",
     "shen_runtime_available": true
   },
@@ -40,15 +40,16 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "X is typed string; the target language's type system rejects non-string values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:22"
+            "internal/shenguard/guards_gen.go:54"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
       "counter_examples": []
     },
     {
@@ -66,11 +67,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Id is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:96"
+            "internal/shenguard/guards_gen.go:142"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "account-state.field-balance",
@@ -79,15 +81,16 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Balance is typed amount; values of that type can only be constructed via shengen's guarded constructor, which enforces all of amount's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:96"
+            "internal/shenguard/guards_gen.go:142"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
       "counter_examples": []
     },
     {
@@ -105,11 +108,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "X is typed number; the target language's type system rejects non-number values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:33"
+            "internal/shenguard/guards_gen.go:68"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "amount.verified-x-0",
@@ -118,16 +122,17 @@
           "discharge_basis": "runtime-via-evaluator",
           "rationale": "amount is evaluated at runtime by the shen-derive evaluator against the spec expression (\u003e= X 0); the spec and the runtime check are the same source.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:33"
+            "internal/shenguard/guards_gen.go:68"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
           "sample_seed": null,
+          "precision": "runtime",
           "runtime_profile": "B"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
       "counter_examples": []
     },
     {
@@ -145,24 +150,28 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Bal is typed number; the target language's type system rejects non-number values at construction.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:74"
+            "internal/shenguard/guards_gen.go:117"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "balance-invariant.field-tx",
           "expression": "Tx : transaction",
           "discharge": "static",
-          "discharge_basis": "guard-type-at-boundary",
-          "rationale": "Tx is typed transaction; values of that type can only be constructed via shengen's guarded constructor, which enforces all of transaction's premises transitively.",
+          "discharge_basis": "guard-brand-bound",
+          "rationale": "shengen's brand inference gives BalanceChecked[B] a phantom brand parameter shared with this premise, so `NewBalanceChecked` accepts only evidence minted for the same subject. The premise `Tx : transaction` is therefore discharged by proof binding, not merely by type: a proof of the right type about the wrong value is a compile error, because the brand is an unexported type the caller cannot name. (Rule balance-invariant.)",
           "code_references": [
-            "internal/shenguard/guards_gen.go:74"
+            "internal/shenguard/guards_gen.go:117",
+            "internal/shenguard/guards_gen.go:NewBalanceChecked"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static",
+          "brand_signature": "BalanceChecked[B]"
         },
         {
           "id": "balance-invariant.verified-bal-head-tx",
@@ -171,15 +180,16 @@
           "discharge_basis": "guard-constructor-validates",
           "rationale": "shengen's generated constructor for balance-invariant rejects inputs that do not satisfy (\u003e= Bal (head Tx)), so this premise holds for any value of type balance-invariant reachable in the impl.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:74"
+            "internal/shenguard/guards_gen.go:117"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
       "counter_examples": []
     },
     {
@@ -194,15 +204,19 @@
           "id": "processable.oracle-spec-equiv",
           "expression": "spec(processable) ≡ impl(Processable) on sampled inputs",
           "discharge": "runtime-sample",
-          "discharge_basis": "shen-derive-sampled",
-          "rationale": "shen-derive evaluated the spec on 35 sampled cases (deterministic-default) and emitted a Go test asserting impl returns the same value on each.",
-          "samples_passed": 35,
+          "discharge_basis": "prover-z3-path-cover",
+          "rationale": "shen-derive symbolically executed the spec (list unroll depth 4), enumerated 10 path(s), and used z3 to find a concrete witness for each of the 9 feasible one(s) (1 dead, 0 undecided). Those 9 witness(es) plus the boundary pool make up the 44 committed cases; the emitted Go test asserts impl returns the spec's value on each.",
+          "samples_passed": 44,
           "samples_failed": 0,
-          "sample_seed": "deterministic-default"
+          "sample_seed": "deterministic-default",
+          "precision": "path-cover",
+          "paths_total": 10,
+          "paths_feasible": 9,
+          "paths_dead": 1
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
       "counter_examples": []
     },
     {
@@ -217,31 +231,37 @@
           "id": "safe-transfer.field-tx",
           "expression": "Tx : transaction",
           "discharge": "static",
-          "discharge_basis": "guard-type-at-boundary",
-          "rationale": "Tx is typed transaction; values of that type can only be constructed via shengen's guarded constructor, which enforces all of transaction's premises transitively.",
+          "discharge_basis": "guard-brand-bound",
+          "rationale": "shengen's brand inference gives SafeTransfer[B] a phantom brand parameter shared with this premise, so `NewSafeTransfer` accepts only evidence minted for the same subject. The premise `Tx : transaction` is therefore discharged by proof binding, not merely by type: a proof of the right type about the wrong value is a compile error, because the brand is an unexported type the caller cannot name. (Rule safe-transfer.)",
           "code_references": [
-            "internal/shenguard/guards_gen.go:115"
+            "internal/shenguard/guards_gen.go:165",
+            "internal/shenguard/guards_gen.go:NewSafeTransfer"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static",
+          "brand_signature": "SafeTransfer[B]"
         },
         {
           "id": "safe-transfer.field-check",
           "expression": "Check : balance-checked",
           "discharge": "static",
-          "discharge_basis": "guard-type-at-boundary",
-          "rationale": "Check is typed balance-checked; values of that type can only be constructed via shengen's guarded constructor, which enforces all of balance-checked's premises transitively.",
+          "discharge_basis": "guard-brand-bound",
+          "rationale": "shengen's brand inference gives SafeTransfer[B] a phantom brand parameter shared with this premise, so `NewSafeTransfer` accepts only evidence minted for the same subject. The premise `Check : balance-checked` is therefore discharged by proof binding, not merely by type: a proof of the right type about the wrong value is a compile error, because the brand is an unexported type the caller cannot name. (Rule safe-transfer.)",
           "code_references": [
-            "internal/shenguard/guards_gen.go:115"
+            "internal/shenguard/guards_gen.go:165",
+            "internal/shenguard/guards_gen.go:NewSafeTransfer"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static",
+          "brand_signature": "SafeTransfer[B]"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
       "counter_examples": []
     },
     {
@@ -259,11 +279,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "Amount is typed amount; values of that type can only be constructed via shengen's guarded constructor, which enforces all of amount's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:51"
+            "internal/shenguard/guards_gen.go:89"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "transaction.field-from",
@@ -272,11 +293,12 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "From is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:51"
+            "internal/shenguard/guards_gen.go:89"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         },
         {
           "id": "transaction.field-to",
@@ -285,15 +307,16 @@
           "discharge_basis": "guard-type-at-boundary",
           "rationale": "To is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively.",
           "code_references": [
-            "internal/shenguard/guards_gen.go:51"
+            "internal/shenguard/guards_gen.go:89"
           ],
           "samples_passed": 0,
           "samples_failed": 0,
-          "sample_seed": null
+          "sample_seed": null,
+          "precision": "static"
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "81ddf671a482f8b325db11acd04c72ec4182af03",
+      "discharged_since_commit": "505c6c6dba9b6a148e778a41eb924fbdd59e50ee",
       "counter_examples": []
     }
   ],
@@ -307,6 +330,14 @@
     "premises_runtime_sampled": 1,
     "premises_unproven": 0,
     "premises_runtime_evaluator": 1
+  },
+  "toolchain": {
+    "go": "go1.24.7",
+    "goos": "linux",
+    "goarch": "amd64",
+    "shengen_version": "shengen 0.3.0",
+    "shengen_sha256": "7befa4e04aae02284ef53274876dfd6401e38c9aa6ef6196c76debf8c169259b",
+    "z3_version": "Z3 version 5.1.0 - 64 bit"
   },
   "signature": null
 }

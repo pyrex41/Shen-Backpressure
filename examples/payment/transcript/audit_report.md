@@ -1,8 +1,8 @@
 # Discharge Report — Audit Rendering
 
-Generated 2026-05-28T18:16:32Z. Source artifact: `.sb/discharge_report.json` (schema_version=1).
+Generated 2026-09-22T04:51:35Z. Source artifact: `transcript/discharge_report.json` (schema_version=1).
 
-**Implementation commit:** `643ba55f2850fcfb411f3b1b1d8c2477f67547a4` (working tree dirty)
+**Implementation commit:** `65a24daad14dd78f13886c4a6f376aeef1febc25` (working tree dirty)
 
 **Spec files:**
 
@@ -16,13 +16,30 @@ Generated 2026-05-28T18:16:32Z. Source artifact: `.sb/discharge_report.json` (sc
 |---|---|
 | sb | 0.3.0 |
 | shen-derive | 0.3.0 |
-| shengen | — |
+| shengen | shengen 0.3.0 |
 | shen runtime | shen-derive-eval |
+
+## Toolchain
+
+| Component | Version |
+|---|---|
+| Go | `go1.24.7` |
+| platform | `linux/amd64` |
+| shengen | `shengen 0.3.0` |
+| shengen sha256 | `7befa4e04aae02284ef53274876dfd6401e38c9aa6ef6196c76debf8c169259b` |
+| z3 | `Z3 version 5.1.0 - 64 bit` |
+
+The shengen hash matters because the guard types are a pure function of the spec bytes and that binary. Re-run the same emitter on the same spec and you get the same guards file, byte for byte, from any directory.
+
+## Signature
+
+**Unsigned.** The `signature` field is null. Nobody has attested that this document came out of the pipeline it describes. The claims can still be re-derived (see below) — a signature says who produced a report, not whether it is true.
 
 ## Summary
 
 - **Rules:** 7 total — 7 discharged, 0 violated, 0 unproven
 - **Premises:** 14 total — 12 static, 1 runtime-evaluator, 1 runtime-sampled, 0 unproven
+- **Weakest evidence anywhere in this report:** runtime
 
 ## Rules
 
@@ -39,15 +56,15 @@ Spec:
   X : account-id;)
 ```
 
-Continuously discharged since commit `81ddf671a482f8b325db11acd04c72ec4182af03`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
-| ID | Expression | Discharge | Basis | Rationale |
-|---|---|---|---|---|
-| `account-id.field-x` | `X : string` | static | guard-type-at-boundary | X is typed string; the target language's type system rejects non-string values at construction. |
+| ID | Expression | Precision | Discharge | Basis | Rationale |
+|---|---|---|---|---|---|
+| `account-id.field-x` | `X : string` | **static** | static | guard-type-at-boundary | X is typed string; the target language's type system rejects non-string values at construction. |
 
-- `account-id.field-x` code references: `internal/shenguard/guards_gen.go:22`
+- `account-id.field-x` code references: `internal/shenguard/guards_gen.go:54`
 
 ### `account-state` — composite (✅ Discharged)
 
@@ -63,17 +80,17 @@ Spec:
   [Id Balance] : account-state;)
 ```
 
-Continuously discharged since commit `81ddf671a482f8b325db11acd04c72ec4182af03`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
-| ID | Expression | Discharge | Basis | Rationale |
-|---|---|---|---|---|
-| `account-state.field-id` | `Id : account-id` | static | guard-type-at-boundary | Id is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively. |
-| `account-state.field-balance` | `Balance : amount` | static | guard-type-at-boundary | Balance is typed amount; values of that type can only be constructed via shengen's guarded constructor, which enforces all of amount's premises transitively. |
+| ID | Expression | Precision | Discharge | Basis | Rationale |
+|---|---|---|---|---|---|
+| `account-state.field-id` | `Id : account-id` | **static** | static | guard-type-at-boundary | Id is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively. |
+| `account-state.field-balance` | `Balance : amount` | **static** | static | guard-type-at-boundary | Balance is typed amount; values of that type can only be constructed via shengen's guarded constructor, which enforces all of amount's premises transitively. |
 
-- `account-state.field-id` code references: `internal/shenguard/guards_gen.go:96`
-- `account-state.field-balance` code references: `internal/shenguard/guards_gen.go:96`
+- `account-state.field-id` code references: `internal/shenguard/guards_gen.go:142`
+- `account-state.field-balance` code references: `internal/shenguard/guards_gen.go:142`
 
 ### `amount` — constrained (✅ Discharged)
 
@@ -89,17 +106,17 @@ Spec:
   X : amount;)
 ```
 
-Continuously discharged since commit `81ddf671a482f8b325db11acd04c72ec4182af03`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
-| ID | Expression | Discharge | Basis | Rationale |
-|---|---|---|---|---|
-| `amount.field-x` | `X : number` | static | guard-type-at-boundary | X is typed number; the target language's type system rejects non-number values at construction. |
-| `amount.verified-x-0` | `(>= X 0) : verified` | runtime-evaluator | runtime-via-evaluator | amount is evaluated at runtime by the shen-derive evaluator against the spec expression (>= X 0); the spec and the runtime check are the same source. |
+| ID | Expression | Precision | Discharge | Basis | Rationale |
+|---|---|---|---|---|---|
+| `amount.field-x` | `X : number` | **static** | static | guard-type-at-boundary | X is typed number; the target language's type system rejects non-number values at construction. |
+| `amount.verified-x-0` | `(>= X 0) : verified` | **runtime** | runtime-evaluator | runtime-via-evaluator | amount is evaluated at runtime by the shen-derive evaluator against the spec expression (>= X 0); the spec and the runtime check are the same source. |
 
-- `amount.field-x` code references: `internal/shenguard/guards_gen.go:33`
-- `amount.verified-x-0` code references: `internal/shenguard/guards_gen.go:33`
+- `amount.field-x` code references: `internal/shenguard/guards_gen.go:68`
+- `amount.verified-x-0` code references: `internal/shenguard/guards_gen.go:68`
 
 ### `balance-invariant` — guarded (✅ Discharged)
 
@@ -116,19 +133,20 @@ Spec:
   [Bal Tx] : balance-checked;)
 ```
 
-Continuously discharged since commit `81ddf671a482f8b325db11acd04c72ec4182af03`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
-| ID | Expression | Discharge | Basis | Rationale |
-|---|---|---|---|---|
-| `balance-invariant.field-bal` | `Bal : number` | static | guard-type-at-boundary | Bal is typed number; the target language's type system rejects non-number values at construction. |
-| `balance-invariant.field-tx` | `Tx : transaction` | static | guard-type-at-boundary | Tx is typed transaction; values of that type can only be constructed via shengen's guarded constructor, which enforces all of transaction's premises transitively. |
-| `balance-invariant.verified-bal-head-tx` | `(>= Bal (head Tx)) : verified` | static | guard-constructor-validates | shengen's generated constructor for balance-invariant rejects inputs that do not satisfy (>= Bal (head Tx)), so this premise holds for any value of type balance-invariant reachable in the impl. |
+| ID | Expression | Precision | Discharge | Basis | Rationale |
+|---|---|---|---|---|---|
+| `balance-invariant.field-bal` | `Bal : number` | **static** | static | guard-type-at-boundary | Bal is typed number; the target language's type system rejects non-number values at construction. |
+| `balance-invariant.field-tx` | `Tx : transaction` | **static** | static | guard-brand-bound | shengen's brand inference gives BalanceChecked[B] a phantom brand parameter shared with this premise, so `NewBalanceChecked` accepts only evidence minted for the same subject. The premise `Tx : transaction` is therefore discharged by proof binding, not merely by type: a proof of the right type about the wrong value is a compile error, because the brand is an unexported type the caller cannot name. (Rule balance-invariant.) |
+| `balance-invariant.verified-bal-head-tx` | `(>= Bal (head Tx)) : verified` | **static** | static | guard-constructor-validates | shengen's generated constructor for balance-invariant rejects inputs that do not satisfy (>= Bal (head Tx)), so this premise holds for any value of type balance-invariant reachable in the impl. |
 
-- `balance-invariant.field-bal` code references: `internal/shenguard/guards_gen.go:74`
-- `balance-invariant.field-tx` code references: `internal/shenguard/guards_gen.go:74`
-- `balance-invariant.verified-bal-head-tx` code references: `internal/shenguard/guards_gen.go:74`
+- `balance-invariant.field-bal` code references: `internal/shenguard/guards_gen.go:117`
+- `balance-invariant.field-tx`: proof binding — the constructor's signature is `BalanceChecked[B]`, so the brand parameter forces this premise to be evidence about the *same subject* as the conclusion. A proof of the right type about the wrong value does not compile.
+- `balance-invariant.field-tx` code references: `internal/shenguard/guards_gen.go:117`, `internal/shenguard/guards_gen.go:NewBalanceChecked`
+- `balance-invariant.verified-bal-head-tx` code references: `internal/shenguard/guards_gen.go:117`
 
 ### `processable` — define (✅ Discharged)
 
@@ -142,16 +160,18 @@ Spec:
   B0 Txs -> ...)
 ```
 
-Continuously discharged since commit `81ddf671a482f8b325db11acd04c72ec4182af03`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
-| ID | Expression | Discharge | Basis | Rationale |
-|---|---|---|---|---|
-| `processable.oracle-spec-equiv` | `spec(processable) ≡ impl(Processable) on sampled inputs` | runtime-sample | shen-derive-sampled | shen-derive evaluated the spec on 35 sampled cases (deterministic-default) and emitted a Go test asserting impl returns the same value on each. |
+| ID | Expression | Precision | Discharge | Basis | Rationale |
+|---|---|---|---|---|---|
+| `processable.oracle-spec-equiv` | `spec(processable) ≡ impl(Processable) on sampled inputs` | **path-cover** | runtime-sample | prover-z3-path-cover | shen-derive symbolically executed the spec (list unroll depth 4), enumerated 10 path(s), and used z3 to find a concrete witness for each of the 9 feasible one(s) (1 dead, 0 undecided). Those 9 witness(es) plus the boundary pool make up the 44 committed cases; the emitted Go test asserts impl returns the spec's value on each. |
 
 
-- `processable.oracle-spec-equiv`: sampled 35 cases (seed: deterministic-default); 35 passed, 0 failed.
+- `processable.oracle-spec-equiv`: sampled 44 cases (seed: deterministic-default); 44 passed, 0 failed.
+- `processable.oracle-spec-equiv`: path cover — 10 path(s) enumerated, 9 feasible (one committed sample each), 1 dead (unsatisfiable path condition), 0 undecided.
+  A dead path is a branch of the spec no input can reach — worth a look from the spec author.
 
 ### `safe-transfer` — composite (✅ Discharged)
 
@@ -167,17 +187,19 @@ Spec:
   [Tx Check] : safe-transfer;)
 ```
 
-Continuously discharged since commit `81ddf671a482f8b325db11acd04c72ec4182af03`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
-| ID | Expression | Discharge | Basis | Rationale |
-|---|---|---|---|---|
-| `safe-transfer.field-tx` | `Tx : transaction` | static | guard-type-at-boundary | Tx is typed transaction; values of that type can only be constructed via shengen's guarded constructor, which enforces all of transaction's premises transitively. |
-| `safe-transfer.field-check` | `Check : balance-checked` | static | guard-type-at-boundary | Check is typed balance-checked; values of that type can only be constructed via shengen's guarded constructor, which enforces all of balance-checked's premises transitively. |
+| ID | Expression | Precision | Discharge | Basis | Rationale |
+|---|---|---|---|---|---|
+| `safe-transfer.field-tx` | `Tx : transaction` | **static** | static | guard-brand-bound | shengen's brand inference gives SafeTransfer[B] a phantom brand parameter shared with this premise, so `NewSafeTransfer` accepts only evidence minted for the same subject. The premise `Tx : transaction` is therefore discharged by proof binding, not merely by type: a proof of the right type about the wrong value is a compile error, because the brand is an unexported type the caller cannot name. (Rule safe-transfer.) |
+| `safe-transfer.field-check` | `Check : balance-checked` | **static** | static | guard-brand-bound | shengen's brand inference gives SafeTransfer[B] a phantom brand parameter shared with this premise, so `NewSafeTransfer` accepts only evidence minted for the same subject. The premise `Check : balance-checked` is therefore discharged by proof binding, not merely by type: a proof of the right type about the wrong value is a compile error, because the brand is an unexported type the caller cannot name. (Rule safe-transfer.) |
 
-- `safe-transfer.field-tx` code references: `internal/shenguard/guards_gen.go:115`
-- `safe-transfer.field-check` code references: `internal/shenguard/guards_gen.go:115`
+- `safe-transfer.field-tx`: proof binding — the constructor's signature is `SafeTransfer[B]`, so the brand parameter forces this premise to be evidence about the *same subject* as the conclusion. A proof of the right type about the wrong value does not compile.
+- `safe-transfer.field-tx` code references: `internal/shenguard/guards_gen.go:165`, `internal/shenguard/guards_gen.go:NewSafeTransfer`
+- `safe-transfer.field-check`: proof binding — the constructor's signature is `SafeTransfer[B]`, so the brand parameter forces this premise to be evidence about the *same subject* as the conclusion. A proof of the right type about the wrong value does not compile.
+- `safe-transfer.field-check` code references: `internal/shenguard/guards_gen.go:165`, `internal/shenguard/guards_gen.go:NewSafeTransfer`
 
 ### `transaction` — composite (✅ Discharged)
 
@@ -194,20 +216,30 @@ Spec:
   [Amount From To] : transaction;)
 ```
 
-Continuously discharged since commit `81ddf671a482f8b325db11acd04c72ec4182af03`.
+Continuously discharged since commit `505c6c6dba9b6a148e778a41eb924fbdd59e50ee`.
 
 **Premises**
 
-| ID | Expression | Discharge | Basis | Rationale |
-|---|---|---|---|---|
-| `transaction.field-amount` | `Amount : amount` | static | guard-type-at-boundary | Amount is typed amount; values of that type can only be constructed via shengen's guarded constructor, which enforces all of amount's premises transitively. |
-| `transaction.field-from` | `From : account-id` | static | guard-type-at-boundary | From is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively. |
-| `transaction.field-to` | `To : account-id` | static | guard-type-at-boundary | To is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively. |
+| ID | Expression | Precision | Discharge | Basis | Rationale |
+|---|---|---|---|---|---|
+| `transaction.field-amount` | `Amount : amount` | **static** | static | guard-type-at-boundary | Amount is typed amount; values of that type can only be constructed via shengen's guarded constructor, which enforces all of amount's premises transitively. |
+| `transaction.field-from` | `From : account-id` | **static** | static | guard-type-at-boundary | From is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively. |
+| `transaction.field-to` | `To : account-id` | **static** | static | guard-type-at-boundary | To is typed account-id; values of that type can only be constructed via shengen's guarded constructor, which enforces all of account-id's premises transitively. |
 
-- `transaction.field-amount` code references: `internal/shenguard/guards_gen.go:51`
-- `transaction.field-from` code references: `internal/shenguard/guards_gen.go:51`
-- `transaction.field-to` code references: `internal/shenguard/guards_gen.go:51`
+- `transaction.field-amount` code references: `internal/shenguard/guards_gen.go:89`
+- `transaction.field-from` code references: `internal/shenguard/guards_gen.go:89`
+- `transaction.field-to` code references: `internal/shenguard/guards_gen.go:89`
 
+
+## How to Verify This Report
+
+Run this in the project directory. It needs no model, no network, and no credentials — only the committed artifacts:
+
+```sh
+sb verify-report --in transcript/discharge_report.json
+```
+
+It re-hashes every spec, re-runs shengen and diffs the result against the committed guards file, resolves every code reference, re-runs the committed sample tests, re-checks the path counters when z3 is present, and re-evaluates the flow premises from a freshly built index. A check it cannot re-derive is reported UNVERIFIED rather than passed — add `--strict` to treat that as a failure. When a check fails, it names the premises that lost their basis.
 
 ## How to Read This Report
 
@@ -229,6 +261,42 @@ it was discharged in the implementation under verification.
   premise here means *every sampled case agreed*. This is sampled
   evidence, not an exhaustive proof.
 
+- **Path cover** — when the premise's basis is
+  `prover-z3-path-cover`, the evidence is stronger than a pool.
+  shen-derive symbolically executed the Shen spec, enumerated every
+  execution path (unrolling list recursion to a fixed depth), and used
+  the Z3 solver to produce one concrete input per *feasible* path.
+  Those inputs are committed as test cases alongside the boundary
+  pool. Paths whose condition is unsatisfiable are reported as dead:
+  branches of the spec no input can reach. This is still bounded
+  evidence — the list-unrolling depth is finite — but within that
+  bound no path of the spec goes unexercised.
+
+- **Vacuous** — the rule's datatype is uninhabited: the conjunction of
+  its verified premises has no solution, so no value of the type can
+  be constructed and every claim that consumes one is empty. This is
+  a defect in the spec rather than in the implementation, and it
+  fails the gate, because an uninhabited guard proves nothing while
+  looking like it proves everything.
+
+- **Precision** — each premise also carries a `precision` on a
+  total order: `static` (the compiler refuses a violating
+  program) is strongest, then `path-cover` (a solver found a
+  witness for every feasible spec path), then `sampled`
+  (agreement on a pool of inputs), then `runtime` (checked in
+  production, on the value in hand, and silent about every value the
+  program never sees), then `unproven`. A report is only as
+  strong as its weakest premise, which is why the Summary states it.
+
+- **Blame** — each counter-example names one responsible party:
+  `spec` (the Shen rule is wrong or uninhabited), `impl`
+  (the implementation disagrees with a spec both oracles read the same
+  way), `wrapper` (a `:runtime-via` checker), or
+  `lowering` (the spec's two evaluators disagree about what it
+  means). The `blame_basis` says how the assignment was
+  reached; `evaluator-only` means no Shen host was available to
+  offer a second reading, so a lowering bug would look identical.
+
 - **Unproven** — the tool could not confidently classify the premise
   in this release. Treat the premise as outside the verified
   boundary until a future version of the tool can address it.
@@ -238,9 +306,13 @@ it was discharged in the implementation under verification.
 - It is not a SOC-2, ISO-27001, or any other compliance certification.
   It is a verification artifact that compliance and audit workflows
   may reference as evidence.
-- It is not signed or attested. The `signature` field in the JSON is
-  reserved for a future signing integration; in this release it is
-  always null.
+- It is not third-party attested. The `signature` field, when
+  present, says which key vouched that this document came out of this
+  pipeline. It is not a claim that the pipeline's conclusions are
+  correct — for that, re-derive them with `sb verify-report`,
+  which needs neither the key nor the network. See the Signature
+  section above, and docs/TRUST-MODEL.md for what signing does and
+  does not move inside the trust boundary.
 - It is not third-party verified. The classifications and rationales
   come from this tool's own analysis of the spec and the
   implementation.

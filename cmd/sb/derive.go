@@ -91,6 +91,10 @@ Flags:
 	tsCLI := "../../cmd/shen-derive-ts/shen-derive.ts"
 	absTSCLI, _ := filepath.Abs(tsCLI)
 
+	// W5.4 — refresh the brand table before classifying, so it can
+	// never describe an older spec than the one being verified.
+	brandTablePath := ensureBrandTable(cfg)
+
 	// First pass: regenerate + diff (or overwrite in --regen mode).
 	drifted := 0
 	goImplPkgs := map[string]bool{}
@@ -160,14 +164,12 @@ Flags:
 			if absGuardFile != "" {
 				runArgs = append(runArgs, "--guard-file", absGuardFile)
 			}
-			// W5.4 — hand shen-derive the brand table `sb gen` wrote,
-			// if there is one, so premises W1's inference pairs are
-			// recorded with the guard-brand-bound basis rather than
-			// the weaker guard-type-at-boundary.
-			if abs, err := filepath.Abs(BrandTablePath); err == nil {
-				if _, statErr := os.Stat(abs); statErr == nil {
-					runArgs = append(runArgs, "--brand-table", abs)
-				}
+			// W5.4 — hand shen-derive the brand table, so premises
+			// W1's inference pairs are recorded with the
+			// guard-brand-bound basis rather than the weaker
+			// guard-type-at-boundary.
+			if brandTablePath != "" {
+				runArgs = append(runArgs, "--brand-table", brandTablePath)
 			}
 			if spec.PathCover {
 				// Path-complete sampling: one committed case per

@@ -22,7 +22,13 @@ package main
 // quietly claiming `impl` is the difference between a report that
 // knows what it knows and one that does not.
 
-import "strings"
+import (
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
 
 // BlameBasisFlowAnalysis is recorded on a counter-example the flow
 // gate produced: the violating reference is in the implementation, and
@@ -33,6 +39,41 @@ const BlameBasisFlowAnalysis = "flow-analysis"
 // Under .sb/ with the other per-run artifacts, so it is regenerated
 // alongside the guards file and cannot go stale relative to it.
 const BrandTablePath = ".sb/brand_table.json"
+
+// ensureBrandTable makes sure .sb/brand_table.json describes the
+// project's current spec, and returns its path (empty when the
+// project does not use brands, or when shengen is unavailable).
+//
+// `sb gen` writes the table as a side effect, but a project whose
+// codegen gate is a shell script calling shengen directly — which is
+// both examples — never goes through `sb gen`. Rather than require
+// every such script to learn a new flag, sb derives the table itself
+// when it needs one. The call is read-only with respect to the guards
+// file: shengen writes the table and nothing else.
+func ensureBrandTable(cfg *Config) string {
+	if cfg == nil || !cfg.Brands || cfg.Lang != "go" || cfg.Spec == "" {
+		return ""
+	}
+	shengen, err := FindShengen()
+	if err != nil {
+		return ""
+	}
+	if err := os.MkdirAll(filepath.Dir(BrandTablePath), 0o755); err != nil {
+		return ""
+	}
+	cmd := exec.Command(shengen, "--spec", cfg.Spec, "--pkg", cfg.Pkg,
+		"--brands", "--brand-table", BrandTablePath, "--dry-run")
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	abs, err := filepath.Abs(BrandTablePath)
+	if err != nil {
+		return BrandTablePath
+	}
+	return abs
+}
 
 // precisionForBasis maps a premise's discharge and basis onto the
 // total order. Mirrors report.PrecisionFor; the two modules cannot
