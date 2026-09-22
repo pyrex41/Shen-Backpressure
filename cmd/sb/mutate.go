@@ -268,71 +268,73 @@ func RunMutation(cfg *Config, timeout time.Duration, equivalent map[string]bool,
 				spec.Func, spec.Lang))
 			continue
 		}
-		file, err := implFileFor(spec)
-		if err != nil {
-			return nil, nil, err
-		}
-		mutants, err := GenerateMutants(file)
-		if err != nil {
-			return nil, nil, fmt.Errorf("%s: %w", file, err)
-		}
-
-		orig, err := os.ReadFile(file)
+		files, err := implFilesFor(spec)
 		if err != nil {
 			return nil, nil, err
 		}
 		stat := MutationSpecStat{Spec: spec.Func, ImplFunc: spec.ImplFunc, Test: specTestName(spec)}
 
-		fmt.Fprintf(os.Stderr, "sb mutate: [%s] %s — %d mutants over %s\n",
-			spec.Func, spec.ImplFunc, len(mutants), file)
-
-		for i := range mutants {
-			m := &mutants[i]
-			m.Spec = spec.Func
-			m.ImplFunc = spec.ImplFunc
-
-			if equivalent[m.ID] {
-				m.Outcome = MutantEquivalent
-				m.Detail = "marked equivalent in sb.toml [derive.mutation]"
-			} else {
-				outcome, detail := evaluateMutant(file, m.Source, spec, timeout)
-				m.Outcome, m.Detail = outcome, detail
+		for _, file := range files {
+			mutants, err := GenerateMutants(file)
+			if err != nil {
+				return nil, nil, fmt.Errorf("%s: %w", file, err)
 			}
-			// Always put the original back before moving on, whatever
-			// happened.
-			if err := os.WriteFile(file, orig, 0o644); err != nil {
-				return nil, nil, fmt.Errorf("restoring %s: %w", file, err)
+			orig, err := os.ReadFile(file)
+			if err != nil {
+				return nil, nil, err
 			}
 
-			if verbose || m.Outcome == MutantSurvived {
-				fmt.Fprintf(os.Stderr, "  %-10s %s  %s → %s\n", m.Outcome, m.ID, m.Before, m.After)
-			}
+			fmt.Fprintf(os.Stderr, "sb mutate: [%s] %s — %d mutants over %s\n",
+				spec.Func, spec.ImplFunc, len(mutants), file)
 
-			s, ok := opStats[m.Operator]
-			if !ok {
-				s = &MutationOperatorStat{Operator: m.Operator}
-				opStats[m.Operator] = s
+			for i := range mutants {
+				m := &mutants[i]
+				m.Spec = spec.Func
+				m.ImplFunc = spec.ImplFunc
+
+				if equivalent[m.ID] {
+					m.Outcome = MutantEquivalent
+					m.Detail = "marked equivalent in sb.toml [derive.mutation]"
+				} else {
+					outcome, detail := evaluateMutant(file, m.Source, spec, timeout)
+					m.Outcome, m.Detail = outcome, detail
+				}
+				// Always put the original back before moving on,
+				// whatever happened.
+				if err := os.WriteFile(file, orig, 0o644); err != nil {
+					return nil, nil, fmt.Errorf("restoring %s: %w", file, err)
+				}
+
+				if verbose || m.Outcome == MutantSurvived {
+					fmt.Fprintf(os.Stderr, "  %-10s %s  %s → %s\n", m.Outcome, m.ID, m.Before, m.After)
+				}
+
+				s, ok := opStats[m.Operator]
+				if !ok {
+					s = &MutationOperatorStat{Operator: m.Operator}
+					opStats[m.Operator] = s
+				}
+				switch m.Outcome {
+				case MutantCaught:
+					s.Caught++
+					stat.Caught++
+					score.Caught++
+				case MutantSurvived:
+					s.Survived++
+					stat.Survived++
+					score.Survived++
+					score.Survivors = append(score.Survivors, stripSource(*m))
+				case MutantEquivalent:
+					s.Equivalent++
+					stat.Equivalent++
+					score.Equivalent++
+				case MutantInvalid:
+					s.Invalid++
+					stat.Invalid++
+					score.Invalid++
+				}
+				all = append(all, stripSource(*m))
 			}
-			switch m.Outcome {
-			case MutantCaught:
-				s.Caught++
-				stat.Caught++
-				score.Caught++
-			case MutantSurvived:
-				s.Survived++
-				stat.Survived++
-				score.Survived++
-				score.Survivors = append(score.Survivors, stripSource(*m))
-			case MutantEquivalent:
-				s.Equivalent++
-				stat.Equivalent++
-				score.Equivalent++
-			case MutantInvalid:
-				s.Invalid++
-				stat.Invalid++
-				score.Invalid++
-			}
-			all = append(all, stripSource(*m))
 		}
 		stat.Score = killRate(stat.Caught, stat.Survived)
 		score.Specs = append(score.Specs, stat)
@@ -411,42 +413,62 @@ func isGoBuildFailure(out string) bool {
 		strings.Contains(out, "typecheck]")
 }
 
-// implFileFor locates the file declaring the spec's implementation
-// function. `go list` resolves the import path to a directory, which
-// keeps this working for any module layout rather than assuming the
-// import path's tail is the directory.
-func implFileFor(spec DeriveSpec) (string, error) {
+// implFilesFor lists the non-test Go files of the spec's
+// implementation package, with the file declaring the implementation
+// function first. The whole package is in scope, not just that one
+// file: the spec test exercises the implementation through whatever
+// helpers it calls, and a helper the test cannot distinguish is
+// exactly the kind of gap the score exists to surface.
+//
+// `go list` resolves the import path to a directory, which keeps this
+// working for any module layout rather than assuming the import path's
+// tail is the directory on disk.
+func implFilesFor(spec DeriveSpec) ([]string, error) {
 	out, err := runCaptured("", "go", "list", "-f", "{{.Dir}}", spec.ImplPkg)
 	if err != nil {
-		return "", fmt.Errorf("go list %s: %v: %s", spec.ImplPkg, err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("go list %s: %v: %s", spec.ImplPkg, err, strings.TrimSpace(string(out)))
 	}
 	dir := strings.TrimSpace(string(out))
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+	var files []string
+	primary := ""
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
 			continue
 		}
 		p := filepath.Join(dir, e.Name())
-		fset := token.NewFileSet()
-		f, err := parser.ParseFile(fset, p, nil, 0)
-		if err != nil {
+		if rel, relErr := filepath.Rel(mustCwd(), p); relErr == nil {
+			p = rel
+		}
+		if primary == "" && fileDeclares(p, spec.ImplFunc) {
+			primary = p
 			continue
 		}
-		for _, d := range f.Decls {
-			fn, ok := d.(*ast.FuncDecl)
-			if ok && fn.Recv == nil && fn.Name != nil && fn.Name.Name == spec.ImplFunc {
-				rel, relErr := filepath.Rel(mustCwd(), p)
-				if relErr != nil {
-					return p, nil
-				}
-				return rel, nil
-			}
+		files = append(files, p)
+	}
+	if primary == "" {
+		return nil, fmt.Errorf("no file in %s declares func %s", dir, spec.ImplFunc)
+	}
+	return append([]string{primary}, files...), nil
+}
+
+// fileDeclares reports whether path declares a top-level function with
+// the given name.
+func fileDeclares(path, name string) bool {
+	f, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		return false
+	}
+	for _, d := range f.Decls {
+		fn, ok := d.(*ast.FuncDecl)
+		if ok && fn.Recv == nil && fn.Name != nil && fn.Name.Name == name {
+			return true
 		}
 	}
-	return "", fmt.Errorf("no file in %s declares func %s", dir, spec.ImplFunc)
+	return false
 }
 
 func mustCwd() string {
