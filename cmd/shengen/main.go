@@ -2405,7 +2405,7 @@ func main() {
 	}
 
 	if *brandTableOut != "" {
-		if err := WriteBrandTableJSON(*brandTableOut, BrandTableToJSON(bt, headerPath, version)); err != nil {
+		if err := WriteBrandTableJSON(*brandTableOut, BrandTableToJSON(bt, types, st, headerPath, version)); err != nil {
 			fmt.Fprintf(os.Stderr, "error writing brand table %s: %v\n", *brandTableOut, err)
 			os.Exit(1)
 		}

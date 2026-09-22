@@ -110,11 +110,16 @@ type BrandTable struct {
 
 // BrandTableType is one Shen type's inferred brand signature.
 type BrandTableType struct {
-	ShenName      string `json:"shen_name"`
-	GoName        string `json:"go_name"`
-	Signature     string `json:"signature"`
-	BoundPremises []int  `json:"bound_premises"`
-	Bound         bool   `json:"bound"`
+	ShenName string `json:"shen_name"`
+	GoName   string `json:"go_name"`
+	// Datatypes are the (datatype …) block names that produce this
+	// type. A report keys its rules by the block name, which is not
+	// always the type name — payment's `balance-invariant` block
+	// concludes a `balance-checked`.
+	Datatypes     []string `json:"datatypes"`
+	Signature     string   `json:"signature"`
+	BoundPremises []int    `json:"bound_premises"`
+	Bound         bool     `json:"bound"`
 }
 
 // LoadBrandTable reads a shengen --brand-table file. A missing path or
@@ -138,14 +143,24 @@ func LoadBrandTable(path string) (*BrandTable, error) {
 	return &bt, nil
 }
 
-// Lookup returns the entry for a Shen type name, or nil.
-func (bt *BrandTable) Lookup(shenName string) *BrandTableType {
+// Lookup returns the entry for a name, matching either the generated
+// type name or the name of a (datatype …) block that produces it. The
+// type name is tried first: it is the more specific key, and only one
+// entry can carry it.
+func (bt *BrandTable) Lookup(name string) *BrandTableType {
 	if bt == nil {
 		return nil
 	}
 	for i := range bt.Types {
-		if bt.Types[i].ShenName == shenName {
+		if bt.Types[i].ShenName == name {
 			return &bt.Types[i]
+		}
+	}
+	for i := range bt.Types {
+		for _, block := range bt.Types[i].Datatypes {
+			if block == name {
+				return &bt.Types[i]
+			}
 		}
 	}
 	return nil

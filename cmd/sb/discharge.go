@@ -49,8 +49,109 @@ type DischargeReport struct {
 	Tools         DischargeTools      `json:"tools"`
 	Rules         []DischargeRule     `json:"rules"`
 	Summary       DischargeSummary    `json:"summary"`
-	Signature     *DischargeSignature `json:"signature"`
+
+	// ---- W5 certificate block (mirrors shen-derive/report) -------
+	// Toolchain names the binaries that produced this report, so
+	// `sb verify-report` can say whether it re-derived with the same
+	// tools. omitempty keeps pre-W5 reports byte-identical.
+	Toolchain *DischargeToolchain `json:"toolchain,omitempty"`
+	// --------------------------------------------------------------
+
+	Signature *DischargeSignature `json:"signature"`
 }
+
+// ---- W5 certificate block (mirrors shen-derive/report) ----------
+
+// DischargeToolchain mirrors report.Toolchain.
+type DischargeToolchain struct {
+	Go               string            `json:"go,omitempty"`
+	GOOS             string            `json:"goos,omitempty"`
+	GOARCH           string            `json:"goarch,omitempty"`
+	ShengenVersion   string            `json:"shengen_version,omitempty"`
+	ShengenSHA256    string            `json:"shengen_sha256,omitempty"`
+	ShengenTSVersion string            `json:"shengen_ts_version,omitempty"`
+	Z3Version        string            `json:"z3_version,omitempty"`
+	Indexers         []DischargeToolVersion `json:"indexers,omitempty"`
+}
+
+// DischargeToolVersion mirrors report.ToolVersion.
+type DischargeToolVersion struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// Precision values, strongest first (mirrors shen-derive/report).
+const (
+	PrecisionStatic    = "static"
+	PrecisionPathCover = "path-cover"
+	PrecisionSampled   = "sampled"
+	PrecisionRuntime   = "runtime"
+	PrecisionUnproven  = "unproven"
+)
+
+// PrecisionOrder is the total order, strongest to weakest.
+var PrecisionOrder = []string{
+	PrecisionStatic, PrecisionPathCover, PrecisionSampled,
+	PrecisionRuntime, PrecisionUnproven,
+}
+
+// PrecisionRank returns a precision's position in the total order; an
+// unrecognised value ranks below everything known.
+func PrecisionRank(p string) int {
+	for i, v := range PrecisionOrder {
+		if v == p {
+			return i
+		}
+	}
+	return len(PrecisionOrder)
+}
+
+// Blame values (mirrors shen-derive/report).
+const (
+	BlameSpec     = "spec"
+	BlameImpl     = "impl"
+	BlameWrapper  = "wrapper"
+	BlameLowering = "lowering"
+)
+
+// Blame bases (mirrors shen-derive/report).
+const (
+	BlameBasisEvaluatorAndHost      = "evaluator-and-host"
+	BlameBasisEvaluatorOnly         = "evaluator-only"
+	BlameBasisEvaluatorHostDisagree = "evaluator-host-disagree"
+	BlameBasisRuntimeVia            = "runtime-via"
+	BlameBasisVacuous               = "vacuous-datatype"
+)
+
+// Discharge bases sb itself reasons about (mirrors
+// shen-derive/report). The full list lives there; these are the ones
+// the verifier and the renderers name.
+const (
+	BasisGuardBrandBound           = "guard-brand-bound"
+	BasisGuardTypeAtBoundary       = "guard-type-at-boundary"
+	BasisGuardConstructorValidates = "guard-constructor-validates"
+	BasisShenDeriveSampled         = "shen-derive-sampled"
+	BasisProverZ3PathCover         = "prover-z3-path-cover"
+	BasisVacuousDatatype           = "vacuous-datatype"
+	BasisNotDischarged             = "not-discharged"
+)
+
+// BlameLabel renders a blame value for a human reader.
+func BlameLabel(blame string) string {
+	switch blame {
+	case BlameSpec:
+		return "spec (the Shen rule itself is wrong or uninhabited)"
+	case BlameImpl:
+		return "impl (the implementation disagrees with the spec)"
+	case BlameWrapper:
+		return "wrapper (a :runtime-via checker or its generated wrapper)"
+	case BlameLowering:
+		return "lowering (the spec's two evaluators do not agree on its meaning)"
+	}
+	return blame
+}
+
+// -----------------------------------------------------------------
 
 type DischargeSpec struct {
 	Files     []DischargeSpecFile `json:"files"`
@@ -104,6 +205,14 @@ type DischargePremise struct {
 	SamplesFailed  int      `json:"samples_failed"`
 	SampleSeed     *string  `json:"sample_seed"`
 
+	// ---- W5 certificate block (mirrors shen-derive/report) -------
+	// Precision is the premise's place in the evidence order; see
+	// PrecisionOrder. BrandSignature is the generic constructor
+	// signature that binds a guard-brand-bound premise.
+	Precision      string `json:"precision,omitempty"`
+	BrandSignature string `json:"brand_signature,omitempty"`
+	// --------------------------------------------------------------
+
 	// Path-cover counters (mirror shen-derive/report/schema.go).
 	// Present only when shen-derive's path sampler ran; passed through
 	// verbatim from the per-spec report.
@@ -131,6 +240,11 @@ type DischargeCounter struct {
 	ImplLineHint    *int              `json:"impl_line_hint"`
 	FirstSeenCommit *string           `json:"first_seen_commit"`
 	Rationale       string            `json:"rationale"`
+
+	// ---- W5 certificate block (mirrors shen-derive/report) -------
+	Blame      string `json:"blame,omitempty"`
+	BlameBasis string `json:"blame_basis,omitempty"`
+	// --------------------------------------------------------------
 }
 
 type DischargeSummary struct {
@@ -154,10 +268,19 @@ type DischargeSummary struct {
 	PremisesRuntimeAttestedDB      int `json:"premises_runtime_attested_db,omitempty"`
 }
 
+// DischargeSignature is a detached signature over the report's
+// canonical bytes (see canonical.go and docs/TRUST-MODEL.md). Mirrors
+// report.Signature.
 type DischargeSignature struct {
 	Algorithm string `json:"algorithm"`
 	KeyID     string `json:"key_id"`
 	Value     string `json:"value"`
+
+	// ---- W5 certificate block (mirrors shen-derive/report) -------
+	Canonicalization string `json:"canonicalization,omitempty"`
+	SignedAt         string `json:"signed_at,omitempty"`
+	Mode             string `json:"mode,omitempty"`
+	// --------------------------------------------------------------
 }
 
 // Status constants mirror the schema doc.

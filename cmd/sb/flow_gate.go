@@ -247,6 +247,20 @@ func flowRules(decls []flow.Decl, results []flow.Result, out *IndexOutcome, engi
 			}
 			rule.Premises = append(rule.Premises, prem)
 		}
+		// W5.4 — precision and blame. A flow premise the analysis
+		// discharged is static evidence: nothing had to run. A
+		// violation is the implementation's — the handler that
+		// reaches the sink without the proof is impl code — and the
+		// basis names the analysis that found it rather than an
+		// oracle that did not exist.
+		for i := range rule.Premises {
+			rule.Premises[i].Precision = precisionForBasis(
+				rule.Premises[i].Discharge, rule.Premises[i].DischargeBasis)
+		}
+		for i := range rule.CounterExamples {
+			rule.CounterExamples[i].Blame = BlameImpl
+			rule.CounterExamples[i].BlameBasis = BlameBasisFlowAnalysis
+		}
 		rules = append(rules, rule)
 	}
 	return rules

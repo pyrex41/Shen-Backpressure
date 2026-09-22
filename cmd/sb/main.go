@@ -15,6 +15,8 @@
 //   policy    Run Cedar (shen-cedar) + Rego (shen-rego) runtime policy emitters + drift + real (cedar/opa) validate; --decidable for fragment tier sketch
 //   context   Emit project context from the manifest
 //   audit-report  Long-form Markdown rendering of the latest discharge report
+//   verify-report Re-derive a committed discharge report from the tree alone
+//   sign-report   Sign a discharge report over its canonical bytes
 //   loop      Launch a Ralph loop (headless LLM + gate verification)
 
 package main
@@ -51,6 +53,10 @@ func main() {
 		cmdContext(os.Args[2:])
 	case "audit-report":
 		cmdAuditReport(os.Args[2:])
+	case "verify-report":
+		cmdVerifyReport(os.Args[2:])
+	case "sign-report":
+		cmdSignReport(os.Args[2:])
 	case "loop":
 		cmdLoop(os.Args[2:])
 	case "version", "--version", "-v":
@@ -79,6 +85,8 @@ Commands:
   policy    Run Cedar (shen-cedar) + Rego (shen-rego) runtime policy emitters + drift + opa/cedar validate; use --decidable for the Decidable-Shen-fragment (native terminating) tier
   context   Emit project context from the manifest (surfaces cedar/rego/decidable-shen policy tiers)
   audit-report  Long-form Markdown rendering of the latest discharge report
+  verify-report Re-derive a committed report's claims (no model, no network)
+  sign-report   Sign a discharge report (ed25519 key file, or --cosign)
   loop      Launch a Ralph loop (headless LLM + gates)
   version   Print version
 

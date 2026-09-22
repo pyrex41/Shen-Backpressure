@@ -114,6 +114,13 @@ func runShengenGo(spec, pkg, output, dbWrappers string, brands, verbose, dryRun 
 	args := []string{"--spec", spec, "--pkg", pkg, "--out", output}
 	if brands {
 		args = append(args, "--brands")
+		// W5.4 — the brand table is the evidence behind the report's
+		// guard-brand-bound discharge basis. It lives under .sb/ with
+		// the other per-run artifacts and is regenerated on every
+		// `sb gen`, so it can never describe a stale guards file.
+		if err := os.MkdirAll(filepath.Dir(BrandTablePath), 0o755); err == nil {
+			args = append(args, "--brand-table", BrandTablePath)
+		}
 	}
 	if dbWrappers != "" {
 		args = append(args, "--db-wrappers", dbWrappers)

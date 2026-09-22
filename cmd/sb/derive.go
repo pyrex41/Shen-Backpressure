@@ -160,6 +160,15 @@ Flags:
 			if absGuardFile != "" {
 				runArgs = append(runArgs, "--guard-file", absGuardFile)
 			}
+			// W5.4 — hand shen-derive the brand table `sb gen` wrote,
+			// if there is one, so premises W1's inference pairs are
+			// recorded with the guard-brand-bound basis rather than
+			// the weaker guard-type-at-boundary.
+			if abs, err := filepath.Abs(BrandTablePath); err == nil {
+				if _, statErr := os.Stat(abs); statErr == nil {
+					runArgs = append(runArgs, "--brand-table", abs)
+				}
+			}
 			if spec.PathCover {
 				// Path-complete sampling: one committed case per
 				// feasible path of the spec, on top of the boundary
@@ -378,6 +387,10 @@ func finalizeDischargeReport(parts []*DischargeReport, cfg *Config, failures []p
 		r.Tools.SBVersion = version
 	}
 	fillImplGit(r)
+	// W5.1 — record which binaries produced this report, so
+	// `sb verify-report` can say whether it re-derived with the same
+	// tools or merely with compatible ones.
+	r.Toolchain = DetectToolchain(cfg, "")
 	if !testsRan {
 		downgradeRuntimeSampledToUnproven(r, skipReason)
 	}
@@ -400,6 +413,12 @@ func finalizeDischargeReport(parts []*DischargeReport, cfg *Config, failures []p
 	// the report is the union of everything that discharged
 	// something, and neither gate owns the file.
 	carryFlowRules(r)
+	// W5.4 — precision on every premise, blame on every
+	// counter-example. Derived from what the report already says, so
+	// applied last: after the downgrade, after the counter-examples,
+	// and after the flow rules are carried across.
+	applyPrecision(r)
+	assignBlame(r, detectShenRuntimeHost(cfg))
 	computeDischargedSinceCommit(r)
 	if err := writeDischarge(DischargeReportPath, r); err != nil {
 		fmt.Fprintf(os.Stderr, "sb derive: write discharge report: %v\n", err)

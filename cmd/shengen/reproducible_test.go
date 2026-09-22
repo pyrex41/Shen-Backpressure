@@ -76,8 +76,15 @@ func TestCanonicalSpecPathNoMarker(t *testing.T) {
 // discharge report's guard-brand-bound basis rests on: safe-transfer's
 // two premises share a brand, transaction's do not.
 func TestBrandTableJSONBindsPairedPremises(t *testing.T) {
-	bt := brandTableForFile(t, filepath.Join("..", "..", "examples", "payment", "specs", "core.shen"))
-	out := BrandTableToJSON(bt, "specs/core.shen", "test")
+	spec := filepath.Join("..", "..", "examples", "payment", "specs", "core.shen")
+	bt := brandTableForFile(t, spec)
+	types, _, err := parseFile(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := newSymbolTable()
+	st.Build(types)
+	out := BrandTableToJSON(bt, types, st, "specs/core.shen", "test")
 
 	byName := map[string]BrandTypeJSON{}
 	for _, e := range out.Types {
@@ -116,6 +123,13 @@ func TestBrandTableJSONBindsPairedPremises(t *testing.T) {
 		t.Errorf("amount is a value, not evidence; got %+v", a)
 	}
 
+	// balance-checked is concluded by the `balance-invariant` block, so
+	// the entry must be findable under that name too — the report keys
+	// its rules by the block.
+	if len(bc.Datatypes) == 0 || bc.Datatypes[0] != "balance-invariant" {
+		t.Errorf("balance-checked should record its producing block: %+v", bc.Datatypes)
+	}
+
 	// Round-trips as JSON.
 	data, err := json.Marshal(out)
 	if err != nil {
@@ -134,7 +148,7 @@ func TestBrandTableJSONBindsPairedPremises(t *testing.T) {
 // so the file must still be valid JSON with an empty type list rather
 // than a null.
 func TestBrandTableJSONNilTable(t *testing.T) {
-	out := BrandTableToJSON(nil, "specs/core.shen", "test")
+	out := BrandTableToJSON(nil, nil, nil, "specs/core.shen", "test")
 	data, err := json.Marshal(out)
 	if err != nil {
 		t.Fatal(err)

@@ -38,6 +38,13 @@ type BrandTableJSON struct {
 type BrandTypeJSON struct {
 	ShenName string `json:"shen_name"`
 	GoName   string `json:"go_name"`
+	// Datatypes are the (datatype …) block names that produce this
+	// type. Usually one, with the same name — but a block may conclude
+	// in a differently-named type (payment's `balance-invariant`
+	// concludes `balance-checked`), and the discharge report keys its
+	// rules by the *block* name. Recording both lets a report look the
+	// entry up by either.
+	Datatypes []string `json:"datatypes,omitempty"`
 	// Kind is "unbranded", "minted", "inherited", or "sum" — the same
 	// vocabulary BrandTable.String prints.
 	Kind string `json:"kind"`
@@ -71,7 +78,8 @@ type BrandTypeJSON struct {
 }
 
 // BrandTableToJSON projects a BrandTable into its wire form.
-func BrandTableToJSON(bt *BrandTable, specPath, shengenVersion string) *BrandTableJSON {
+func BrandTableToJSON(bt *BrandTable, types []Datatype, st *SymbolTable, specPath, shengenVersion string) *BrandTableJSON {
+	blocks := datatypeBlocksByType(types, st)
 	out := &BrandTableJSON{
 		SchemaVersion:  1,
 		Spec:           specPath,
@@ -94,6 +102,7 @@ func BrandTableToJSON(bt *BrandTable, specPath, shengenVersion string) *BrandTab
 		entry := BrandTypeJSON{
 			ShenName:    n,
 			GoName:      info.GoName,
+			Datatypes:   blocks[n],
 			Kind:        brandKindLabel(info),
 			Params:      info.Params,
 			Signature:   brandSignature(info),
@@ -102,6 +111,34 @@ func BrandTableToJSON(bt *BrandTable, specPath, shengenVersion string) *BrandTab
 		entry.BoundPremises = brandBoundPremises(info)
 		entry.Bound = len(entry.BoundPremises) > 0
 		out.Types = append(out.Types, entry)
+	}
+	return out
+}
+
+// datatypeBlocksByType maps each generated type name to the
+// (datatype …) blocks that conclude in it, in spec order.
+func datatypeBlocksByType(types []Datatype, st *SymbolTable) map[string][]string {
+	out := map[string][]string{}
+	if st == nil {
+		return out
+	}
+	for _, dt := range types {
+		for _, gt := range classify(dt, st) {
+			name := generatedShenName(dt, gt, st)
+			if name == "" {
+				continue
+			}
+			seen := false
+			for _, existing := range out[name] {
+				if existing == dt.Name {
+					seen = true
+					break
+				}
+			}
+			if !seen {
+				out[name] = append(out[name], dt.Name)
+			}
+		}
 	}
 	return out
 }
