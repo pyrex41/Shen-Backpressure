@@ -1,8 +1,8 @@
 # Discharge Report — Audit Rendering
 
-Generated 2026-09-22T04:11:10Z. Source artifact: `.sb/discharge_report.json` (schema_version=1).
+Generated 2026-09-22T04:16:23Z. Source artifact: `.sb/discharge_report.json` (schema_version=1).
 
-**Implementation commit:** `faf5445ebd1c381f6cdc0dde87142d778b5cde69` (working tree dirty)
+**Implementation commit:** `76467fdd14e9b455808a1593b9b10d28289eeacb`
 
 **Spec files:**
 

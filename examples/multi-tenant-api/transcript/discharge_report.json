@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T04:11:10Z",
+  "generated_at": "2026-09-22T04:16:23Z",
   "spec": {
     "files": [
       {
@@ -11,8 +11,8 @@
     "rule_count": 17
   },
   "impl": {
-    "git_commit": "faf5445ebd1c381f6cdc0dde87142d778b5cde69",
-    "git_dirty": true,
+    "git_commit": "76467fdd14e9b455808a1593b9b10d28289eeacb",
+    "git_dirty": false,
     "target_languages": [
       "go"
     ]
