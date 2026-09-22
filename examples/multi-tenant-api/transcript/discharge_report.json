@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-23T04:35:14Z",
+  "generated_at": "2026-09-22T04:07:06Z",
   "spec": {
     "files": [
       {
         "path": "specs/core.shen",
-        "sha256": "5cd6e689dff7fa71d761537dcc8eaafa8243bd7240dd07cff1d5883ac1164141"
+        "sha256": "e58f2ba7e92e94b8df7f234f6fd346faa8d05b0f175b09ea44c757690e676f56"
       }
     ],
-    "rule_count": 15
+    "rule_count": 17
   },
   "impl": {
-    "git_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+    "git_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
     "git_dirty": true,
     "target_languages": [
       "go"
@@ -74,7 +74,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
       "counter_examples": []
     },
     {
@@ -100,7 +100,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
       "counter_examples": []
     },
     {
@@ -139,7 +139,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
       "counter_examples": []
     },
     {
@@ -178,7 +178,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
       "counter_examples": []
     },
     {
@@ -256,7 +256,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
       "counter_examples": []
     },
     {
@@ -321,7 +321,30 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "counter_examples": []
+    },
+    {
+      "name": "resource-access-discipline",
+      "kind": "flow",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(flow resource-access-discipline\n  (constructor-only internal/shenguard/NewResourceAccess\n                    internal/verified/CheckResourceAccess\n                    cmd/cedar-verify/computeGuardAllow))",
+      "human_description": "Flow discipline: only internal/verified/CheckResourceAccess and cmd/cedar-verify/computeGuardAllow may reference the constructor internal/shenguard/NewResourceAccess.",
+      "human_description_source": "auto",
+      "premises": [
+        {
+          "id": "constructor-only:internal/shenguard/NewResourceAccess",
+          "expression": "(constructor-only internal/shenguard/NewResourceAccess\n                    internal/verified/CheckResourceAccess\n                    cmd/cedar-verify/computeGuardAllow)",
+          "discharge": "static",
+          "discharge_basis": "flow-analysis",
+          "rationale": "All 2 resolved references to internal/shenguard/NewResourceAccess lie inside internal/verified/CheckResourceAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go.",
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
       "counter_examples": []
     },
     {
@@ -347,7 +370,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
       "counter_examples": []
     },
     {
@@ -370,7 +393,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
       "counter_examples": []
     },
     {
@@ -422,7 +445,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
       "counter_examples": []
     },
     {
@@ -448,7 +471,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
       "counter_examples": []
     },
     {
@@ -474,7 +497,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
       "counter_examples": []
     },
     {
@@ -539,7 +562,40 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
+      "counter_examples": []
+    },
+    {
+      "name": "tenant-access-discipline",
+      "kind": "flow",
+      "spec_file": "specs/core.shen",
+      "spec_excerpt": "(flow tenant-access-discipline\n  (constructor-only internal/shenguard/NewTenantAccess\n                    internal/verified/CheckTenantAccess\n                    cmd/cedar-verify/computeGuardAllow)\n  (must-pass-through *ListResources*\n                     internal/verified/CheckTenantAccess\n                     DB#Query*))",
+      "human_description": "Flow discipline: only internal/verified/CheckTenantAccess and cmd/cedar-verify/computeGuardAllow may reference the constructor internal/shenguard/NewTenantAccess and every call path from *ListResources* to DB#Query* references internal/verified/CheckTenantAccess first.",
+      "human_description_source": "auto",
+      "premises": [
+        {
+          "id": "constructor-only:internal/shenguard/NewTenantAccess",
+          "expression": "(constructor-only internal/shenguard/NewTenantAccess\n                    internal/verified/CheckTenantAccess\n                    cmd/cedar-verify/computeGuardAllow)",
+          "discharge": "static",
+          "discharge_basis": "flow-analysis",
+          "rationale": "All 3 resolved references to internal/shenguard/NewTenantAccess lie inside internal/verified/CheckTenantAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go.",
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        },
+        {
+          "id": "must-pass-through:*ListResources*→DB#Query*",
+          "expression": "(must-pass-through *ListResources*\n                     internal/verified/CheckTenantAccess\n                     DB#Query*)",
+          "discharge": "static",
+          "discharge_basis": "flow-analysis",
+          "rationale": "Every call path from the 1 definitions matching *ListResources* to a call of DB#Query* passes through a reference to internal/verified/CheckTenantAccess. Engine: go-datalog; index: scip-go.",
+          "samples_passed": 0,
+          "samples_failed": 0,
+          "sample_seed": null
+        }
+      ],
+      "status": "discharged",
+      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
       "counter_examples": []
     },
     {
@@ -565,7 +621,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
       "counter_examples": []
     },
     {
@@ -591,7 +647,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
       "counter_examples": []
     },
     {
@@ -643,17 +699,17 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "d9194a75ecc6c7d1d19355c371da26278610d21e",
+      "discharged_since_commit": "81799ef61ae94d18f916ac660c7a82744f8f120a",
       "counter_examples": []
     }
   ],
   "summary": {
-    "rule_count": 15,
-    "rules_discharged": 15,
+    "rule_count": 17,
+    "rules_discharged": 17,
     "rules_violated": 0,
     "rules_unproven": 0,
-    "premises_total": 33,
-    "premises_static": 32,
+    "premises_total": 36,
+    "premises_static": 35,
     "premises_runtime_sampled": 1,
     "premises_unproven": 0
   },

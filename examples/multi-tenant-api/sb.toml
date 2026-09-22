@@ -42,6 +42,28 @@ name = "tcb-audit"
 kind = "command"
 run  = "./bin/shenguard-audit.sh"
 
+# Gate 5+ — flow premises over a resolved symbol graph (W3).
+#
+# Kind "flow" is served by `sb flow`: it runs `sb index` (scip-go here,
+# cached by tree hash under .sb/), evaluates every (flow ...) form in
+# specs/core.shen, and records each premise in the discharge report —
+# discharged with basis "flow-analysis", or violated with the file:line
+# of the offending reference and the shortest violating path.
+#
+# The `run` field of a flow gate is NOT the gate: it is the legacy grep
+# to fall back to when no SCIP indexer is on PATH. In that case the
+# premises are recorded unproven with basis "grep-fallback", so the
+# report is honest about the fact that a regex ran instead of an
+# analysis. Step 1 of bin/shenguard-audit.sh is that grep, and
+# --grep-only runs it alone.
+#
+# The fixed five-gate shape above is untouched; this is an additional
+# manifest gate. See ../../docs/FLOW.md.
+[[gates]]
+name = "flow"
+kind = "flow"
+run  = "./bin/shenguard-audit.sh --grep-only"
+
 # Gate 6 — spec-equivalence verification via shen-derive.
 #
 # Anchors the discharge report on the trivial `same-user?`

@@ -6,7 +6,22 @@
 // *semantic*: the handler simply reads resources directly from the
 // DB using only the user-id (no tenant-membership check).
 //
-// What catches it:
+// What catches it: since W3, the `flow` gate. The premise
+//
+//	(must-pass-through *ListResources*
+//	                   internal/verified/CheckTenantAccess
+//	                   DB#Query*)
+//
+// in specs/core.shen says that every call path from a definition
+// matching the source pattern to a call of the database sink must
+// pass through a reference to the proof-producing wrapper. This
+// handler matches the source pattern, reaches `DB#Query` directly,
+// and references `CheckTenantAccess` nowhere, so `sb flow` reports a
+// violation with this file's `db.Query` line and the shortest
+// violating path. Staging this file under internal/bypass_harness/
+// and running `sb flow` is enough to see it go red.
+//
+// Before W3 the defences were weaker and all of them social:
 //
 //   1. Code review: the function signature has no `verified.TenantAccess`
 //      parameter, so the "must walk the proof chain" discipline is
@@ -29,7 +44,8 @@
 // verified.TenantAccess parameter, the caller had to construct one
 // (and bind to a Check* wrapper to do so). It cannot prevent a
 // developer from writing a function that ignores the chain entirely.
-// That's a code-review concern, made enforceable by the grep gate.
+// The flow gate can: "reaches the sink without the proof" is a
+// property of the call graph, not of the signature.
 package bypass_attempts_demo
 
 import (

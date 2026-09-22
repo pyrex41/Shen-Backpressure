@@ -123,12 +123,12 @@ func evalConstructorOnly(fs *FactSet, p ConstructorOnly) Result {
 	case len(res.Violations) == 0:
 		res.Discharged = true
 		res.Rationale = fmt.Sprintf(
-			"All %d resolved references to %s lie inside %s.",
-			res.Considered, p.Ctor.String(), joinPatterns(p.Allowed))
+			"All %s to %s lie inside %s.",
+			plural(res.Considered, "resolved reference"), p.Ctor.String(), joinPatterns(p.Allowed))
 	default:
 		res.Rationale = fmt.Sprintf(
-			"%d of %d resolved references to %s lie outside %s.",
-			len(res.Violations), res.Considered, p.Ctor.String(), joinPatterns(p.Allowed))
+			"%d of %s to %s lie outside %s.",
+			len(res.Violations), plural(res.Considered, "resolved reference"), p.Ctor.String(), joinPatterns(p.Allowed))
 	}
 	return res
 }
@@ -164,12 +164,12 @@ func evalMustPassThrough(fs *FactSet, p MustPassThrough) Result {
 	case len(res.Violations) == 0:
 		res.Discharged = true
 		res.Rationale = fmt.Sprintf(
-			"Every call path from the %d definitions matching %s to a call of %s passes through a reference to %s.",
-			res.Considered, p.Source.String(), p.Sink.String(), p.Proof.String())
+			"Every call path from the %s matching %s to a call of %s passes through a reference to %s.",
+			plural(res.Considered, "definition"), p.Source.String(), p.Sink.String(), p.Proof.String())
 	default:
 		res.Rationale = fmt.Sprintf(
-			"%d of %d definitions matching %s reach %s without a reference to %s.",
-			len(res.Violations), res.Considered, p.Source.String(), p.Sink.String(), p.Proof.String())
+			"%d of %s matching %s reach %s without a reference to %s.",
+			len(res.Violations), plural(res.Considered, "definition"), p.Source.String(), p.Sink.String(), p.Proof.String())
 	}
 	return res
 }
@@ -277,6 +277,15 @@ func joinPatterns(pats []Pattern) string {
 		parts[i] = p.String()
 	}
 	return strings.Join(parts, ", ")
+}
+
+// plural renders a count with its noun, so a rationale reads
+// "1 definition" rather than "the 1 definitions".
+func plural(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 func sortViolations(vs []Violation) {

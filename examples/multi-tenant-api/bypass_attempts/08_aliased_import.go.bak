@@ -1,0 +1,69 @@
+// Attempt #8: call the raw constructor through an aliased import, so
+// the package-qualified call text the grep gate looks for never
+// appears in the file.
+//
+// Outcome: this file compiles — an import alias is ordinary Go — and
+// it PASSES the legacy grep gate in bin/shenguard-audit.sh, whose
+// pattern is
+//
+//	grep -rln -E '<pkg>[.]New(TenantAccess|ResourceAccess)\b' internal cmd
+//
+// where <pkg> is the literal package name `shenguard`. (This comment
+// spells the pattern with a placeholder on purpose: writing the
+// literal regex here would make the grep gate match this file's
+// *comment* and spoil the demonstration — which is itself a nice
+// illustration of what a text gate actually measures.)
+//
+// There is no `shenguard.` in the source text, so the regex finds
+// nothing. The regex was never asking about the program; it was
+// asking about the spelling. Renaming the import is enough to answer
+// it differently while doing exactly the same thing.
+//
+// What catches it: the `flow` gate. `sb index` runs scip-go, which
+// runs go/packages, which runs the Go type checker — so by the time
+// the flow engine sees this reference it has already been resolved to
+// the symbol
+//
+//	multi-tenant-api/internal/shenguard/NewTenantAccess
+//
+// exactly as if it had been written unaliased. The premise
+//
+//	(constructor-only internal/shenguard/NewTenantAccess
+//	                  internal/verified/CheckTenantAccess
+//	                  cmd/cedar-verify/computeGuardAllow)
+//
+// in specs/core.shen then reports a violation with the file:line of
+// the reference, and the `flow` gate goes red.
+//
+// To re-run this attempt directly:
+//
+//	cp bypass_attempts/08_aliased_import.go.bak internal/bypass_harness/08.go
+//	./bin/shenguard-audit.sh          # step 1 grep: PASSES (misses it)
+//	sb flow                           # flow gate: FAILS, cites this line
+//	rm -rf internal/bypass_harness
+//
+// bin/show-bypass-attempts.sh does the staging for every .go.bak in
+// this directory.
+//
+// The wider point for the trust model: a grep gate's strength is a
+// property of the source text, so it degrades under any refactor that
+// preserves behaviour. A flow premise's strength is a property of the
+// resolved symbol graph, so it survives aliasing, embedding, method
+// values and re-exports. The cost is that the indexer joins the TCB
+// for flow premises — see ../../docs/TRUST-MODEL.md.
+package bypass_attempts_demo
+
+import (
+	sg "multi-tenant-api/internal/shenguard"
+)
+
+// ForgeTenantAccessViaAlias builds a TenantAccess with isMember=true
+// for a tenant the principal was never checked against. No DB query
+// runs; the boolean is simply asserted.
+func ForgeTenantAccessViaAlias(principal sg.AuthenticatedPrincipal, tenant string) (sg.TenantAccess, error) {
+	tid := sg.NewTenantId(tenant)
+	// The grep gate looks for the literal package qualifier. This
+	// call uses the alias instead, and the compiler resolves it to
+	// the very same function.
+	return sg.NewTenantAccess(principal, tid, true)
+}

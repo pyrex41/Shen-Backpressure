@@ -78,7 +78,9 @@ for src in $ATTEMPTS; do
             "$(case $base in
                 02_*)  echo "runtime predicate \`(= User (head (head Jwt)))\`" ;;
                 03_*)  echo "code review (\`unsafe.Pointer\` red flag)" ;;
-                04_*|05_*) echo "the \`shenguard.New*\` grep gate in \`bin/shenguard-audit.sh\`" ;;
+                04_*)  echo "the \`flow\` gate's \`must-pass-through\` premise (it reaches the DB sink with no proof on the path)" ;;
+                05_*)  echo "the raw-constructor discipline: \`flow\` gate \`constructor-only\`, grep fallback in \`bin/shenguard-audit.sh\`" ;;
+                08_*)  echo "the \`flow\` gate's \`constructor-only\` premise — and NOT by the grep, which the alias evades" ;;
                 *) echo "downstream review" ;;
               esac)"
     else
@@ -114,8 +116,17 @@ described in `../../docs/TRUST-MODEL.md`:
 - Attempts #4 and #5 compile because the type system can only
   enforce "if you ask for a verified.TenantAccess, you walked the
   chain"; it cannot stop someone from writing a handler that
-  doesn't ask. The local `bin/shenguard-audit.sh` and a
-  `bypass-policy` grep catch these patterns.
+  doesn't ask. Since W3 these are caught by the `flow` gate rather
+  than by review: attempt #4 by `must-pass-through`, which finds a
+  call path from the handler to `DB#Query` with no reference to
+  `verified.CheckTenantAccess` on it, and attempt #5 by
+  `constructor-only`.
+- Attempt #8 is the one that separates the two kinds of gate. It
+  calls the raw constructor through an aliased import, which the
+  grep in `bin/shenguard-audit.sh` cannot see and the resolved
+  symbol graph resolves to the same symbol. Run
+  `sb flow` with a SCIP indexer on PATH to see it caught, and
+  `./bin/shenguard-audit.sh --grep-only` to see it missed.
 
 The structural guarantee from W2.1 is attempt #2's failure: pairing
 token-A with user-B is now structurally rejected, where pre-W2.1

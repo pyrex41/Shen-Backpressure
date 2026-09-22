@@ -358,6 +358,36 @@ func mergeFlowRules(rules []DischargeRule) error {
 	return writeDischarge(DischargeReportPath, r)
 }
 
+// carryFlowRules copies flow rules from the report already on disk
+// into r, which `sb derive` is about to write. Rules r already has
+// under the same name win, so a fresh flow run is never overwritten
+// by a stale one. Missing or unreadable reports are simply nothing to
+// carry.
+func carryFlowRules(r *DischargeReport) {
+	prev, err := loadDischarge(DischargeReportPath)
+	if err != nil || prev == nil {
+		return
+	}
+	have := map[string]bool{}
+	for _, rule := range r.Rules {
+		have[rule.Name] = true
+	}
+	added := false
+	for _, rule := range prev.Rules {
+		if rule.Kind != FlowRuleKind || have[rule.Name] {
+			continue
+		}
+		r.Rules = append(r.Rules, rule)
+		added = true
+	}
+	if !added {
+		return
+	}
+	sort.SliceStable(r.Rules, func(i, j int) bool { return r.Rules[i].Name < r.Rules[j].Name })
+	r.Spec.RuleCount = len(r.Rules)
+	r.Summary = computeDischargeSummary(r.Rules)
+}
+
 // printFlowResults renders the human-facing gate output.
 func printFlowResults(results []flow.Result, out *IndexOutcome) {
 	for _, res := range results {

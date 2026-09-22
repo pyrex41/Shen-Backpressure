@@ -214,3 +214,50 @@
 (define same-user?
   {user-id --> user-id --> boolean}
   A B -> (= A B))
+
+\* --- Flow premises (consumed by `sb flow`, ignored by shengen / shen-derive) ---
+
+   These two forms replace the regex "grep gate" that Step 1 of
+   bin/shenguard-audit.sh performs over source text. `sb index` runs
+   scip-go (which runs go/packages, which runs the type checker), and
+   `sb flow` evaluates the premises below over the resolved symbol
+   graph. The difference is not cosmetic: a regex over
+   `shenguard.New(TenantAccess|ResourceAccess)` answers a question
+   about spelling, so `sg "…/internal/shenguard"` evades it (see
+   bypass_attempts/08_aliased_import.go.bak). The premise below
+   answers a question about the program, so the alias resolves to the
+   same symbol and the reference is caught.
+
+   Symbols are matched by their canonical SCIP descriptor path, with
+   `*` matching any run of characters and a pattern matching any
+   suffix that starts at a `/` or `#` boundary — so
+   `internal/verified/CheckTenantAccess` matches regardless of module
+   path or the indexer's version hash. See ../../docs/FLOW.md.
+
+   Why `cmd/cedar-verify/computeGuardAllow` is an allowed caller: it
+   is the differential-testing oracle for the Cedar tier, and calls
+   the raw constructor on purpose to compare its verdict against
+   Cedar's. Note that this is a *per-function* exemption, which the
+   per-file grep gate cannot express — the grep has to exempt the
+   whole of cmd/cedar-verify/main.go or fail.
+
+   Why these forms live inside a Shen comment: `flow` is not a Shen
+   function, so a bare top-level form would make `shen tc+` (gate 4)
+   complain about an undefined symbol. sb's flow parser reads the
+   forms whether or not they are commented; keeping them here leaves
+   gate 4 untouched.
+
+(flow tenant-access-discipline
+  (constructor-only internal/shenguard/NewTenantAccess
+                    internal/verified/CheckTenantAccess
+                    cmd/cedar-verify/computeGuardAllow)
+  (must-pass-through *ListResources*
+                     internal/verified/CheckTenantAccess
+                     DB#Query*))
+
+(flow resource-access-discipline
+  (constructor-only internal/shenguard/NewResourceAccess
+                    internal/verified/CheckResourceAccess
+                    cmd/cedar-verify/computeGuardAllow))
+
+*\
