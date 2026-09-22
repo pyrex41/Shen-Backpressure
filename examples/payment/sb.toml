@@ -54,6 +54,16 @@ run  = "./bin/shenguard-audit.sh"
 [derive]
 dir = "../../shen-derive"
 
+# W2 — path-complete sampling. shen-derive symbolically executes each
+# (define …), enumerates every path (unrolling list recursion to
+# `path_depth`), and asks Z3 for one concrete input per feasible path.
+# Those inputs are committed alongside the boundary pool, and the
+# generated test's header records paths_total / paths_feasible /
+# paths_dead. Needs a `z3` binary on PATH; without one the gate keeps
+# working on the boundary pool alone and says so in the header.
+path_cover = true
+path_depth = 4
+
 [[derive.specs]]
 path      = "specs/core.shen"
 func      = "processable"
