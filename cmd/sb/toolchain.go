@@ -55,6 +55,17 @@ func DetectToolchain(cfg *Config, shengenPath string) *DischargeToolchain {
 		}
 	}
 
+	// W6 — the Shen host, whenever one is resolvable. Unlike z3 and
+	// the indexers, it is not conditioned on a feature being switched
+	// on: gate 4 is one of the fixed five, so every project's report
+	// makes a tc+ claim and every report should say which typechecker
+	// backed it. A report with no shen_host is one whose tc+ claim was
+	// never checked by anything.
+	if h := ResolveShenHost(cfg); h.Found() {
+		tc.ShenHost = h.Name
+		tc.ShenHostVersion = h.Version
+	}
+
 	// Indexers, likewise, only when a flow gate is configured.
 	if cfg != nil && hasFlowGate(cfg) {
 		for _, name := range []string{"scip-go", "scip-typescript"} {
@@ -148,6 +159,8 @@ func ToolchainMismatch(recorded, current *DischargeToolchain) []string {
 	cmp("shengen version", recorded.ShengenVersion, current.ShengenVersion)
 	cmp("shengen sha256", recorded.ShengenSHA256, current.ShengenSHA256)
 	cmp("z3", recorded.Z3Version, current.Z3Version)
+	cmp("shen host", recorded.ShenHost, current.ShenHost)
+	cmp("shen host version", recorded.ShenHostVersion, current.ShenHostVersion)
 	for _, was := range recorded.Indexers {
 		for _, now := range current.Indexers {
 			if was.Name == now.Name {

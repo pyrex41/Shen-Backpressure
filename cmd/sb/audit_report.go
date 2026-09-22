@@ -222,12 +222,39 @@ func renderToolchainSection(b *strings.Builder, r *DischargeReport) {
 	row("shengen sha256", tc.ShengenSHA256)
 	row("shengen-ts", tc.ShengenTSVersion)
 	row("z3", tc.Z3Version)
+	row("Shen host", tc.ShenHost)
+	row("Shen host version", tc.ShenHostVersion)
 	for _, ix := range tc.Indexers {
 		row(ix.Name, ix.Version)
+	}
+	if r.FlowEngine != "" {
+		row("flow engine", r.FlowEngine)
 	}
 	b.WriteString("\nThe shengen hash matters because the guard types are a pure function of the " +
 		"spec bytes and that binary. Re-run the same emitter on the same spec and you get the " +
 		"same guards file, byte for byte, from any directory.\n")
+	// W6 — the host is the only entry here that is a *second reading*
+	// of the spec rather than another step of the pipeline, so what it
+	// buys is worth spelling out.
+	if tc.ShenHost != "" {
+		b.WriteString("\nThe Shen host is what makes two of this report's claims checkable at all. " +
+			"Gate 4's `tc +` is a statement by Shen's own typechecker about the spec, given the " +
+			"intrinsic signatures in the generated prelude (see `docs/TRUST-MODEL.md`); and a " +
+			"behavioral counter-example blamed on the implementation with basis " +
+			"`evaluator-and-host` was re-evaluated on this host and agreed with. Without a host " +
+			"both claims collapse to a single oracle, and a lowering bug and an implementation " +
+			"bug become indistinguishable.\n")
+	} else {
+		b.WriteString("\n**No Shen host.** Gate 4's `tc +` claim was not made by a typechecker in " +
+			"this run, and every behavioral counter-example carries `blame_basis: evaluator-only` " +
+			"— one oracle spoke, so a lowering bug and an implementation bug look identical. " +
+			"`make shen-go` at the repository root builds one.\n")
+	}
+	if r.FlowEngine == FlowEngineBoth {
+		b.WriteString("\nThe flow premises were evaluated twice, by the Shen Prolog rules in " +
+			"`sb/flow/stdlib.shen` and by their Go transcription in `cmd/sb/flow`, and the two " +
+			"agreed on every premise. A disagreement would have failed the gate.\n")
+	}
 }
 
 // renderSignatureSection states, in one line, whether anyone has

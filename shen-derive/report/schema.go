@@ -39,6 +39,13 @@ type Report struct {
 	Toolchain *Toolchain `json:"toolchain,omitempty"`
 	// --------------------------------------------------------------
 
+	// FlowEngine names which engine evaluated the flow premises: "go",
+	// "shen", or "both" (W6). Two engines are two implementations of
+	// one rule set, so a report that does not say which one ran cannot
+	// be checked against the other. Written by `sb flow`; empty and
+	// omitted for a project with no flow gate.
+	FlowEngine string `json:"flow_engine,omitempty"`
+
 	Signature *Signature `json:"signature"` // null until `sb sign-report`
 }
 
@@ -71,6 +78,14 @@ type Toolchain struct {
 	// Indexers are the SCIP indexers the flow gate used, in the order
 	// they ran. Absent when no flow premise was evaluated.
 	Indexers []ToolVersion `json:"indexers,omitempty"`
+	// ShenHost and ShenHostVersion name the Shen host that ran gate
+	// 4's `tc +` and, where a behavioral counter-example was blamed
+	// with basis `evaluator-and-host`, acted as the second oracle
+	// (W6). Absent means no host was available — which is a different
+	// statement from "the host's version is unknown", so both fields
+	// are omitempty rather than defaulted.
+	ShenHost        string `json:"shen_host,omitempty"`
+	ShenHostVersion string `json:"shen_host_version,omitempty"`
 }
 
 // ToolVersion is a named external tool and the version string it

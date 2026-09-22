@@ -1,8 +1,8 @@
 # Discharge Report — Audit Rendering
 
-Generated 2026-09-22T05:03:06Z. Source artifact: `transcript/discharge_report.json` (schema_version=1).
+Generated 2026-09-22T12:54:02Z. Source artifact: `transcript/discharge_report.json` (schema_version=1).
 
-**Implementation commit:** `ca43ead79fc8c6dc5708b9325bdb786b281a6320` (working tree dirty)
+**Implementation commit:** `1c52bb341f92feade55a586c5a2baa21093609ee` (working tree dirty)
 
 **Spec files:**
 
@@ -27,10 +27,17 @@ Generated 2026-09-22T05:03:06Z. Source artifact: `transcript/discharge_report.js
 | platform | `linux/amd64` |
 | shengen | `shengen 0.3.0` |
 | shengen sha256 | `4a7d38acf282002e50cc85431a73e838edb0e659514e6a26943b85858b106088` |
+| Shen host | `shen` |
+| Shen host version | `42 (port ("Go" "1.0.0-rc1") implementation ("AOT+interpreter" "go1.27.0"))` |
 | scip-go | `0.2.7` |
 | scip-typescript | `0.4.0` |
+| flow engine | `both` |
 
 The shengen hash matters because the guard types are a pure function of the spec bytes and that binary. Re-run the same emitter on the same spec and you get the same guards file, byte for byte, from any directory.
+
+The Shen host is what makes two of this report's claims checkable at all. Gate 4's `tc +` is a statement by Shen's own typechecker about the spec, given the intrinsic signatures in the generated prelude (see `docs/TRUST-MODEL.md`); and a behavioral counter-example blamed on the implementation with basis `evaluator-and-host` was re-evaluated on this host and agreed with. Without a host both claims collapse to a single oracle, and a lowering bug and an implementation bug become indistinguishable.
+
+The flow premises were evaluated twice, by the Shen Prolog rules in `sb/flow/stdlib.shen` and by their Go transcription in `cmd/sb/flow`, and the two agreed on every premise. A disagreement would have failed the gate.
 
 ## Signature
 
@@ -41,37 +48,6 @@ The shengen hash matters because the guard types are a pure function of the spec
 - **Rules:** 17 total — 17 discharged, 0 violated, 0 unproven
 - **Premises:** 36 total — 35 static, 1 runtime-sampled, 0 unproven
 - **Weakest evidence anywhere in this report:** sampled
-
-## Gate Strength
-
-A discharge says a gate passed. This section says how much that is worth, by breaking the software on purpose and counting what the gates noticed.
-
-### Mutation score — 100.0%
-
-`sb mutate` applied a fixed operator set to each implementation package and ran **only** the committed spec test against every mutant. 2 of 2 live mutants were caught, with 0 marked equivalent by the author and 0 excluded as invalid (the mutated package did not compile, which is evidence about Go and not about the test).
-
-Measured 2026-09-22T05:03:08Z; per-mutant timeout 1m0s. A mutant that times out counts as caught: the gate's verdict on it was still "not this implementation".
-
-| Spec | Impl | Test | Score | Caught | Survived | Equivalent | Invalid |
-|---|---|---|---:|---:|---:|---:|---:|
-| `same-user?` | `SameUser` | `TestSpec_SameUser` | 100.0% | 2 | 0 | 0 | 0 |
-
-**Per operator.** A column of survivors under one operator names the shape of the blind spot, not just its size.
-
-| Operator | Caught | Survived | Equivalent | Invalid |
-|---|---:|---:|---:|---:|
-| `cmp-flip` | 1 | 0 | 0 | 0 |
-| `zero-return` | 1 | 0 | 0 | 0 |
-
-No survivors: every mutant this operator set produced was either caught by the spec test or marked equivalent.
-
-
-### Forgery corpus
-
-`sb forgery` staged 9 program(s) from `forgeries` and ran the check each one's header declares. 9 produced their declared outcome. 1 succeeded — that is, obtained or used a guard value the proof chain never justified.
-
-A succeeding forgery is not necessarily a defect: the corpus deliberately carries the ones that document a limit of the trust model, so that a **new** success shows up as a gate failure rather than as prose nobody re-reads. See `docs/TRUST-MODEL.md`.
-
 
 ## Rules
 
@@ -90,7 +66,7 @@ Spec:
   [Jwt User] : authenticated-user;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 
@@ -118,7 +94,7 @@ Spec:
   Auth : authenticated-principal;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 
@@ -143,7 +119,7 @@ Spec:
   X : jwt-audience;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 
@@ -169,7 +145,7 @@ Spec:
   X : jwt-issuer;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 
@@ -198,7 +174,7 @@ Spec:
   [Sub Exp Iss Aud] : parsed-claims;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 
@@ -232,7 +208,7 @@ Spec:
   [Access Resource IsOwned] : resource-access;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 
@@ -262,13 +238,13 @@ Spec:
                     cmd/cedar-verify/computeGuardAllow))
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 
 | ID | Expression | Precision | Discharge | Basis | Rationale |
 |---|---|---|---|---|---|
-| `constructor-only:internal/shenguard/NewResourceAccess` | `(constructor-only internal/shenguard/NewResourceAccess                     internal/verified/CheckResourceAccess                     cmd/cedar-verify/computeGuardAllow)` | **static** | static | flow-analysis | Resolved references to internal/shenguard/NewResourceAccess, 2 references in all, are confined to internal/verified/CheckResourceAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go. |
+| `constructor-only:internal/shenguard/NewResourceAccess` | `(constructor-only internal/shenguard/NewResourceAccess                     internal/verified/CheckResourceAccess                     cmd/cedar-verify/computeGuardAllow)` | **static** | static | flow-analysis | Resolved references to internal/shenguard/NewResourceAccess, 2 references in all, are confined to internal/verified/CheckResourceAccess, cmd/cedar-verify/computeGuardAllow. Engine: both; index: scip-go. |
 
 
 ### `resource-id` — wrapper (✅ Discharged)
@@ -284,7 +260,7 @@ Spec:
   X : resource-id;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 
@@ -306,7 +282,7 @@ Spec:
   A B -> ...)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 
@@ -332,7 +308,7 @@ Spec:
   [Service Secret] : service-credential;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 
@@ -359,7 +335,7 @@ Spec:
   X : service-id;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 
@@ -382,7 +358,7 @@ Spec:
   Cred : authenticated-principal;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 
@@ -409,7 +385,7 @@ Spec:
   [Principal Tenant IsMember] : tenant-access;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 
@@ -442,14 +418,14 @@ Spec:
                      DB#Query*))
 ```
 
-Continuously discharged since commit `ca43ead79fc8c6dc5708b9325bdb786b281a6320`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 
 | ID | Expression | Precision | Discharge | Basis | Rationale |
 |---|---|---|---|---|---|
-| `constructor-only:internal/shenguard/NewTenantAccess` | `(constructor-only internal/shenguard/NewTenantAccess                     internal/verified/CheckTenantAccess                     cmd/cedar-verify/computeGuardAllow)` | **static** | static | flow-analysis | Resolved references to internal/shenguard/NewTenantAccess, 3 references in all, are confined to internal/verified/CheckTenantAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go. |
-| `must-pass-through:*ListResources*→DB#Query*` | `(must-pass-through *ListResources*                      internal/verified/CheckTenantAccess                      DB#Query*)` | **static** | static | flow-analysis | Every call path from 1 definition matching *ListResources* to a call of DB#Query* passes through a reference to internal/verified/CheckTenantAccess. Engine: go-datalog; index: scip-go. |
+| `constructor-only:internal/shenguard/NewTenantAccess` | `(constructor-only internal/shenguard/NewTenantAccess                     internal/verified/CheckTenantAccess                     cmd/cedar-verify/computeGuardAllow)` | **static** | static | flow-analysis | Resolved references to internal/shenguard/NewTenantAccess, 3 references in all, are confined to internal/verified/CheckTenantAccess, cmd/cedar-verify/computeGuardAllow. Engine: both; index: scip-go. |
+| `must-pass-through:*ListResources*→DB#Query*` | `(must-pass-through *ListResources*                      internal/verified/CheckTenantAccess                      DB#Query*)` | **static** | static | flow-analysis | Every call path from 1 definition matching *ListResources* to a call of DB#Query* passes through a reference to internal/verified/CheckTenantAccess. Engine: both; index: scip-go. |
 
 
 ### `tenant-id` — wrapper (✅ Discharged)
@@ -465,7 +441,7 @@ Spec:
   X : tenant-id;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 
@@ -488,7 +464,7 @@ Spec:
   X : user-id;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 
@@ -513,7 +489,7 @@ Spec:
   [Claims Sig] : verified-jwt;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 

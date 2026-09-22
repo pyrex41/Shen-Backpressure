@@ -545,6 +545,14 @@ func carryFlowRules(r *DischargeReport) {
 	if err != nil || prev == nil {
 		return
 	}
+	// W6 — which engine(s) evaluated the premises travels with them.
+	// `sb derive` writes the report from scratch and runs last, so
+	// without this the flow_engine field a `sb flow` run recorded
+	// minutes earlier is dropped and the report goes silent about
+	// whether the Shen rules or only their Go transcription ran.
+	if r.FlowEngine == "" && prev.FlowEngine != "" {
+		r.FlowEngine = prev.FlowEngine
+	}
 	have := map[string]bool{}
 	for _, rule := range r.Rules {
 		have[rule.Name] = true

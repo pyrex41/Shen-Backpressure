@@ -1,12 +1,12 @@
 # Discharge Report — Audit Rendering
 
-Generated 2026-09-22T05:01:42Z. Source artifact: `transcript/discharge_report.json` (schema_version=1).
+Generated 2026-09-22T12:54:23Z. Source artifact: `transcript/discharge_report.json` (schema_version=1).
 
-**Implementation commit:** `ca43ead79fc8c6dc5708b9325bdb786b281a6320` (working tree dirty)
+**Implementation commit:** `1c52bb341f92feade55a586c5a2baa21093609ee` (working tree dirty)
 
 **Spec files:**
 
-- `specs/core.shen` (sha256 `51f38561a5106b251086bfc5f5f68430a27a4c400c6cae5474c6020f2bde2607`)
+- `specs/core.shen` (sha256 `988cb4eafe303e58abd124238526cf076c443561cb7ccd8e0cbb6064bc6d812a`)
 
 **Target languages:** go
 
@@ -28,8 +28,12 @@ Generated 2026-09-22T05:01:42Z. Source artifact: `transcript/discharge_report.js
 | shengen | `shengen 0.3.0` |
 | shengen sha256 | `4a7d38acf282002e50cc85431a73e838edb0e659514e6a26943b85858b106088` |
 | z3 | `Z3 version 5.1.0 - 64 bit` |
+| Shen host | `shen` |
+| Shen host version | `42 (port ("Go" "1.0.0-rc1") implementation ("AOT+interpreter" "go1.27.0"))` |
 
 The shengen hash matters because the guard types are a pure function of the spec bytes and that binary. Re-run the same emitter on the same spec and you get the same guards file, byte for byte, from any directory.
+
+The Shen host is what makes two of this report's claims checkable at all. Gate 4's `tc +` is a statement by Shen's own typechecker about the spec, given the intrinsic signatures in the generated prelude (see `docs/TRUST-MODEL.md`); and a behavioral counter-example blamed on the implementation with basis `evaluator-and-host` was re-evaluated on this host and agreed with. Without a host both claims collapse to a single oracle, and a lowering bug and an implementation bug become indistinguishable.
 
 ## Signature
 
@@ -40,36 +44,6 @@ The shengen hash matters because the guard types are a pure function of the spec
 - **Rules:** 7 total — 7 discharged, 0 violated, 0 unproven
 - **Premises:** 14 total — 12 static, 1 runtime-evaluator, 1 runtime-sampled, 0 unproven
 - **Weakest evidence anywhere in this report:** runtime
-
-## Gate Strength
-
-A discharge says a gate passed. This section says how much that is worth, by breaking the software on purpose and counting what the gates noticed.
-
-### Mutation score — 100.0%
-
-`sb mutate` applied a fixed operator set to each implementation package and ran **only** the committed spec test against every mutant. 3 of 3 live mutants were caught, with 0 marked equivalent by the author and 0 excluded as invalid (the mutated package did not compile, which is evidence about Go and not about the test).
-
-Measured 2026-09-22T05:01:42Z; per-mutant timeout 1m0s. A mutant that times out counts as caught: the gate's verdict on it was still "not this implementation".
-
-| Spec | Impl | Test | Score | Caught | Survived | Equivalent | Invalid |
-|---|---|---|---:|---:|---:|---:|---:|
-| `processable` | `Processable` | `TestSpec_Processable` | 100.0% | 3 | 0 | 0 | 0 |
-
-**Per operator.** A column of survivors under one operator names the shape of the blind spot, not just its size.
-
-| Operator | Caught | Survived | Equivalent | Invalid |
-|---|---:|---:|---:|---:|
-| `cmp-flip` | 1 | 0 | 0 | 0 |
-| `off-by-one` | 1 | 0 | 0 | 0 |
-| `zero-return` | 1 | 0 | 0 | 0 |
-
-No survivors: every mutant this operator set produced was either caught by the spec test or marked equivalent.
-
-
-### Forgery corpus
-
-`sb forgery` staged 3 program(s) from `forgeries` and ran the check each one's header declares. 3 produced their declared outcome. 0 succeeded — that is, obtained or used a guard value the proof chain never justified.
-
 
 ## Rules
 
@@ -86,7 +60,7 @@ Spec:
   X : account-id;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `5c4ce377f341be643e063ca7777dc748359e97f6`.
 
 **Premises**
 
@@ -110,7 +84,7 @@ Spec:
   [Id Balance] : account-state;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `5c4ce377f341be643e063ca7777dc748359e97f6`.
 
 **Premises**
 
@@ -136,7 +110,7 @@ Spec:
   X : amount;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `5c4ce377f341be643e063ca7777dc748359e97f6`.
 
 **Premises**
 
@@ -163,7 +137,7 @@ Spec:
   [Bal Tx] : balance-checked;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `5c4ce377f341be643e063ca7777dc748359e97f6`.
 
 **Premises**
 
@@ -190,7 +164,7 @@ Spec:
   B0 Txs -> ...)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `1c52bb341f92feade55a586c5a2baa21093609ee`.
 
 **Premises**
 
@@ -217,7 +191,7 @@ Spec:
   [Tx Check] : safe-transfer;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `5c4ce377f341be643e063ca7777dc748359e97f6`.
 
 **Premises**
 
@@ -246,7 +220,7 @@ Spec:
   [Amount From To] : transaction;)
 ```
 
-Continuously discharged since commit `4cd91f974840602457085346c959b38d134e0e15`.
+Continuously discharged since commit `5c4ce377f341be643e063ca7777dc748359e97f6`.
 
 **Premises**
 

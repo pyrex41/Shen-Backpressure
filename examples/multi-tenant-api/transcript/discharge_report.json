@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T05:03:06Z",
+  "generated_at": "2026-09-22T12:54:02Z",
   "spec": {
     "files": [
       {
@@ -11,7 +11,7 @@
     "rule_count": 17
   },
   "impl": {
-    "git_commit": "ca43ead79fc8c6dc5708b9325bdb786b281a6320",
+    "git_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
     "git_dirty": true,
     "target_languages": [
       "go"
@@ -79,7 +79,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     },
     {
@@ -108,7 +108,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     },
     {
@@ -149,7 +149,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     },
     {
@@ -190,7 +190,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     },
     {
@@ -273,7 +273,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     },
     {
@@ -344,7 +344,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     },
     {
@@ -360,7 +360,7 @@
           "expression": "(constructor-only internal/shenguard/NewResourceAccess\n                    internal/verified/CheckResourceAccess\n                    cmd/cedar-verify/computeGuardAllow)",
           "discharge": "static",
           "discharge_basis": "flow-analysis",
-          "rationale": "Resolved references to internal/shenguard/NewResourceAccess, 2 references in all, are confined to internal/verified/CheckResourceAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go.",
+          "rationale": "Resolved references to internal/shenguard/NewResourceAccess, 2 references in all, are confined to internal/verified/CheckResourceAccess, cmd/cedar-verify/computeGuardAllow. Engine: both; index: scip-go.",
           "samples_passed": 0,
           "samples_failed": 0,
           "sample_seed": null,
@@ -368,7 +368,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     },
     {
@@ -395,7 +395,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     },
     {
@@ -419,7 +419,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     },
     {
@@ -474,7 +474,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     },
     {
@@ -501,7 +501,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     },
     {
@@ -530,7 +530,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     },
     {
@@ -601,7 +601,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     },
     {
@@ -617,7 +617,7 @@
           "expression": "(constructor-only internal/shenguard/NewTenantAccess\n                    internal/verified/CheckTenantAccess\n                    cmd/cedar-verify/computeGuardAllow)",
           "discharge": "static",
           "discharge_basis": "flow-analysis",
-          "rationale": "Resolved references to internal/shenguard/NewTenantAccess, 3 references in all, are confined to internal/verified/CheckTenantAccess, cmd/cedar-verify/computeGuardAllow. Engine: go-datalog; index: scip-go.",
+          "rationale": "Resolved references to internal/shenguard/NewTenantAccess, 3 references in all, are confined to internal/verified/CheckTenantAccess, cmd/cedar-verify/computeGuardAllow. Engine: both; index: scip-go.",
           "samples_passed": 0,
           "samples_failed": 0,
           "sample_seed": null,
@@ -628,7 +628,7 @@
           "expression": "(must-pass-through *ListResources*\n                     internal/verified/CheckTenantAccess\n                     DB#Query*)",
           "discharge": "static",
           "discharge_basis": "flow-analysis",
-          "rationale": "Every call path from 1 definition matching *ListResources* to a call of DB#Query* passes through a reference to internal/verified/CheckTenantAccess. Engine: go-datalog; index: scip-go.",
+          "rationale": "Every call path from 1 definition matching *ListResources* to a call of DB#Query* passes through a reference to internal/verified/CheckTenantAccess. Engine: both; index: scip-go.",
           "samples_passed": 0,
           "samples_failed": 0,
           "sample_seed": null,
@@ -636,7 +636,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "ca43ead79fc8c6dc5708b9325bdb786b281a6320",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     },
     {
@@ -663,7 +663,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     },
     {
@@ -690,7 +690,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     },
     {
@@ -747,7 +747,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     }
   ],
@@ -776,54 +776,10 @@
         "name": "scip-typescript",
         "version": "0.4.0"
       }
-    ]
+    ],
+    "shen_host": "shen",
+    "shen_host_version": "42 (port (\"Go\" \"1.0.0-rc1\") implementation (\"AOT+interpreter\" \"go1.27.0\"))"
   },
-  "evidence": {
-    "mutation_score": {
-      "score": 1,
-      "caught": 2,
-      "survived": 0,
-      "equivalent": 0,
-      "invalid": 0,
-      "total": 2,
-      "timeout": "1m0s",
-      "measured_at": "2026-09-22T05:03:08Z",
-      "operators": [
-        {
-          "operator": "cmp-flip",
-          "caught": 1,
-          "survived": 0,
-          "equivalent": 0,
-          "invalid": 0
-        },
-        {
-          "operator": "zero-return",
-          "caught": 1,
-          "survived": 0,
-          "equivalent": 0,
-          "invalid": 0
-        }
-      ],
-      "specs": [
-        {
-          "spec": "same-user?",
-          "impl_func": "SameUser",
-          "test": "TestSpec_SameUser",
-          "score": 1,
-          "caught": 2,
-          "survived": 0,
-          "equivalent": 0,
-          "invalid": 0
-        }
-      ]
-    },
-    "forgery": {
-      "total": 9,
-      "as_declared": 9,
-      "succeeding": 1,
-      "measured_at": "2026-09-22T05:03:10Z",
-      "corpus": "forgeries"
-    }
-  },
+  "flow_engine": "both",
   "signature": null
 }

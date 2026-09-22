@@ -50,6 +50,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pyrex41/Shen-Backpressure/cmd/sb/flow"
 )
@@ -102,6 +103,8 @@ without a model and without the network:
   path cover         re-checked when z3 is present, UNVERIFIED when not
   flow premises      re-evaluated from a fresh index when an indexer
                      is present, UNVERIFIED when not
+  shen typecheck     tc+ re-run in a Shen host when one is present,
+                     UNVERIFIED when not
   signature          with --require-sig
 
 Exit status is non-zero when any check FAILS, and the failure names
@@ -161,6 +164,7 @@ Flags:
 		}
 		checks = append(checks, verifyPathCover(r, cfg))
 		checks = append(checks, verifyFlowPremises(r, cfg))
+		checks = append(checks, verifyShenTypecheck(r, cfg, specOK))
 		checks = append(checks, verifyToolchain(r, cfg))
 	}
 
@@ -682,6 +686,74 @@ func verifyFlowPremises(r *DischargeReport, cfg *Config) VerifyCheck {
 // ============================================================================
 // 7. Toolchain and signature
 // ============================================================================
+
+// ============================================================================
+// 7. Shen typecheck (W6.E)
+// ============================================================================
+
+// verifyShenTypecheck re-runs gate 4 — `tc +` over the spec plus the
+// generated intrinsic prelude — inside a live Shen host.
+//
+// This is the one claim in the report that nothing else re-derives.
+// The other checks re-run Go code; tc+ is a statement made by a
+// different language's typechecker about the spec itself, and before
+// W6 there was no host anywhere in this repository, so it had never
+// been made at all, let alone re-made by a verifier.
+//
+// UNVERIFIED without a host, never PASS. "Nobody typechecked this" and
+// "a typechecker accepted this" are different statements, and only one
+// of them is evidence. --strict turns the first into a failure.
+func verifyShenTypecheck(r *DischargeReport, cfg *Config, specOK bool) VerifyCheck {
+	c := VerifyCheck{Name: "shen typecheck"}
+	spec := cfg.Spec
+	if len(r.Spec.Files) > 0 && r.Spec.Files[0].Path != "" {
+		spec = r.Spec.Files[0].Path
+	}
+	if spec == "" {
+		c.Status = VerifyUnverified
+		c.Detail = "the report names no spec file and sb.toml configures none"
+		return c
+	}
+	if !specOK {
+		c.Status = VerifySkip
+		c.Detail = "skipped: the spec does not match the hash the report was built from, so typechecking it would say nothing about this report"
+		return c
+	}
+
+	res := RunShenCheck(cfg, spec, false, 90*time.Second)
+	if res.Skipped {
+		c.Status = VerifyUnverified
+		c.Detail = "no Shen host, so tc+ was not re-run"
+		c.Notes = []string{ShenInstallHint}
+		if r.Toolchain != nil && r.Toolchain.ShenHost != "" {
+			// The report says a host typechecked it and this run
+			// cannot ask one. Worth naming: the claim is not
+			// contradicted, but it is also not re-derived here.
+			c.Notes = append(c.Notes,
+				"the report was produced with "+r.Toolchain.ShenHost+" ("+r.Toolchain.ShenHostVersion+")")
+		}
+		return c
+	}
+	if res.Err != nil {
+		c.Status = VerifyFail
+		c.Detail = fmt.Sprintf("%s rejected %s: %v", res.Host.Name, spec, res.Err)
+		var ids []string
+		for _, rule := range r.Rules {
+			if rule.Kind == FlowRuleKind {
+				continue
+			}
+			ids = append(ids, rule.Name)
+		}
+		c.LostBasis = ids
+		return c
+	}
+	c.Status = VerifyPass
+	c.Detail = fmt.Sprintf("tc+ accepted %s in %s, with the generated intrinsic prelude", spec, res.Host)
+	if r.Toolchain != nil && r.Toolchain.ShenHost != "" && r.Toolchain.ShenHost != res.Host.Name {
+		c.Notes = []string{"the report names host " + r.Toolchain.ShenHost + "; this run used " + res.Host.Name}
+	}
+	return c
+}
 
 func verifyToolchain(r *DischargeReport, cfg *Config) VerifyCheck {
 	c := VerifyCheck{Name: "toolchain"}

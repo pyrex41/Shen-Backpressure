@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T05:01:42Z",
+  "generated_at": "2026-09-22T12:54:23Z",
   "spec": {
     "files": [
       {
         "path": "specs/core.shen",
-        "sha256": "51f38561a5106b251086bfc5f5f68430a27a4c400c6cae5474c6020f2bde2607"
+        "sha256": "988cb4eafe303e58abd124238526cf076c443561cb7ccd8e0cbb6064bc6d812a"
       }
     ],
     "rule_count": 7
   },
   "impl": {
-    "git_commit": "ca43ead79fc8c6dc5708b9325bdb786b281a6320",
+    "git_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
     "git_dirty": true,
     "target_languages": [
       "go"
@@ -49,7 +49,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "5c4ce377f341be643e063ca7777dc748359e97f6",
       "counter_examples": []
     },
     {
@@ -90,7 +90,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "5c4ce377f341be643e063ca7777dc748359e97f6",
       "counter_examples": []
     },
     {
@@ -132,7 +132,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "5c4ce377f341be643e063ca7777dc748359e97f6",
       "counter_examples": []
     },
     {
@@ -189,7 +189,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "5c4ce377f341be643e063ca7777dc748359e97f6",
       "counter_examples": []
     },
     {
@@ -216,7 +216,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "1c52bb341f92feade55a586c5a2baa21093609ee",
       "counter_examples": []
     },
     {
@@ -261,7 +261,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "5c4ce377f341be643e063ca7777dc748359e97f6",
       "counter_examples": []
     },
     {
@@ -316,7 +316,7 @@
         }
       ],
       "status": "discharged",
-      "discharged_since_commit": "4cd91f974840602457085346c959b38d134e0e15",
+      "discharged_since_commit": "5c4ce377f341be643e063ca7777dc748359e97f6",
       "counter_examples": []
     }
   ],
@@ -337,61 +337,9 @@
     "goarch": "amd64",
     "shengen_version": "shengen 0.3.0",
     "shengen_sha256": "4a7d38acf282002e50cc85431a73e838edb0e659514e6a26943b85858b106088",
-    "z3_version": "Z3 version 5.1.0 - 64 bit"
-  },
-  "evidence": {
-    "mutation_score": {
-      "score": 1,
-      "caught": 3,
-      "survived": 0,
-      "equivalent": 0,
-      "invalid": 0,
-      "total": 3,
-      "timeout": "1m0s",
-      "measured_at": "2026-09-22T05:01:42Z",
-      "operators": [
-        {
-          "operator": "cmp-flip",
-          "caught": 1,
-          "survived": 0,
-          "equivalent": 0,
-          "invalid": 0
-        },
-        {
-          "operator": "off-by-one",
-          "caught": 1,
-          "survived": 0,
-          "equivalent": 0,
-          "invalid": 0
-        },
-        {
-          "operator": "zero-return",
-          "caught": 1,
-          "survived": 0,
-          "equivalent": 0,
-          "invalid": 0
-        }
-      ],
-      "specs": [
-        {
-          "spec": "processable",
-          "impl_func": "Processable",
-          "test": "TestSpec_Processable",
-          "score": 1,
-          "caught": 3,
-          "survived": 0,
-          "equivalent": 0,
-          "invalid": 0
-        }
-      ]
-    },
-    "forgery": {
-      "total": 3,
-      "as_declared": 3,
-      "succeeding": 0,
-      "measured_at": "2026-09-22T05:01:44Z",
-      "corpus": "forgeries"
-    }
+    "z3_version": "Z3 version 5.1.0 - 64 bit",
+    "shen_host": "shen",
+    "shen_host_version": "42 (port (\"Go\" \"1.0.0-rc1\") implementation (\"AOT+interpreter\" \"go1.27.0\"))"
   },
   "signature": null
 }
