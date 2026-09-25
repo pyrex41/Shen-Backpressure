@@ -1,0 +1,30 @@
+.PHONY: all gates gen compile test shen-check audit derive mutate dialyzer
+
+all: gates
+
+gates:
+	sb gates
+
+gen:
+	sb gen
+
+compile:
+	mix compile --warnings-as-errors
+
+test:
+	mix test
+
+shen-check:
+	./bin/shen-check.sh
+
+audit:
+	sb audit
+
+derive:
+	sb derive
+
+mutate:
+	sb mutate-spec
+
+dialyzer:
+	mix dialyzer

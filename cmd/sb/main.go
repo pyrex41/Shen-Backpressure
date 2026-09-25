@@ -42,6 +42,8 @@ func main() {
 		cmdDerive(os.Args[2:])
 	case "mutate-spec":
 		cmdMutateSpec(os.Args[2:])
+	case "audit":
+		cmdAudit(os.Args[2:])
 	case "policy":
 		cmdPolicy(os.Args[2:])
 	case "context":
@@ -72,6 +74,7 @@ Commands:
   gates     Run manifest-defined verification gates
   derive    Run spec-equivalence verification
   mutate-spec  Premise-mutation gate: every verified premise needs a hostile witness
+  audit     TCB audit gate (elixir: drift + namespace isolation + tracer wiring; else runs [commands] audit)
   policy    Run Cedar (shen-cedar) + Rego (shen-rego) runtime policy emitters + drift + opa/cedar validate; use --decidable for the Decidable-Shen-fragment (native terminating) tier
   context   Emit project context from the manifest (surfaces cedar/rego/decidable-shen policy tiers)
   audit-report  Long-form Markdown rendering of the latest discharge report

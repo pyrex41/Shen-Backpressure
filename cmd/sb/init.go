@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 )
@@ -19,8 +20,8 @@ var skilldata embed.FS
 
 func cmdInit(args []string) {
 	fset := flag.NewFlagSet("init", flag.ExitOnError)
-	lang := fset.String("lang", "go", "target language: go or ts")
-	pkg := fset.String("pkg", "shenguard", "guard type package name")
+	lang := fset.String("lang", "go", "target language: go, ts or elixir")
+	pkg := fset.String("pkg", "shenguard", "guard type package name (elixir: module namespace, default <App>.Shen from mix.exs)")
 	withConfig := fset.Bool("config", false, "generate sb.toml config file")
 	withMakefile := fset.Bool("makefile", false, "generate Makefile with gate targets")
 	noSkills := fset.Bool("no-skills", false, "skip installing Claude Code skills and commands")
@@ -45,7 +46,14 @@ Flags:
 	if !isFlagSet(fset, "lang") {
 		if _, err := os.Stat("package.json"); err == nil {
 			*lang = "ts"
+		} else if _, err := os.Stat("mix.exs"); err == nil {
+			*lang = "elixir"
 		}
+	}
+
+	if *lang == "elixir" {
+		initElixir(*pkg, isFlagSet(fset, "pkg"), *withMakefile, *noSkills, *templateDir)
+		return
 	}
 
 	cfg := &Config{
@@ -255,6 +263,85 @@ func writeEmbedded(dest, tmplPath string, perm os.FileMode, overrideDir string) 
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stderr, "  wrote %s\n", dest)
+}
+
+var mixAppRe = regexp.MustCompile(`app:\s*:([a-z0-9_]+)`)
+
+// elixirApp reads the OTP app name from mix.exs ("my_app"), or "app".
+func elixirApp() string {
+	if data, err := os.ReadFile("mix.exs"); err == nil {
+		if m := mixAppRe.FindSubmatch(data); m != nil {
+			return string(m[1])
+		}
+	}
+	return "app"
+}
+
+func camelizeApp(app string) string {
+	var b strings.Builder
+	for _, part := range strings.Split(app, "_") {
+		if part != "" {
+			b.WriteString(strings.ToUpper(part[:1]) + part[1:])
+		}
+	}
+	return b.String()
+}
+
+// initElixir scaffolds an Elixir (Mix) project: starter spec with its
+// hostile/good corpus, the verified-if prelude, shen-erl check script and
+// sb.toml. mix.exs is the user's file, so the tracer wiring is printed.
+func initElixir(pkg string, pkgSet, withMakefile, noSkills bool, templateDir string) {
+	app := elixirApp()
+	if !pkgSet {
+		pkg = camelizeApp(app) + ".Shen"
+	}
+	cfg := &Config{
+		Lang:   "elixir",
+		Pkg:    pkg,
+		Spec:   "specs/core.shen",
+		Output: fmt.Sprintf("lib/%s/shen/guards_gen.ex", app),
+		Build:  "mix compile --warnings-as-errors",
+		Test:   "mix test",
+		Check:  "./bin/shen-check.sh",
+	}
+	fmt.Fprintln(os.Stderr, "Scaffolding Shen-backpressure project (elixir)...")
+	for _, d := range []string{"specs/hostile", "specs/good", "bin", "shen", filepath.Dir(cfg.Output)} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "sb init: creating %s: %v\n", d, err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "  created %s/\n", d)
+	}
+	writeTemplate("specs/core.shen", "templates/elixir-core.shen.tmpl", nil, templateDir)
+	writeEmbedded("specs/verified.shen", "templates/verified.shen", 0644, templateDir)
+	writeEmbedded("specs/hostile/01_negative_amount.shen", "templates/elixir-hostile-negative-amount.shen", 0644, templateDir)
+	writeEmbedded("specs/hostile/02_self_transfer.shen", "templates/elixir-hostile-self-transfer.shen", 0644, templateDir)
+	writeEmbedded("specs/good/01_guarded.shen", "templates/elixir-good-guarded.shen", 0644, templateDir)
+	writeEmbedded("bin/shen-check.sh", "templates/elixir-shen-check.sh", 0755, templateDir)
+	writeTemplate("sb.toml", "templates/elixir-sb.toml.tmpl", cfg, templateDir)
+	if withMakefile {
+		writeTemplate("Makefile", "templates/elixir-Makefile.tmpl", cfg, templateDir)
+	}
+	if !noSkills {
+		installSkills()
+	}
+	fmt.Fprintf(os.Stderr, `
+Shen-backpressure scaffolded (elixir, namespace %s).
+
+Wire the guard tracer into mix.exs (sb audit checks this):
+
+    # top of mix.exs
+    Code.require_file("shen/guard_tracer.ex", __DIR__)
+
+    # in project/0
+    elixirc_options: [tracers: [%s.GuardTracer]],
+
+Next steps:
+  1. Edit specs/core.shen; keep one hostile file per verified premise in specs/hostile/
+  2. sb gen            # guards + tracer (needs Go to build shengen-ex, or bin/shengen-ex)
+  3. sb gates          # gen, compile, test, shen tc+ (shen-erl), tcb audit, mutate-spec
+     (shen-erl: https://github.com/pyrex41/shen-erl — set SHEN_ERL_ROOT)
+`, cfg.Pkg, cfg.Pkg)
 }
 
 func isFlagSet(fs *flag.FlagSet, name string) bool {
