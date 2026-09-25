@@ -1,0 +1,70 @@
+# Shen-Backpressure manifest — Elixir/Ash port of examples/multi-tenant-api.
+#
+# Gate order: gen → compile (warnings are errors, guard tracer active)
+# → test (incl. shen-derive tests against shen-erl) → shen tc+ (shen-erl)
+# → tcb audit (drift, namespace isolation, tracer wiring). `sb gates`
+# appends shen-derive (from [[derive.specs]]) and mutate-spec (from [mutate]).
+
+[project]
+lang = "elixir"
+pkg  = "Tenant.Shen"
+
+[paths]
+spec   = "specs/core.shen"
+output = "lib/tenant/shen/guards_gen.ex"
+
+[elixir]
+tracer_out  = "shen/guard_tracer.ex"
+ash_out     = "lib/tenant/shen/policy_gen.ex"
+ash_targets = ["tenant-access", "resource-access", "write-access"]
+
+[[gates]]
+name = "shengen"
+run  = "sb gen"
+
+[[gates]]
+name = "build"
+run  = "mix compile --warnings-as-errors"
+
+[[gates]]
+name = "test"
+run  = "mix test"
+
+[[gates]]
+name = "shen-check"
+run  = "./bin/shen-check.sh"
+
+[[gates]]
+name = "tcb-audit"
+run  = "sb audit"
+
+# shen-derive, Elixir leg: `shengen-ex derive` writes an ExUnit module that
+# compares the impl against the Shen define evaluated in-process by shen-erl.
+[[derive.specs]]
+lang      = "elixir"
+path      = "specs/core.shen"
+func      = "member-of?"
+impl_pkg  = "Tenant.Authz"
+impl_func = "member_of?"
+guard_pkg = "Tenant.Shen"
+out_file  = "test/derived/member_of_spec_test.exs"
+
+[[derive.specs]]
+lang      = "elixir"
+path      = "specs/core.shen"
+func      = "visible-titles"
+impl_pkg  = "Tenant.Authz"
+impl_func = "visible_titles"
+guard_pkg = "Tenant.Shen"
+out_file  = "test/derived/visible_titles_spec_test.exs"
+
+# Premise mutation: each verified premise must have a hostile witness in
+# specs/hostile/ (a program that only typechecks without that premise).
+[mutate]
+prelude = ["specs/verified.shen"]
+hostile = ["specs/hostile/*.shen"]
+good    = ["specs/good/*.shen"]
+# Headroom for older kernels (shen-sbcl 21.x needs more than the 1e6 default
+# to accept specs/good/); shen-erl (S42) passes with the default.
+max_inferences = 20000000
+# shen = "shen-erl"   # or $SB_SHEN; any Shen with `script <file>` (shen-erl, ShenScript) or shen-sbcl

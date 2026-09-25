@@ -6,12 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 func cmdGen(args []string) {
 	fs := flag.NewFlagSet("gen", flag.ExitOnError)
 	verbose := fs.Bool("verbose", false, "print the shengen command before running it")
 	dryRun := fs.Bool("dry-run", false, "print the shengen command without executing it")
+	check := fs.Bool("check", false, "elixir only: do not write; fail if generated files drifted from the spec")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `sb gen — Generate guard types from Shen specs
 
@@ -25,6 +27,9 @@ configured output path. The language is taken from sb.toml's
     ts      — full-featured TypeScript emitter (cmd/shengen-ts)
     py      — experimental Python emitter (cmd/shengen-py)
     rs      — experimental Rust emitter (cmd/shengen-rs)
+    elixir  — Elixir emitter (cmd/shengen-ex): opaque structs + validating
+              new/N, a compile tracer, and optional Ash policy checks
+              ([elixir] tracer_out / ash_out / ash_targets in sb.toml)
 
 The Python and Rust emitters cover datatypes, sum types, (list X)
 parametric types, and a conservative subset of (define …) blocks.
@@ -60,6 +65,11 @@ Flags:
 		os.Exit(1)
 	}
 
+	if *check && cfg.Lang != "elixir" {
+		fmt.Fprintln(os.Stderr, "sb gen: --check is only implemented for lang = \"elixir\" (use bin/shenguard-audit.sh)")
+		os.Exit(2)
+	}
+
 	switch cfg.Lang {
 	case "go":
 		if err := runShengenGo(spec, cfg.Pkg, cfg.Output, cfg.DBWrap, *verbose, *dryRun); err != nil {
@@ -81,8 +91,13 @@ Flags:
 			fmt.Fprintf(os.Stderr, "sb gen: %v\n", err)
 			os.Exit(1)
 		}
+	case "elixir":
+		if err := runShengenEx(cfg, spec, *verbose, *dryRun, *check); err != nil {
+			fmt.Fprintf(os.Stderr, "sb gen: %v\n", err)
+			os.Exit(1)
+		}
 	default:
-		fmt.Fprintf(os.Stderr, "sb gen: unsupported language %q (expected go|ts|py|rs)\n", cfg.Lang)
+		fmt.Fprintf(os.Stderr, "sb gen: unsupported language %q (expected go|ts|py|rs|elixir)\n", cfg.Lang)
 		os.Exit(1)
 	}
 }
@@ -188,6 +203,55 @@ func runShengenRs(spec, output string, verbose, dryRun bool) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Generated %s from %s (experimental rs emitter)\n", output, spec)
+	return nil
+}
+
+// shengenExArgs builds the shengen-ex argv for the project config.
+func shengenExArgs(cfg *Config, spec string) []string {
+	args := []string{"--spec", spec, "--namespace", cfg.Pkg, "--out", cfg.Output}
+	if cfg.Elixir.TracerOut != "" {
+		args = append(args, "--tracer-out", cfg.Elixir.TracerOut)
+	}
+	if cfg.Elixir.AshOut != "" {
+		args = append(args, "--ash-out", cfg.Elixir.AshOut)
+		if len(cfg.Elixir.AshTargets) > 0 {
+			args = append(args, "--ash-targets", strings.Join(cfg.Elixir.AshTargets, ","))
+		}
+	}
+	if cfg.Elixir.RuntimeModule != "" {
+		args = append(args, "--runtime-module", cfg.Elixir.RuntimeModule)
+	}
+	return args
+}
+
+func runShengenEx(cfg *Config, spec string, verbose, dryRun, check bool) error {
+	bin, err := FindShengenEx()
+	if err != nil {
+		return err
+	}
+	args := shengenExArgs(cfg, spec)
+	if check {
+		args = append(args, "--check")
+	}
+	for _, p := range []string{cfg.Elixir.TracerOut, cfg.Elixir.AshOut} {
+		if p != "" && !check {
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				return err
+			}
+		}
+	}
+	if verbose || dryRun {
+		printCommand(bin, args)
+	}
+	if dryRun {
+		return nil
+	}
+	cmd := exec.Command(bin, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("shengen-ex failed: %w", err)
+	}
 	return nil
 }
 

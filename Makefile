@@ -1,4 +1,4 @@
-.PHONY: help sync-skilldata build-sb build-shengen build-shengen-ts build-shen-derive build-shen-derive-ts build-all check-skilldata
+.PHONY: help sync-skilldata build-sb build-shengen build-shengen-ex build-shengen-ts build-shen-derive build-shen-derive-ts build-all check-skilldata
 
 help:
 	@echo "Shen-Backpressure build targets:"
@@ -7,6 +7,7 @@ help:
 	@echo "  check-skilldata    Verify cmd/sb/skilldata/ matches canonical sb/ (no changes)"
 	@echo "  build-sb           Build the sb engine binary (embeds skilldata)"
 	@echo "  build-shengen      Build Go shengen"
+	@echo "  build-shengen-ex   Build the Elixir emitter (shengen-ex)"
 	@echo "  build-shengen-ts   Build TypeScript shengen"
 	@echo "  build-shen-derive  Build Go shen-derive"
 	@echo "  build-shen-derive-ts  Build TypeScript shen-derive"
@@ -32,6 +33,9 @@ build-sb: sync-skilldata
 build-shengen:
 	cd cmd/shengen && go build -o ../../bin/shengen .
 
+build-shengen-ex:
+	cd cmd/shengen-ex && go build -o ../../bin/shengen-ex .
+
 build-shengen-ts:
 	cd cmd/shengen-ts && npm install && npm run build
 
@@ -41,4 +45,4 @@ build-shen-derive:
 build-shen-derive-ts:
 	cd cmd/shen-derive-ts && npm install && npm run build
 
-build-all: build-sb build-shengen build-shengen-ts build-shen-derive build-shen-derive-ts
+build-all: build-sb build-shengen build-shengen-ex build-shengen-ts build-shen-derive build-shen-derive-ts

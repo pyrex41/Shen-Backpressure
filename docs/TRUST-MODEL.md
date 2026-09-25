@@ -86,6 +86,25 @@ that would violate them.
   `examples/shen-web-tools/runtime/guards_gen.ts:17-29` for the TS
   equivalent.
 
+### Elixir: what replaces the compiler
+
+Elixir has no unexported fields. For `lang = "elixir"` the
+unforgeable-construction guarantee rests on three generated pieces:
+
+- `@opaque` structs whose only constructor is `new/N`;
+- a **compile tracer** that makes `mix compile` refuse `%Guard{}`
+  literals, struct updates, and `struct/2` next to guard types;
+- `sb audit`, which refuses raw `__struct__` maps and hand-written
+  modules in the guard namespace.
+
+Map-update syntax (`%{proof | field: v}`) is invisible to the tracer.
+Dialyzer reports it only once the forged value reaches an opaque
+contract, so it stays a named gap
+([REFERENCE](REFERENCE.md#elixir-target-cmdshengen-ex),
+[`examples/phoenix-ash-tenant/AUDIT.md`](../examples/phoenix-ash-tenant/AUDIT.md)).
+Type-level chaining holds as runtime `is_struct/2` checks in `new/N` and
+in the generated Ash policies, not as static types.
+
 ## What's runtime-checked
 
 The validating constructor is itself a runtime check — it just

@@ -28,8 +28,8 @@ type GateDef struct {
 
 // Config holds project configuration, loaded from sb.toml or detected by convention.
 type Config struct {
-	Lang    string // "go" or "ts"
-	Pkg     string // guard type package name
+	Lang    string // "go", "ts", "py", "rs" or "elixir"
+	Pkg     string // guard type package name (Elixir: module namespace, e.g. MyApp.Shen)
 	Spec    string // path to .shen spec file
 	Output  string // path to generated guard types
 	DBWrap  string // path to generated DB wrappers (optional)
@@ -61,6 +61,12 @@ type Config struct {
 	// Uses Shen's own sequent calculus + embedded Prolog as gatekeeper.
 	// Populated from [decidable-shen] (sketch; can generalize to [[emitters]] later).
 	DecidableShen DecidableShenConfig
+
+	// Elixir emitter options ([elixir] table), used when Lang == "elixir".
+	Elixir ElixirConfig
+
+	// Premise-mutation gate ([mutate] table).
+	Mutate MutateConfig
 
 	// Loop config
 	Harness        string // LLM harness command (e.g. "claude -p")
@@ -119,6 +125,55 @@ type DecidableShenConfig struct {
 	Enabled bool     // presence of section enables the tier (for sketch)
 	Targets []string // explicit targets for the decidable fragment (e.g. tenant-access); empty = infer
 	// Future: CertOut string for a certified .shen or .cert sidecar; EvalStubOut etc.
+}
+
+// ElixirConfig configures cmd/shengen-ex for lang = "elixir".
+type ElixirConfig struct {
+	TracerOut     string   // generated compile tracer (loaded from mix.exs); default shen/guard_tracer.ex
+	AshOut        string   // optional: generated Ash policy checks
+	AshTargets    []string // access conclusions for the Ash checks (empty = infer)
+	RuntimeModule string   // module implementing :runtime-via checkers
+}
+
+type tomlElixir struct {
+	TracerOut     string   `toml:"tracer_out"`
+	AshOut        string   `toml:"ash_out"`
+	AshTargets    []string `toml:"ash_targets"`
+	RuntimeModule string   `toml:"runtime_module"`
+}
+
+type tomlMutate struct {
+	Shen    string   `toml:"shen"`
+	Args    []string `toml:"args"`
+	Prelude []string `toml:"prelude"`
+	Hostile []string `toml:"hostile"`
+	Good    []string `toml:"good"`
+	Isolate string   `toml:"isolate"`
+	Timeout string   `toml:"timeout"`
+	Jobs    int      `toml:"jobs"`
+
+	MaxInferences int `toml:"max_inferences"`
+}
+
+func applyElixirMutate(cfg *Config, ex tomlElixir, mu tomlMutate) {
+	cfg.Elixir = ElixirConfig{
+		TracerOut:     ex.TracerOut,
+		AshOut:        ex.AshOut,
+		AshTargets:    append([]string(nil), ex.AshTargets...),
+		RuntimeModule: ex.RuntimeModule,
+	}
+	cfg.Mutate = MutateConfig{
+		Shen:    mu.Shen,
+		Args:    append([]string(nil), mu.Args...),
+		Prelude: append([]string(nil), mu.Prelude...),
+		Hostile: append([]string(nil), mu.Hostile...),
+		Good:    append([]string(nil), mu.Good...),
+		Isolate: mu.Isolate,
+		Timeout: mu.Timeout,
+		Jobs:    mu.Jobs,
+
+		MaxInferences: mu.MaxInferences,
+	}
 }
 
 // tomlCedar mirrors the [cedar] table in sb.toml (new + legacy).
@@ -188,7 +243,9 @@ type tomlConfigNew struct {
 	DecidableShen struct {
 		Targets []string `toml:"targets"`
 	} `toml:"decidable-shen"`
-	Loop struct {
+	Elixir tomlElixir `toml:"elixir"`
+	Mutate tomlMutate `toml:"mutate"`
+	Loop   struct {
 		Harness string `toml:"harness"`
 		MaxIter int    `toml:"max_iter"`
 		Timeout string `toml:"timeout"`
@@ -236,7 +293,9 @@ type tomlConfigLegacy struct {
 	DecidableShen struct {
 		Targets []string `toml:"targets"`
 	} `toml:"decidable-shen"`
-	Loop struct {
+	Elixir tomlElixir `toml:"elixir"`
+	Mutate tomlMutate `toml:"mutate"`
+	Loop   struct {
 		Harness string `toml:"harness"`
 		MaxIter int    `toml:"max_iter"`
 		Timeout string `toml:"timeout"`
@@ -292,6 +351,7 @@ func LoadConfig() (*Config, error) {
 			applyCedar(cfg, tcNew.Cedar.SchemaOut, tcNew.Cedar.PoliciesOut, tcNew.Cedar.Targets)
 			applyRego(cfg, tcNew.Rego.ModuleOut, tcNew.Rego.Targets, tcNew.Rego.Package)
 			applyDecidableShen(cfg, tcNew.DecidableShen.Targets)
+			applyElixirMutate(cfg, tcNew.Elixir, tcNew.Mutate)
 			applyLoop(cfg, tcNew.Loop.Harness, tcNew.Loop.MaxIter,
 				tcNew.Loop.Timeout, tcNew.Loop.Prompt, tcNew.Loop.Plan)
 		} else {
@@ -310,6 +370,7 @@ func LoadConfig() (*Config, error) {
 			applyCedar(cfg, tcLegacy.Cedar.SchemaOut, tcLegacy.Cedar.PoliciesOut, tcLegacy.Cedar.Targets)
 			applyRego(cfg, tcLegacy.Rego.ModuleOut, tcLegacy.Rego.Targets, tcLegacy.Rego.Package)
 			applyDecidableShen(cfg, tcLegacy.DecidableShen.Targets)
+			applyElixirMutate(cfg, tcLegacy.Elixir, tcLegacy.Mutate)
 			applyLoop(cfg, tcLegacy.Loop.Harness, tcLegacy.Loop.MaxIter,
 				tcLegacy.Loop.Timeout, tcLegacy.Loop.Prompt, tcLegacy.Loop.Plan)
 		}
@@ -324,8 +385,22 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
+	if cfg.Lang == "elixir" {
+		if cfg.Pkg == "shenguard" {
+			cfg.Pkg = "Shenguard"
+		}
+		if cfg.Elixir.TracerOut == "" {
+			cfg.Elixir.TracerOut = "shen/guard_tracer.ex"
+		}
+		if cfg.Check == "./bin/shen-check.sh" {
+			cfg.Check = "./bin/shen-check.sh"
+		}
+	}
+
 	if cfg.Output == "" {
 		switch cfg.Lang {
+		case "elixir":
+			cfg.Output = "lib/shen/guards_gen.ex"
 		case "go":
 			cfg.Output = fmt.Sprintf("internal/%s/guards_gen.go", cfg.Pkg)
 		case "ts":
@@ -343,6 +418,8 @@ func LoadConfig() (*Config, error) {
 
 	if cfg.Build == "" {
 		switch cfg.Lang {
+		case "elixir":
+			cfg.Build = "mix compile --warnings-as-errors"
 		case "go":
 			cfg.Build = "go build ./..."
 		case "ts":
@@ -352,6 +429,8 @@ func LoadConfig() (*Config, error) {
 
 	if cfg.Test == "" {
 		switch cfg.Lang {
+		case "elixir":
+			cfg.Test = "mix test"
 		case "go":
 			cfg.Test = "go test ./..."
 		case "ts":
@@ -532,6 +611,36 @@ func FindShengen() (string, error) {
 	}
 
 	return "", fmt.Errorf("shengen not found: check bin/shengen, $SHENGEN_PATH, $PATH, or cmd/shengen/main.go")
+}
+
+// FindShengenEx locates the Elixir emitter: ./bin/shengen-ex ->
+// $SHENGEN_EX_PATH -> $PATH -> build from cmd/shengen-ex (walking up from
+// the project, so examples/<proj>/ works in-repo).
+func FindShengenEx() (string, error) {
+	if _, err := os.Stat("bin/shengen-ex"); err == nil {
+		return filepath.Abs("bin/shengen-ex")
+	}
+	if p := os.Getenv("SHENGEN_EX_PATH"); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	if p, err := exec.LookPath("shengen-ex"); err == nil {
+		return p, nil
+	}
+	src, err := findScriptByWalking("cmd/shengen-ex/main.go", "shengen-ex")
+	if err != nil {
+		return "", fmt.Errorf("shengen-ex not found: check bin/shengen-ex, $SHENGEN_EX_PATH, $PATH, or cmd/shengen-ex")
+	}
+	srcDir := filepath.Dir(src)
+	outPath := filepath.Join(os.TempDir(), "shen-backpressure-shengen-ex")
+	cmd := exec.Command("go", "build", "-o", outPath, ".")
+	cmd.Dir = srcDir
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("building shengen-ex from %s: %w", srcDir, err)
+	}
+	return outPath, nil
 }
 
 // FindShengenTS locates the TypeScript shengen.

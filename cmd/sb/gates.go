@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -118,6 +119,13 @@ func buildGateList(cfg *Config) []gate {
 		// Manifest-defined gates: convert each GateDef to a gate.
 		for _, gd := range cfg.Gates {
 			bin, args := SplitCommand(gd.Run)
+			if bin == "sb" {
+				// `sb <cmd>` gates run the same engine binary, whether or
+				// not it is on $PATH.
+				if self, err := os.Executable(); err == nil {
+					bin = self
+				}
+			}
 			gates = append(gates, gate{
 				name:          gd.Name,
 				kind:          gd.Kind,
@@ -162,6 +170,19 @@ func buildGateList(cfg *Config) []gate {
 		}
 	}
 
+	// Append the premise-mutation gate when [mutate] declares a hostile
+	// corpus, unless the manifest already lists it.
+	if cfg.Mutate.Enabled() && !hasGateRunning(gates, "mutate-spec") {
+		if self, err := os.Executable(); err == nil {
+			gates = append(gates, gate{
+				name: "mutate-spec",
+				kind: GateKindCommand,
+				cmd:  self,
+				args: []string{"mutate-spec"},
+			})
+		}
+	}
+
 	// Always append shen-cedar (sb policy) gate when [cedar] is present in sb.toml
 	// (modeled exactly after derive auto-registration).
 	if cfg.Cedar.SchemaOut != "" || cfg.Cedar.PoliciesOut != "" || len(cfg.Cedar.Targets) > 0 {
@@ -202,6 +223,19 @@ func buildGateList(cfg *Config) []gate {
 	}
 
 	return gates
+}
+
+// hasGateRunning reports whether some gate already invokes `sb <sub>`.
+func hasGateRunning(gates []gate, sub string) bool {
+	for _, g := range gates {
+		if len(g.args) > 0 && g.args[0] == sub && (filepath.Base(g.cmd) == "sb" || strings.HasSuffix(g.cmd, "/sb")) {
+			return true
+		}
+		if self, err := os.Executable(); err == nil && g.cmd == self && len(g.args) > 0 && g.args[0] == sub {
+			return true
+		}
+	}
+	return false
 }
 
 func runOneGate(g gate) gateResult {

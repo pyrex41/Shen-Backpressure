@@ -1,0 +1,8 @@
+# Planted forgery: builds a tenant-access proof without its constructor.
+# `make demo` copies this into lib/ and expects `mix compile` to fail
+# with the Shen guard tracer's CompileError.
+defmodule Tenant.Hostile do
+  def admin_everywhere(principal, tenant) do
+    %Tenant.Shen.TenantAccess{principal: principal, tenant: tenant, is_member: true}
+  end
+end
