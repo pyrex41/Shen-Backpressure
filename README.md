@@ -26,10 +26,20 @@ invariants and pure functions. The spec lives in your repo as
 `specs/core.shen` and is the human-edited source of truth.
 
 `shengen` lowers the spec into opaque guard types in your target
-language. Today: Go and TypeScript are production-wired through
-`sb gen`; Python and Rust exist as reference emitters. The guard
-types have unexported fields and validated constructors, so the
-language compiler enforces every invariant the spec declares.
+language. Today: Go, TypeScript and Elixir are production-wired
+through `sb gen`; Python and Rust exist as reference emitters. The
+guard types have unexported fields and validated constructors, so the
+language compiler enforces every invariant the spec declares. Elixir is
+dynamic, so there the job is split between a generated compile tracer
+and `@opaque` + Dialyzer; see the table below.
+
+| Target | Emitter | `sb gen` | Opaqueness enforced by | shen-derive oracle | Example |
+|---|---|---|---|---|---|
+| Go | `cmd/shengen` | yes | unexported fields (compiler) | Go shen-derive evaluator | `examples/payment`, `examples/multi-tenant-api` |
+| TypeScript | `cmd/shengen-ts` | yes | `#private` fields (tsc) | `cmd/shen-derive-ts` | `examples/shen-web-tools` |
+| Elixir | `cmd/shengen-ex` | yes (`lang = "elixir"`) | `@opaque` structs + generated compile tracer (`%Guard{}`/`struct/2` refused) + Dialyzer | the real Shen kernel in-process via [shen-erl](https://github.com/pyrex41/shen-erl) | `examples/phoenix-ash-tenant` (Ash policies) |
+| Python | `cmd/shengen-py` | reference | closures / dataclasses | — | `examples/payment/reference` |
+| Rust | `cmd/shengen-rs` | reference | private fields + PhantomData | — | `examples/payment/reference` |
 `shen-derive` turns `(define …)` spec blocks into table-driven tests
 that pin a hand-written implementation against the spec on sampled
 inputs.
@@ -57,6 +67,12 @@ sixth when `shen-derive` is configured):
 | 4. shen tc+ | `bin/shen-check.sh` | Verifies spec internal consistency. Catches contradictory rules. |
 | 5. tcb audit | `bin/shenguard-audit.sh` | Re-runs shengen, diffs output, rejects unexpected files in `shenguard/`. |
 | 6. shen-derive | `sb derive` | Regenerates committed spec-equivalence tests, fails on drift, then runs them. Active when `[[derive.specs]]` is configured. |
+| 7. mutate-spec | `sb mutate-spec` | Drops each `: verified` premise in turn and requires some hostile `.shen` file to start typechecking; fails listing premises no hostile program depends on. Active when `[mutate]` is configured. Works with any Shen runtime (shen-erl, shen-sbcl, ShenScript, ...). |
+
+For `lang = "elixir"` the gates are `sb gen` → `mix compile
+--warnings-as-errors` → `mix test` → `bin/shen-check.sh` (tc+ in
+shen-erl) → `sb audit` (drift, guard-namespace isolation, tracer
+wiring). `sb init --lang elixir` scaffolds them.
 
 Gate topology is declared in `sb.toml`. The legacy fixed five-gate
 shape still works; the new `[[gates]]` array of tables lets you
@@ -273,6 +289,8 @@ option when you only want the skills.
 cmd/sb/                  Engine CLI (gen, gates, derive, context, loop, init)
 cmd/shengen/             Go codegen (production-wired)
 cmd/shengen-ts/          TypeScript codegen (production-wired, while-loop emission)
+cmd/shengen-ex/          Elixir codegen (production-wired): guards, compile tracer,
+                         Ash policy checks, ExUnit/StreamData derive tests
 cmd/shengen-py/          Python codegen (reference)
 cmd/shengen-rs/          Rust codegen (reference)
 cmd/shen-derive-ts/      Self-hosted TS port of shen-derive (async crypto, aliases, multi-spec)
@@ -280,7 +298,8 @@ shen-derive/             Go shen-derive module
 sb/                      Canonical SKM bundle (commands, skill, AGENT_PROMPT)
 cmd/sb/skilldata/        Build-time mirror of sb/, embedded into the binary
 docs/REFERENCE.md        Pattern catalog, side-by-sides, design-decision Q&A
-examples/                payment/, multi-tenant-api/, shen-web-tools/, .archive/
+examples/                payment/, multi-tenant-api/, shen-web-tools/,
+                         phoenix-ash-tenant/ (Elixir + Ash), .archive/
 thoughts/                Research notes, reviews, handoffs (incl. tag-resolver
                          finish line + feature design prompts under
                          shared/research/2026-05-05-*)
