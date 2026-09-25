@@ -62,6 +62,9 @@ type Config struct {
 	// Populated from [decidable-shen] (sketch; can generalize to [[emitters]] later).
 	DecidableShen DecidableShenConfig
 
+	// Premise-mutation gate ([mutate] table).
+	Mutate MutateConfig
+
 	// Loop config
 	Harness        string // LLM harness command (e.g. "claude -p")
 	MaxIter        int    // max loop iterations
@@ -119,6 +122,34 @@ type DecidableShenConfig struct {
 	Enabled bool     // presence of section enables the tier (for sketch)
 	Targets []string // explicit targets for the decidable fragment (e.g. tenant-access); empty = infer
 	// Future: CertOut string for a certified .shen or .cert sidecar; EvalStubOut etc.
+}
+
+type tomlMutate struct {
+	Shen    string   `toml:"shen"`
+	Args    []string `toml:"args"`
+	Prelude []string `toml:"prelude"`
+	Hostile []string `toml:"hostile"`
+	Good    []string `toml:"good"`
+	Isolate string   `toml:"isolate"`
+	Timeout string   `toml:"timeout"`
+	Jobs    int      `toml:"jobs"`
+
+	MaxInferences int `toml:"max_inferences"`
+}
+
+func applyMutate(cfg *Config, mu tomlMutate) {
+	cfg.Mutate = MutateConfig{
+		Shen:    mu.Shen,
+		Args:    append([]string(nil), mu.Args...),
+		Prelude: append([]string(nil), mu.Prelude...),
+		Hostile: append([]string(nil), mu.Hostile...),
+		Good:    append([]string(nil), mu.Good...),
+		Isolate: mu.Isolate,
+		Timeout: mu.Timeout,
+		Jobs:    mu.Jobs,
+
+		MaxInferences: mu.MaxInferences,
+	}
 }
 
 // tomlCedar mirrors the [cedar] table in sb.toml (new + legacy).
@@ -188,7 +219,8 @@ type tomlConfigNew struct {
 	DecidableShen struct {
 		Targets []string `toml:"targets"`
 	} `toml:"decidable-shen"`
-	Loop struct {
+	Mutate tomlMutate `toml:"mutate"`
+	Loop   struct {
 		Harness string `toml:"harness"`
 		MaxIter int    `toml:"max_iter"`
 		Timeout string `toml:"timeout"`
@@ -236,7 +268,8 @@ type tomlConfigLegacy struct {
 	DecidableShen struct {
 		Targets []string `toml:"targets"`
 	} `toml:"decidable-shen"`
-	Loop struct {
+	Mutate tomlMutate `toml:"mutate"`
+	Loop   struct {
 		Harness string `toml:"harness"`
 		MaxIter int    `toml:"max_iter"`
 		Timeout string `toml:"timeout"`
@@ -292,6 +325,7 @@ func LoadConfig() (*Config, error) {
 			applyCedar(cfg, tcNew.Cedar.SchemaOut, tcNew.Cedar.PoliciesOut, tcNew.Cedar.Targets)
 			applyRego(cfg, tcNew.Rego.ModuleOut, tcNew.Rego.Targets, tcNew.Rego.Package)
 			applyDecidableShen(cfg, tcNew.DecidableShen.Targets)
+			applyMutate(cfg, tcNew.Mutate)
 			applyLoop(cfg, tcNew.Loop.Harness, tcNew.Loop.MaxIter,
 				tcNew.Loop.Timeout, tcNew.Loop.Prompt, tcNew.Loop.Plan)
 		} else {
@@ -310,6 +344,7 @@ func LoadConfig() (*Config, error) {
 			applyCedar(cfg, tcLegacy.Cedar.SchemaOut, tcLegacy.Cedar.PoliciesOut, tcLegacy.Cedar.Targets)
 			applyRego(cfg, tcLegacy.Rego.ModuleOut, tcLegacy.Rego.Targets, tcLegacy.Rego.Package)
 			applyDecidableShen(cfg, tcLegacy.DecidableShen.Targets)
+			applyMutate(cfg, tcLegacy.Mutate)
 			applyLoop(cfg, tcLegacy.Loop.Harness, tcLegacy.Loop.MaxIter,
 				tcLegacy.Loop.Timeout, tcLegacy.Loop.Prompt, tcLegacy.Loop.Plan)
 		}

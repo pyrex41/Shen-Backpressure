@@ -108,6 +108,22 @@ type DischargePremise struct {
 	RuntimeChecker  *string `json:"runtime_checker,omitempty"`
 	EquivalenceTest *string `json:"equivalence_test,omitempty"`
 	DBQueryExcerpt  *string `json:"db_query_excerpt,omitempty"`
+
+	// Mutation evidence from `sb mutate-spec` (additive, omitempty so
+	// reports without it stay byte-identical): whether dropping this
+	// verified premise let a hostile program typecheck.
+	Mutation *DischargeMutation `json:"mutation,omitempty"`
+}
+
+// DischargeMutation records premise-mutation evidence for one verified
+// premise. Status is "killed" (some hostile file typechecks once the
+// premise is dropped — the premise is load-bearing), "survived" (no
+// hostile witness), or "error".
+type DischargeMutation struct {
+	Status      string   `json:"status"`
+	KilledBy    []string `json:"killed_by,omitempty"`
+	ShenRuntime string   `json:"shen_runtime"`
+	CheckedAt   string   `json:"checked_at"`
 }
 
 type DischargeCounter struct {
