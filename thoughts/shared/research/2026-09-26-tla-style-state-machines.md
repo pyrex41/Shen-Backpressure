@@ -13,6 +13,25 @@ last_updated_by: claude
 
 # TLA+-style specs in Shen
 
+> **Update (2026-09-26, later): the checker is now a Shen library.** It
+> lives in shencheck at `lib/tla/tla.shen`. It is portable across Shen
+> ports: 27/27 conformance on shen-go, shen-lua, shen-rust and shen-cl.
+> Specs are real Shen, with symbols and action values, and fairness is a
+> predicate over actions. The Go `shen-derive check`/`trace` described
+> below remains as the reference implementation that the library's
+> conformance numbers are checked against; it is no longer the intended
+> engine.
+>
+> Library timings at 7 computers (23,634 states):
+>
+> | Port and visited map | Time |
+> |---|---|
+> | shen-cl, portable map | 2.3 s |
+> | shen-lua, native map | 2.5 s |
+> | shen-rust, portable map | 10.2 s |
+> | shen-go, portable map | 10.6 s |
+> | shen-derive `check` | 21 s |
+
 This note responds to Reasonable's "The internet discovers TLA+. Now
 what?" (Mészáros et al., 25 Sept 2026). It collects the ways the Shen
 projects have been reaching for the same thing and proposes one clean
