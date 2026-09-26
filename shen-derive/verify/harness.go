@@ -224,15 +224,11 @@ func evalDefine(def *specfile.Define, vals []core.Value, base *core.Env) (core.V
 func bindClausePatterns(base *core.Env, patterns []core.Sexpr, vals []core.Value) (*core.Env, bool, error) {
 	env := base
 	for i, p := range patterns {
-		bindings, ok, err := core.Match(p, vals[i])
-		if err != nil {
-			return nil, false, err
-		}
+		var ok bool
+		var err error
+		env, ok, err = core.MatchEnv(p, vals[i], env)
 		if !ok {
-			return nil, false, nil
-		}
-		for name, v := range bindings {
-			env = env.Extend(name, v)
+			return nil, false, err
 		}
 	}
 	return env, true, nil
@@ -341,7 +337,14 @@ func curriedDefineFn(def *specfile.Define, shared *envHolder) core.Value {
 			},
 		}
 	}
-	return build(nil)
+	root := build(nil).(*core.BuiltinFn)
+	if arity > 0 {
+		root.N = arity
+		root.FnN = func(vals []core.Value) (core.Value, error) {
+			return evalDefine(def, vals, shared.env)
+		}
+	}
+	return root
 }
 
 // goLiteralFor converts an evaluated spec value to a Go source expression

@@ -35,6 +35,12 @@ type PrimPartial struct {
 type BuiltinFn struct {
 	Name string
 	Fn   func(Value) (Value, error)
+	// N and FnN optionally give a direct N-argument entry point. When a
+	// call form supplies at least N arguments, Eval calls FnN once
+	// instead of currying through Fn, which avoids building a partial
+	// application per argument. FnN must agree with Fn.
+	N   int
+	FnN func([]Value) (Value, error)
 }
 
 func (IntVal) valNode()       {}
@@ -223,15 +229,34 @@ func Eval(env *Env, sexpr Sexpr) (Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Apply args one at a time (curried)
-		result := fv
-		for _, arg := range s.Elems[1:] {
-			av, err := Eval(env, arg)
-			if err != nil {
+		args := make([]Value, len(s.Elems)-1)
+		for i, arg := range s.Elems[1:] {
+			if args[i], err = Eval(env, arg); err != nil {
 				return nil, err
 			}
-			result, err = Apply(result, av)
-			if err != nil {
+		}
+		// Fast path: a call that saturates a primitive or a define in one
+		// go runs it directly, without currying.
+		result := fv
+		switch f := fv.(type) {
+		case *PrimPartial:
+			if n := primArity(f.Op); len(f.Args) == 0 && len(args) >= n {
+				if result, err = execPrim(f.Op, args[:n]); err != nil {
+					return nil, err
+				}
+				args = args[n:]
+			}
+		case *BuiltinFn:
+			if f.FnN != nil && len(args) >= f.N {
+				if result, err = f.FnN(args[:f.N]); err != nil {
+					return nil, err
+				}
+				args = args[f.N:]
+			}
+		}
+		// Apply any remaining args one at a time (curried)
+		for _, av := range args {
+			if result, err = Apply(result, av); err != nil {
 				return nil, err
 			}
 		}
