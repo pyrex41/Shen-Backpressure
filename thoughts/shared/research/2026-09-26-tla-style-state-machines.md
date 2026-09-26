@@ -226,6 +226,57 @@ explicit. A generated `record(state)` helper would make it cheap.
 6. **Step guards from `next`** via evalhost. Retire the hand-written
    state-machine examples in `.archive/`.
 
+## Which runtime should run the checker? (measured 2026-09-26)
+
+The prototype runs specs on the shen-derive evaluator because it was
+already in this repo. It is neither real Shen nor fast.
+
+**Cost of one `next` call** (election, 5 computers, the same state, one
+4-core Xeon container):
+
+| Runtime | µs per `next` | vs native |
+|---|---|---|
+| hand-written Go (compiled-spec ceiling) | 0.32 | 1× |
+| shen-cl on SBCL | 8.7 | 27× |
+| shen-go bytecode VM | 103 | 320× |
+| shen-rust, loop inside Shen | 166 | 520× |
+| shen-derive evaluator | 407 | 1,270× |
+| shen-rust via shencheck's FFI, one `eval` per call | 721 | 2,250× |
+
+**Whole-search cross-check.** The same model and search, written in
+plain Shen with symbols and kernel list functions, gives:
+
+- the same state counts on shen-go at every size (38 / 132 / 762 /
+  3,526 / 23,634);
+- 6.0 s at 7 computers against shen-derive's 21 s, even with a weak
+  bucket hash.
+
+Measurement notes:
+
+- Shen's `hash` sums character codes and `floor` is slow, so a fast
+  search needs a host-native hash set. That set is the one piece of
+  port-specific code.
+- shen-cl was bootstrapped here from shen-go's S41 kernel, so its Lisp
+  interop was not available.
+
+What follows:
+
+1. **Specs should be real Shen**, not the shen-derive dialect. That
+   brings symbols, `tc+` on the same file, yggdrasil shaking, and one
+   spec shared with shencheck.
+2. **The checker should be a Shen library** (BFS, invariants, SCC
+   liveness, AG EF) plus one native hash-set primitive per port. The Go
+   `check` package stays as the reference implementation that the
+   ports are differentially tested against.
+3. **shencheck is the natural host**, but only if the search runs
+   inside Shen with a single `eval`. Its per-call FFI string bridge is
+   the slowest option measured.
+4. **For speed, run on SBCL**, or shake with yggdrasil to a static
+   artifact.
+5. **Compiling `next` to native Go is the remaining ~25×** over SBCL.
+   Only pursue it if TLC-scale instances matter. shen-derive's v1
+   codegen hit a ceiling doing exactly this kind of lowering.
+
 ## What not to build
 
 - **A TLA+ parser, or TLA+ syntax in Shen.** The value is the mental
