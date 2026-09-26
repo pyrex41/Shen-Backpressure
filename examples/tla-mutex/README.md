@@ -21,7 +21,7 @@ make -C ../.. build-shen-derive          # builds bin/shen-derive
 ../../bin/shen-derive check specs/mutex.shen \
   --inv mutex,lock-matches-crit --step-inv release-by-holder
 # 8 distinct states, 14 transitions, depth 3
-# OK: every reachable state satisfies the invariants
+# OK: every reachable state satisfies the invariants and every temporal property holds
 
 ../../bin/shen-derive check specs/mutex-racy.shen --inv mutex
 # FAIL: invariant mutex violated

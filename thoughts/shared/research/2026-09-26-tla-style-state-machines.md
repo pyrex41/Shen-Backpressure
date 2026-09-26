@@ -5,7 +5,7 @@ git_commit: 6b9dde0
 branch: claude/tla-plus-shen-synthesis-wqw29z
 repository: pyrex41/Shen-Backpressure
 topic: "TLA+-style specs in Shen: one state-machine spec, four consumers"
-tags: [research, design, tla-plus, state-machines, model-checking, trace-validation, shencheck]
+tags: [research, design, tla-plus, state-machines, model-checking, liveness, trace-validation, shencheck]
 status: prototype
 last_updated: 2026-09-26
 last_updated_by: claude
@@ -13,218 +13,240 @@ last_updated_by: claude
 
 # TLA+-style specs in Shen
 
-Prompted by Reasonable's "The internet discovers TLA+. Now what?"
-(reasonable.io/blog/tla-tutorial). The post's mental model is: a model
-describes every possible execution trace of a system, a property
-describes which traces are acceptable, and verification asks whether
-every possible trace is acceptable. TLC answers that for a finite
-instance by enumerating reachable states. From there the post argues for
-stronger proof machinery (Verus, Lean) and a connection to real code.
+This note responds to Reasonable's "The internet discovers TLA+. Now
+what?" (Mészáros et al., 25 Sept 2026). It collects the ways the Shen
+projects have been reaching for the same thing and proposes one clean
+shape for it.
 
-This note collects the ways the Shen projects have been reaching for the
-same thing and proposes one clean shape for it. A working prototype is
-included: `shen-derive check`, `shen-derive trace` and
-`examples/tla-mutex/`.
+A working prototype is included:
 
-## What has been tried, and why it felt scattered
+- `shen-derive check` and `shen-derive trace`;
+- `examples/leader-election/`, which is the article's running example;
+- `examples/tla-mutex/`, which checks a spec against a real Go
+  implementation.
+
+## What the article says, and what it asks for
+
+The article teaches TLA+ through leader election among three computers:
+
+- a model has **states** and **actions**;
+- a property says which **executions** are acceptable;
+- TLC explores every reachable state of a finite instance.
+
+The article's numbers:
+
+| Case | Result |
+|---|---|
+| 3 computers | 38 states, "never two leaders" holds |
+| A bug that lets a computer vote twice | a six-step counterexample ending with two leaders |
+| A typo that stops anything from happening | safety still passes; only liveness (`<> someone is leader`) catches it |
+| Liveness in general | needs fairness: WF(A) for actions that stay enabled, SF(A) for actions enabled infinitely often |
+
+It then names three places where TLA+ stops short:
+
+1. **Model checking only covers finite instances.** 38 states with three
+   computers becomes more than a million with nine. General claims need
+   proofs, and TLAPS's automation is limited, especially for liveness.
+2. **The model is not the implementation.** Nothing keeps them in step
+   as the code changes.
+3. **Linear time can't state everything.** "From any state, a new
+   election can still be started" is CTL (branching time). "This
+   computer has a strategy to become leader" is ATL (strategic).
+
+Reasonable's answer is to move into Verus:
+
+- a TLA+→Verus transpiler;
+- a prover–reviewer agent loop with an anti-cheat gatekeeper, which
+  checks the agents didn't modify the spec or slip in `assume(false)`;
+- a library of WF1/WF2/SF1/SF2 liveness rules as proven lemmas;
+- refinement proofs in the style of Anvil;
+- more than 3,000 machine-checked proofs from 16,459 TLA+
+  spec/property pairs.
+
+Further out they name program synthesis and *protocol search*, where a
+cheap verifier becomes the objective function in an evolutionary loop.
+
+## What has been tried here, and why it felt scattered
 
 | Where | What it does | What was missing |
 |---|---|---|
-| Shen-Backpressure `examples/.archive/{order,pipeline}-state-machine`, `circuit-breaker`, `workflow-saga` | "The state machine is the type system": a datatype per legal transition, so an illegal transition can't be constructed. | It checks only single steps. Nothing asks what happens across *sequences* of steps (reachability, invariants, deadlock), and the transition graph is written out by hand as types. |
-| Shen-Backpressure `2026-05-05-feature-holographic-mock.md` | A Shen state machine as a stateful test double. | It is a design prompt only. |
-| Shen-Backpressure `2026-05-05-feature-counterexample-traces.md` | Counterexamples fed back to the agent. | It is a design prompt only, and it is about pure functions. |
-| shencheck `transition : model --> action --> observation --> list model` | Possible-state semantics: histories from a real system are checked against a Shen model, with bounded liveness. | Models are JSON strings, the checkers live in Rust, and nothing explores the model *on its own* before the system exists. |
-| yggdrasil `trace-check` | Runtime traces checked against a static claim (Datalog containment). | It is a different domain, but it has the same shape: observed behaviour must lie inside the specified behaviour. |
+| Shen-Backpressure `examples/.archive/{order,pipeline}-state-machine`, `circuit-breaker`, `workflow-saga` | "The state machine is the type system": a datatype per legal transition. | It checks only single steps. There is nothing over sequences of steps (reachability, invariants, deadlock, liveness), and the transition graph is written by hand as types. |
+| Shen-Backpressure `2026-05-05-feature-holographic-mock.md`, `...-counterexample-traces.md` | A Shen state machine as a test double; counterexamples as agent feedback. | Both are design prompts only. |
+| shencheck `transition : model --> action --> observation --> list model` | Possible-state semantics over real histories, with bounded liveness. | Models are JSON strings and checkers are Rust. Nothing explores the model on its own before a system exists. |
+| yggdrasil `trace-check` | Runtime traces checked against a static claim (Datalog containment). | It is a different domain, but it has the same shape: observed behaviour must lie inside specified behaviour. |
 
-Each of these is one facet of the TLA+ workflow. They sit in different
-repos, use different encodings, and "trace" means something different in
-each. None of them has the part that makes TLA+ worth using: exhaustive
-exploration of the design itself, before any code.
+Each is one facet of the TLA+ workflow. Nothing had the core of it:
+exhaustive exploration of the design, with safety *and* liveness,
+before code.
 
 ## The shape: one spec, four consumers
 
-Write the system the way TLA+ does, as a state machine, in plain Shen
-`define`s:
+Write the system the way TLA+ does, in plain Shen `define`s:
 
 ```shen
 (define init -> [S0 ...])                       \* Init *\
-(define next S -> [(@p "Action" S') ...])       \* Next: a disjunction of actions *\
-(define inv  S -> Bool)                         \* invariant: []Inv *\
+(define next S -> [(@p "Action" S') ...])       \* Next = A1 \/ A2 \/ ... *\
+(define inv  S -> Bool)                         \* safety: []Inv *\
 (define step-inv S S' -> Bool)                  \* action property: [][A]_vars *\
+(define p S -> Bool)                            \* for <>p, p ~> q, AG EF p *\
+(define quorum -> 2)                            \* CONSTANTS; --const overrides *\
 ```
 
-Nondeterminism is a list of successors. Each disjunct of TLA+'s `Next`
-is one labelled successor. A state is any value the evaluator has
-(lists, strings, numbers, booleans, tuples).
+Nondeterminism is a list of successors. Each labelled successor is one
+disjunct of TLA+'s `Next`, which is also the "split over actions" the
+article's inductive proofs need. That one artifact feeds four consumers:
 
-That one artifact then feeds four consumers:
+1. **`shen-derive check`: model checking.** It runs a breadth-first
+   search over the reachable states and checks:
+   - invariants, step invariants and deadlock;
+   - `<>P` and `P ~> Q` under WF(Next), plus per-action `--wf` / `--sf`
+     (glob-matched labels);
+   - the CTL property `AG EF P` (`--possible`), which TLA+ cannot state.
 
-1. **`shen-derive check`: model checking (TLC).** It runs a
-   breadth-first search over the reachable states of the finite instance,
-   checking state invariants, step invariants and deadlock. Because the
-   search is breadth-first, a counterexample is a *shortest* trace. This
-   is what finds design bugs before code exists. It is **implemented**.
-2. **`shen-derive trace`: trace validation.** The implementation logs its
-   state (mapped to spec state) at each linearization point as JSONL.
-   Every recorded step must be a stutter or a successor that `next`
-   allows, with the action label if one was recorded, and every state
-   must satisfy the invariants. This is the "connect to real code" step,
-   and it catches implementation bugs that a correct design can't. It is
-   **implemented**.
-3. **Guards: single-step legality at runtime (shengen, evalhost).** The
-   same `next` can back a generated `NewStep(from, to)` constructor whose
-   check is "`to` ∈ `next(from)`", evaluated by `runtime/evalhost`
-   (profile B, `:runtime-via :eval`). That replaces the hand-written
-   transition datatypes in the archived state-machine examples. The
-   transition graph is derived from `next` instead of being duplicated as
-   types. This is **proposed**.
-4. **shencheck: workloads, faults and histories.** shencheck's
-   `transition m a o` is `next` restricted to successors consistent with
-   the observed action and observation. Its possible-state semantics (a
-   set of model states) is exactly trace validation with hidden variables
-   (see "Partial observation" below). shencheck brings the things a model
-   checker can't: generated workloads against a real deployment, fault
-   injection, bounded liveness and shrinking. Its histories then become
-   inputs to (2). This is **proposed**, and it is mostly a matter of
-   aligning signatures and letting shencheck call a typed spec instead of
-   JSON strings.
+   Safety counterexamples are shortest. Liveness counterexamples are
+   lassos ("back to state k, repeats forever"). **Implemented.**
+2. **`shen-derive trace`: trace validation.** The implementation logs
+   mapped spec state at its linearization points. Every step must be a
+   stutter or an allowed successor, with its action label if one was
+   recorded. This is the cheap, evidence-level answer to "the model is
+   not the implementation". **Implemented.**
+3. **Step guards.** A generated `NewStep(from, to)` constructor checks
+   `to ∈ next(from)` via `runtime/evalhost` (profile B,
+   `:runtime-via :eval`). The transition graph is derived from `next`
+   instead of hand-written as types. **Proposed.**
+4. **shencheck.** Its `transition m a o` is `next` restricted to what
+   was observed. Its possible-state semantics is trace validation with
+   hidden variables. It adds what a model checker can't: real
+   deployments, fault injection and shrinking. **Proposed.**
 
-In the Ralph loop, (1) and (2) are just more `sb` gates. A counterexample
-trace is ideal backpressure: it is short, concrete, and says which action
-broke which invariant. It also fills the counterexample-traces design
-prompt without new machinery.
+### The article's example, reproduced
+
+`examples/leader-election/specs/election.shen` is modelled from the
+article's description. It reproduces every number the article gives and
+goes on to exercise fairness:
+
+| Run | Result |
+|---|---|
+| Base model | 38 states, 57 transitions; `one-leader` holds. |
+| `--const double-vote?=true` | A 6-step counterexample ending in two leaders (article level 2). |
+| `--eventually has-leader` | Fails: a, b and c all start, each holds only its own vote, and nothing is enabled. The article doesn't say whether its model has this split vote. |
+| `--const timeouts?=true` | Split votes retry. Now a livelock: "back to state 0, repeats forever". |
+| `... --wf '* votes *'` | Still fails. Votes are disabled once everyone has voted, so weak fairness is met without voting. |
+| `... --sf '* votes *'` | Holds. Votes are enabled infinitely often, so strong fairness forces one. |
+| `--const quorum=4` | Safety passes and liveness fails (article level 3's point). |
+| `--possible can-start` | Fails. After someone wins, no new election can ever start. This is the article's own CTL example, answered for this model. |
+
+These all run in `TestElection`.
 
 ### Mapping the TLA+ vocabulary
 
-| TLA+ | Shen here |
+| TLA+ | Here |
 |---|---|
 | `VARIABLES` | the state value; optionally a `datatype` giving it a type |
-| `Init` | `(define init -> [...])` |
-| `Next == A1 \/ A2 \/ ...` | `(define next S -> [(@p "A1" S1) (@p "A2" S2) ...])` |
-| `[]Inv` | `--inv name` over `S --> boolean` |
-| `[][A]_vars` | `--step-inv name` over `S --> S --> boolean` |
-| stuttering | trace validation accepts `s = s'` |
-| `CONSTANTS` / `.cfg` | fixed in the spec for the finite instance, or passed as flags later |
-| TLC deadlock check | on by default; `--no-deadlock` turns it off |
-| `WF`/`SF`, `<>P`, `~>` | **not yet**; see below |
-| refinement (`Spec => HighSpec` under a mapping) | trace validation is its implementation-level form; spec-to-spec refinement is a small extension (below) |
+| `Init`, `Next` | `(define init -> [...])`, `(define next S -> [...])` |
+| `[]Inv`, `[][A]_vars` | `--inv`, `--step-inv` |
+| `<>P`, `P ~> Q` | `--eventually`, `--leads-to P:Q` |
+| `WF_vars(Next)` | always assumed: no infinite stuttering while something is enabled |
+| `WF_vars(A)`, `SF_vars(A)` | `--wf`, `--sf` on action labels |
+| `CONSTANTS` / `.cfg` | nullary defines, overridden with `--const name=expr` |
+| TLC deadlock check | on by default; `--no-deadlock` |
+| CTL `AG EF P` | `--possible` (not expressible in TLA+) |
+| refinement | `trace` for implementations; spec-to-spec is next (below) |
 
-## The worked example: `examples/tla-mutex/`
+## Where this meets the article's roadmap
 
-- `specs/mutex.shen`: two processes and a lock, where taking the lock is
-  one atomic step. It has invariants `mutex` and `lock-matches-crit`, and
-  step invariant `release-by-holder`.
-  - `check` result: 8 states, 14 transitions, OK.
-- `specs/mutex-racy.shen`: the same system with check-then-take split
-  into two steps.
-  - `check` result: it fails with the shortest 6-step interleaving that
-    puts both processes in `crit`.
-- `impl/main.go`: two goroutines using a real `atomic.Bool` lock, in
-  either CAS mode or racy mode, writing a JSONL trace.
-  - `trace` against `mutex.shen` accepts the CAS implementation's
-    1,201-step traces.
-  - It rejects the racy implementation, typically within a few hundred
-    steps, with `action "p2" does not take ["crit","want",true] to
-    ["crit","crit",true]`.
-  - In 20 runs it caught the race 18 times using step checking alone,
-    with no invariants.
+- **The gatekeeper already exists.** The article's anti-cheat
+  gatekeeper checks that proving agents didn't touch the spec or assume
+  their way out. That is what Shen-Backpressure's gates, TCB audit and
+  drift checks already do for Ralph loops. `check` and `trace` become two
+  more gates, and a counterexample trace is ideal backpressure: short,
+  concrete, and it names the action and the property.
+- **Protocol search.** It needs a verifier cheap enough to be an
+  objective function. An in-process check of a 38-state model takes
+  milliseconds. The Ralph loop plus a `check` gate is protocol search
+  with an agent as the mutation operator.
+- **Proof, the Shen way: invariants as types.** The article's safety
+  proofs are inductive:
+  - `Init => Inv` and `Inv /\ Next => Inv'`, split over actions.
+  - In Shen: `init : (list safe-state)` and
+    `next : safe-state --> (list safe-state)`, where `safe-state`'s
+    `verified` premises are `Inv`.
+  - If `tc+` accepts that, the invariant holds for every instance size,
+    which is the article's "38 vs a million" problem.
+  - Cheap stage first: `check --inductive` explores every state in a
+    bounded domain satisfying `Inv`, not just the reachable ones, and
+    finds the missing conjunct.
+  - Open question: can `tc+` discharge arithmetic `verified` premises?
+    It needs a spike.
+- **Liveness proofs, the same way.** Their WF1 rule has three
+  premises:
+  - `P /\ Next => P' \/ Q'`
+  - `P /\ A => Q'`
+  - `P => ENABLED A`
 
-So the same spec rejects the racy *design* exhaustively and rejects the
-racy *implementation* from a trace. Those are two different kinds of
-evidence, and they should be reported as such. `check` is exhaustive for
-the instance. `trace` is sampled: one run, one interleaving. Both fit the
-existing discharge-report categories.
+  All three are state or step predicates. The first two are step
+  invariants and the third is a state invariant, so `check` can already
+  test them on an instance. They are also the obligations a typed proof
+  (or an emitted Verus lemma) would carry. A `--wf1 P:A:Q` convenience
+  flag would make this a first-class certificate check.
+- **Richer logics.** `--possible` shows that the explicit graph makes
+  CTL cheap. General CTL (`EG`, `AU`, …) is a fixpoint over the same
+  graph. ATL (strategies) is out of scope.
+- **Verus/Lean.** The spec shape above is exactly what TLA+→Verus
+  pipelines translate. If Shen specs ever need machine-checked proofs
+  beyond `tc+`, *emit* Verus or TLA+ from `init`/`next` rather than
+  rebuilding a prover.
 
-## The instrumentation rule
+## The instrumentation rule for `trace`
 
-The one thing trace validation asks of the implementer: log spec state
-at **linearization points**, atomically with the change. In the example,
-the CAS that takes the lock and the pc update are logged inside one
-recorder critical section. If they were logged separately, the trace
-would show a state the spec has no step for (lock held, nobody in
-`crit`), and a correct implementation would be rejected. That isn't a
-flaw in the approach. It is the refinement mapping being made explicit,
-and it is where most of the real design thinking happens. A generated
-`record(state)` helper (from the state datatype via shengen) is the
-natural way to make this cheap.
-
-## Up the ladder: invariants as types
-
-The Reasonable post climbs from model checking to proofs. The step Shen
-is uniquely placed to take is the **inductive invariant as a type**:
-
-- TLA+ proves `[]Inv` by showing `Init => Inv` and
-  `Inv /\ Next => Inv'`.
-- In Shen that is: `init : (list safe-state)` and
-  `next : safe-state --> (list safe-state)`, where `safe-state` is a
-  datatype whose `verified` premises are `Inv`.
-- If `tc+` accepts those signatures, the invariant holds for every
-  reachable state of *every* instance, not just the finite one `check`
-  explored.
-
-Two cheap stages come before full proof:
-
-- **`check --inductive` (proposed).** Enumerate every state in a bounded
-  domain that satisfies `Inv`, not just the reachable ones, apply `next`,
-  and check that `Inv` holds after. This is the standard trick for
-  debugging an inductive invariant with a model checker. It finds the
-  missing conjunct long before a proof attempt does.
-- **Typecheck the `next` signature against the invariant type.** This is
-  the open question. Shen's sequent calculus can state it, but
-  discharging arithmetic `verified` premises inside `tc+` needs rules
-  that don't exist today. It needs a spike before anyone relies on it.
-
-Beyond that is Verus/Lean territory: emit the obligations
-`Init => Inv` and `Inv /\ Next => Inv'` for an external prover. Out of
-scope here, but note that the spec shape above is exactly what those
-obligations are stated over.
+Log spec state at **linearization points**, atomically with the change.
+In `examples/tla-mutex/impl`, the CAS that takes the lock and the pc
+update are logged inside one recorder critical section. Logging them
+separately would show a state the spec has no step for, and a correct
+implementation would be rejected. This is the refinement mapping made
+explicit. A generated `record(state)` helper would make it cheap.
 
 ## Next steps, in order
 
-1. **Wire `check` and `trace` into `sb`** as gate kinds. `check` output
-   becomes a discharge-report entry ("exhaustive, instance N states").
+1. **Wire `check` and `trace` into `sb`** as gate kinds, with discharge
+   report entries:
+   - "exhaustive for instance (N states)" from `check`;
+   - "sampled (one trace)" from `trace`.
+
    Counterexamples go into `sb context`.
-2. **Partial observation.** Real systems can't always log all spec
-   state. Track the *set* of spec states consistent with the observations
-   so far, as shencheck's possible-state semantics already does, and fail
-   when it empties. This makes the `observation` in shencheck's
-   `transition` and the hidden variables in TLA+ trace validation the
-   same feature.
+2. **Partial observation in `trace`.** Track the *set* of spec states
+   consistent with observations so far, as shencheck's possible-state
+   semantics does. This unifies shencheck `transition` and TLA+ trace
+   validation's hidden variables.
 3. **Spec-to-spec refinement:** `check low.shen --refines high.shen
-   --map f`. Explore the low-level spec, and require every step to map to
-   a high-level `next` step or a stutter. Both halves are already built.
-4. **Generated step guards** from `next` via evalhost (consumer 3), and
-   retire the hand-written state-machine examples in `.archive/` in
-   favour of one spec per system.
-5. **Bounded liveness** in `check`: `eventually P within k steps` on
-   every path, which is decidable by the same BFS. True liveness under
-   fairness (SCC analysis) only if a real example needs it. shencheck's
-   deadline-based `Eventually` is already the pragmatic form.
-6. **`check --inductive`**, then the typing spike above.
+   --map f`. Every low step must map to a high `next` step or a stutter.
+4. **`check --inductive`** and **`--wf1 P:A:Q`**: proof-shaped
+   certificates, checked on instances.
+5. **The `tc+` typing spike** for invariants as types.
+6. **Step guards from `next`** via evalhost. Retire the hand-written
+   state-machine examples in `.archive/`.
 
 ## What not to build
 
-- **A TLA+ parser or TLA+ syntax in Shen.** The value is the mental model
-  (behaviours, `Init`/`Next`, invariants, refinement), not the notation.
-  Shen `define`s are already a good notation for it, and the same text
-  feeds the evaluator, shengen and `tc+`.
+- **A TLA+ parser, or TLA+ syntax in Shen.** The value is the mental
+  model, not the notation. Shen `define`s already feed the evaluator,
+  shengen and `tc+`.
 - **A competitive model checker.** There is no symmetry reduction, no
-  disk-backed state queue and no parallel search here, and there
-  shouldn't be. If a spec outgrows in-memory BFS, the escape hatch is to
-  *emit* TLA+ from the (small, pure) Shen `init`/`next` and hand it to
-  TLC or Apalache, not to rebuild them.
+  disk-backed queue and no parallel search here, and there shouldn't be.
+  If a spec outgrows in-memory BFS, emit TLA+ for TLC/Apalache, or Verus
+  for proofs.
 
 ## Limits of the prototype
 
 - It runs on the shen-derive evaluator subset:
-  - Symbols aren't values, so use strings (`"idle"`).
-  - There is no `length`, `element?`, and so on; compose from
-    `map`/`filter`/`foldr`.
-  - Lists in patterns must be cons/bracket forms.
-- States are deduplicated by printed form. Keep states canonical (sorted
-  sets, fixed field order).
-- The whole state graph is held in memory. The default bound is
-  `--max-states 1000000`, and exit code 3 means "stopped, not proven".
-- Liveness and fairness are not checked.
-- Trace validation needs full spec state per line until partial
-  observation (step 2) lands.
+  - Symbols aren't values, so use strings.
+  - Helpers like `nth` are written in the spec.
+  - `cn` is the only string primitive.
+- States are deduplicated by printed form, so keep them canonical.
+- The whole graph, including edges, is in memory. `--max-states`
+  bounds it, and exit code 3 means "stopped, not proven". Temporal
+  properties are checked only on a complete graph.
+- Liveness always assumes WF(Next). A `--wf`/`--sf` glob covers the
+  disjunction of the matching actions, not each one separately. For
+  per-instance fairness, list the labels individually.
+- `trace` needs full spec state on every line until step 2 lands.

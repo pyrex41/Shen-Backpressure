@@ -1,30 +1,43 @@
 package check
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // ExploreOptions bounds and configures an exploration.
 type ExploreOptions struct {
 	// MaxStates stops exploration once this many distinct states have
 	// been found. Zero means no bound. A bounded run that stops early
-	// reports Complete=false: it is evidence, not a check.
+	// reports Complete=false: it is evidence, not a check. Temporal
+	// properties are only checked on a complete graph.
 	MaxStates int
 	// Deadlock reports a reachable state with no successors as a
 	// violation, as TLC does by default. A spec whose terminal states are
 	// intended should either turn this off or let those states stutter
 	// (list themselves as a successor).
 	Deadlock bool
+
+	// Temporal properties, checked once the reachable graph is complete.
+	Temporal Temporal
 }
 
-// Violation is a failed check with the shortest trace that reaches it.
+// Violation is a failed check with a trace that demonstrates it.
 type Violation struct {
-	// Kind is "invariant", "step-invariant", "deadlock" or "error".
+	// Kind is "invariant", "step-invariant", "deadlock", "liveness",
+	// "possibility" or "error".
 	Kind string
-	// Name is the invariant that failed; empty for deadlock.
+	// Name is the property that failed; empty for deadlock.
 	Name string
 	// Err is the evaluation error when Kind is "error".
 	Err error
 	// Trace runs from an initial state to the failing state.
 	Trace []Step
+	// Loop describes how a liveness counterexample continues forever:
+	// -1 means the last state stutters forever (nothing is enabled);
+	// k >= 0 means the behaviour returns from the last state to
+	// Trace[k] and repeats. Unused for other kinds.
+	Loop int
 }
 
 func (v *Violation) Error() string {
@@ -33,6 +46,8 @@ func (v *Violation) Error() string {
 		return "deadlock reached"
 	case "error":
 		return fmt.Sprintf("evaluation error: %v", v.Err)
+	case "possibility":
+		return fmt.Sprintf("possibility %s violated: from the last state no behaviour ever reaches it", v.Name)
 	default:
 		return fmt.Sprintf("%s %s violated", v.Kind, v.Name)
 	}
@@ -47,57 +62,75 @@ type ExploreResult struct {
 	Violation   *Violation
 }
 
-// Explore enumerates the reachable states of m breadth-first. Because
-// the search is breadth-first, a returned counterexample is a shortest
-// one.
-func (m *Machine) Explore(opts ExploreOptions) (*ExploreResult, error) {
-	type node struct {
-		step   Step
-		parent int // index into nodes; -1 for initial states
-		depth  int
+// edge is one successor of a state in the explored graph.
+type edge struct {
+	action string
+	to     int
+}
+
+// graph is the reachable state graph built by Explore. Node i was found
+// from parent[i] by action step[i].Action; initial states have parent -1.
+// Nodes are numbered in breadth-first order, so following parents gives
+// a shortest path from an initial state.
+type graph struct {
+	step   []Step
+	parent []int
+	depth  []int
+	succ   [][]edge
+	index  map[string]int
+}
+
+// pathTo returns the shortest path from an initial state to node i.
+func (g *graph) pathTo(i int) []Step {
+	var rev []Step
+	for ; i >= 0; i = g.parent[i] {
+		rev = append(rev, g.step[i])
 	}
-	var nodes []node
-	seen := map[string]bool{}
+	out := make([]Step, len(rev))
+	for j := range rev {
+		out[j] = rev[len(rev)-1-j]
+	}
+	return out
+}
+
+// Explore enumerates the reachable states of m breadth-first, checking
+// safety as it goes; a safety counterexample is therefore a shortest
+// one. If the whole graph is explored without a safety violation, the
+// temporal properties in opts are checked on it.
+func (m *Machine) Explore(opts ExploreOptions) (*ExploreResult, error) {
+	g := &graph{index: map[string]int{}}
 	res := &ExploreResult{}
 
-	trace := func(i int) []Step {
-		var rev []Step
-		for ; i >= 0; i = nodes[i].parent {
-			rev = append(rev, nodes[i].step)
-		}
-		out := make([]Step, len(rev))
-		for j := range rev {
-			out[j] = rev[len(rev)-1-j]
-		}
-		return out
-	}
-	fail := func(kind, name string, err error, tr []Step) (*ExploreResult, error) {
-		res.States = len(nodes)
-		res.Violation = &Violation{Kind: kind, Name: name, Err: err, Trace: tr}
+	fail := func(v *Violation) (*ExploreResult, error) {
+		res.States = len(g.step)
+		res.Violation = v
 		return res, nil
 	}
-	// add records a newly found state and checks its state invariants.
-	// It returns false when exploration should stop.
-	add := func(st Step, parent, depth int) (bool, *ExploreResult, error) {
+	// add returns the node for st, recording and checking it if new.
+	add := func(st Step, parent int) (int, *Violation) {
 		k := key(st.State)
-		if seen[k] {
-			return true, nil, nil
+		if i, ok := g.index[k]; ok {
+			return i, nil
 		}
-		seen[k] = true
-		nodes = append(nodes, node{step: st, parent: parent, depth: depth})
-		if depth > res.Depth {
-			res.Depth = depth
+		i := len(g.step)
+		depth := 0
+		if parent >= 0 {
+			depth = g.depth[parent] + 1
 		}
+		g.index[k] = i
+		g.step = append(g.step, st)
+		g.parent = append(g.parent, parent)
+		g.depth = append(g.depth, depth)
+		g.succ = append(g.succ, nil)
+		res.Depth = max(res.Depth, depth)
 		name, err := m.brokenInvariant(st.State)
 		if err != nil {
-			r, e := fail("error", name, err, trace(len(nodes)-1))
-			return false, r, e
+			return i, &Violation{Kind: "error", Name: name, Err: err, Trace: g.pathTo(i)}
 		}
 		if name != "" {
-			r, e := fail("invariant", name, nil, trace(len(nodes)-1))
-			return false, r, e
+			return i, &Violation{Kind: "invariant", Name: name, Trace: g.pathTo(i)}
 		}
-		return true, nil, nil
+		return i, nil
 	}
 
 	inits, err := m.Initial()
@@ -105,48 +138,55 @@ func (m *Machine) Explore(opts ExploreOptions) (*ExploreResult, error) {
 		return nil, err
 	}
 	for _, s := range inits {
-		if ok, r, e := add(Step{State: s}, -1, 0); !ok {
-			return r, e
+		if _, v := add(Step{State: s}, -1); v != nil {
+			return fail(v)
 		}
 	}
 
-	for i := 0; i < len(nodes); i++ {
-		if opts.MaxStates > 0 && len(nodes) >= opts.MaxStates {
-			res.States = len(nodes)
+	for i := 0; i < len(g.step); i++ {
+		if opts.MaxStates > 0 && len(g.step) >= opts.MaxStates {
+			res.States = len(g.step)
 			return res, nil
 		}
-		cur := nodes[i]
-		succs, err := m.Successors(cur.step.State)
+		cur := g.step[i].State
+		succs, err := m.Successors(cur)
 		if err != nil {
-			return fail("error", "", err, trace(i))
+			return fail(&Violation{Kind: "error", Err: err, Trace: g.pathTo(i)})
 		}
 		if len(succs) == 0 && opts.Deadlock {
-			return fail("deadlock", "", nil, trace(i))
+			return fail(&Violation{Kind: "deadlock", Trace: g.pathTo(i)})
 		}
 		for _, st := range succs {
 			res.Transitions++
-			name, err := m.brokenStepInvariant(cur.step.State, st.State)
-			if err != nil || name != "" {
-				kind := "step-invariant"
-				if err != nil {
-					kind = "error"
-				}
-				return fail(kind, name, err, append(trace(i), st))
+			name, err := m.brokenStepInvariant(cur, st.State)
+			if err != nil {
+				return fail(&Violation{Kind: "error", Name: name, Err: err, Trace: append(g.pathTo(i), st)})
 			}
-			if ok, r, e := add(st, i, cur.depth+1); !ok {
-				return r, e
+			if name != "" {
+				return fail(&Violation{Kind: "step-invariant", Name: name, Trace: append(g.pathTo(i), st)})
 			}
+			j, v := add(st, i)
+			if v != nil {
+				return fail(v)
+			}
+			g.succ[i] = append(g.succ[i], edge{action: st.Action, to: j})
 		}
 	}
-	res.States = len(nodes)
+	res.States = len(g.step)
 	res.Complete = true
+
+	v, err := m.checkTemporal(g, opts.Temporal)
+	if err != nil {
+		return nil, err
+	}
+	res.Violation = v
 	return res, nil
 }
 
 // FormatTrace renders a trace one state per line, TLC style. start is
 // the index of tr[0] in the full trace, for printing an excerpt.
 func FormatTrace(tr []Step, start int) string {
-	s := ""
+	var b strings.Builder
 	for i, st := range tr {
 		action := st.Action
 		if start+i == 0 {
@@ -154,7 +194,21 @@ func FormatTrace(tr []Step, start int) string {
 		} else if action == "" {
 			action = "<next>"
 		}
-		s += fmt.Sprintf("  %3d  %-14s %s\n", start+i, action, st.State)
+		fmt.Fprintf(&b, "  %3d  %-14s %s\n", start+i, action, st.State)
+	}
+	return b.String()
+}
+
+// FormatViolation renders a violation's trace, including how a liveness
+// counterexample continues forever.
+func FormatViolation(v *Violation) string {
+	s := FormatTrace(v.Trace, 0)
+	if v.Kind == "liveness" {
+		if v.Loop < 0 {
+			s += "       (stays here forever: no action is enabled)\n"
+		} else {
+			s += fmt.Sprintf("       (back to state %d, and repeats forever)\n", v.Loop)
+		}
 	}
 	return s
 }

@@ -12,6 +12,9 @@ import (
 	"github.com/pyrex41/Shen-Backpressure/shen-derive/specfile"
 )
 
+// consts holds the --const overrides collected by machineFlags.
+var consts [][2]string
+
 // machineFlags registers the flags shared by check and trace, which name
 // the defines that make a spec a state machine.
 func machineFlags(fs *flag.FlagSet) func() check.Names {
@@ -19,6 +22,14 @@ func machineFlags(fs *flag.FlagSet) func() check.Names {
 	nextName := fs.String("next", "next", "define taking a state to its list of successors")
 	inv := fs.String("inv", "", "comma-separated state invariants (state --> boolean)")
 	stepInv := fs.String("step-inv", "", "comma-separated step invariants (state --> state --> boolean)")
+	fs.Func("const", "`name=expr` replaces a constant (nullary define), like a TLC model's CONSTANTS; repeatable", func(v string) error {
+		name, expr, ok := strings.Cut(v, "=")
+		if !ok {
+			return fmt.Errorf("want name=expr")
+		}
+		consts = append(consts, [2]string{strings.TrimSpace(name), expr})
+		return nil
+	})
 	return func() check.Names {
 		return check.Names{
 			Init:           *initName,
@@ -51,6 +62,12 @@ func loadMachine(fs *flag.FlagSet, names func() check.Names, args []string) *che
 		fmt.Fprintf(os.Stderr, "parse error: %v\n", err)
 		os.Exit(2)
 	}
+	for _, c := range consts {
+		if err := check.Override(sf, c[0], c[1]); err != nil {
+			fmt.Fprintf(os.Stderr, "--const: %v\n", err)
+			os.Exit(2)
+		}
+	}
 	m, err := check.Load(sf, names())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", args[0], err)
@@ -65,27 +82,47 @@ func cmdCheck(args []string) {
 	names := machineFlags(fs)
 	maxStates := fs.Int("max-states", 1000000, "stop after this many distinct states (0 = unbounded)")
 	noDeadlock := fs.Bool("no-deadlock", false, "do not report states without successors")
+	eventually := fs.String("eventually", "", "comma-separated P: every behaviour reaches a P state (<>P)")
+	leadsTo := fs.String("leads-to", "", "comma-separated P:Q: every P state is followed by a Q state (P ~> Q)")
+	possible := fs.String("possible", "", "comma-separated P: from every reachable state, P can still be reached (CTL AG EF P)")
+	wf := fs.String("wf", "", "comma-separated action labels given weak fairness (a trailing * matches a prefix)")
+	sf := fs.String("sf", "", "comma-separated action labels given strong fairness (a trailing * matches a prefix)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: shen-derive check <spec.shen> [flags]")
 		fs.PrintDefaults()
 	}
 	m := loadMachine(fs, names, args)
 
-	res, err := m.Explore(check.ExploreOptions{MaxStates: *maxStates, Deadlock: !*noDeadlock})
+	temporal := check.Temporal{
+		Eventually: splitList(*eventually),
+		Possible:   splitList(*possible),
+		WF:         splitList(*wf),
+		SF:         splitList(*sf),
+	}
+	for _, pq := range splitList(*leadsTo) {
+		p, q, ok := strings.Cut(pq, ":")
+		if !ok {
+			fmt.Fprintf(os.Stderr, "--leads-to %q: want P:Q\n", pq)
+			os.Exit(2)
+		}
+		temporal.LeadsTo = append(temporal.LeadsTo, check.LeadsTo{P: p, Q: q})
+	}
+
+	res, err := m.Explore(check.ExploreOptions{MaxStates: *maxStates, Deadlock: !*noDeadlock, Temporal: temporal})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(2)
 	}
 	fmt.Printf("%d distinct states, %d transitions, depth %d\n", res.States, res.Transitions, res.Depth)
 	if v := res.Violation; v != nil {
-		fmt.Printf("FAIL: %s\n%s", v.Error(), check.FormatTrace(v.Trace, 0))
+		fmt.Printf("FAIL: %s\n%s", v.Error(), check.FormatViolation(v))
 		os.Exit(1)
 	}
 	if !res.Complete {
-		fmt.Printf("INCOMPLETE: stopped at --max-states %d; no violation in the states seen\n", *maxStates)
+		fmt.Printf("INCOMPLETE: stopped at --max-states %d; no safety violation in the states seen, temporal properties not checked\n", *maxStates)
 		os.Exit(3)
 	}
-	fmt.Println("OK: every reachable state satisfies the invariants")
+	fmt.Println("OK: every reachable state satisfies the invariants and every temporal property holds")
 }
 
 // cmdTrace validates a trace recorded from an implementation.

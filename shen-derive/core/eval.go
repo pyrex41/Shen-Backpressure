@@ -100,7 +100,7 @@ func primArity(op string) int {
 	switch op {
 	case "not", "fst", "snd", "concat":
 		return 1
-	case "+", "-", "*", "/", "%", "=", "!=", "<", "<=", ">", ">=", "and", "or", "cons", "map", "filter", "unfoldr":
+	case "+", "-", "*", "/", "%", "=", "!=", "<", "<=", ">", ">=", "and", "or", "cons", "map", "filter", "unfoldr", "cn":
 		return 2
 	case "foldr", "foldl", "scanl", "compose":
 		return 3
@@ -361,6 +361,14 @@ func execPrim(op string, args []Value) (Value, error) {
 		result[0] = args[0]
 		copy(result[1:], xs)
 		return result, nil
+
+	case "cn":
+		a, ok1 := args[0].(StringVal)
+		b, ok2 := args[1].(StringVal)
+		if !ok1 || !ok2 {
+			return nil, fmt.Errorf("cn: expected two strings, got %s and %s", args[0], args[1])
+		}
+		return a + b, nil
 
 	case "concat":
 		xss, err := asList(args[0])

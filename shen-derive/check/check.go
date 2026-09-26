@@ -35,6 +35,7 @@ import (
 
 // Machine is a spec bound to the defines that make it a state machine.
 type Machine struct {
+	spec           *specfile.SpecFile
 	env            *core.Env
 	init           *specfile.Define
 	next           *specfile.Define
@@ -57,40 +58,62 @@ func Load(sf *specfile.SpecFile, n Names) (*Machine, error) {
 		defs[i] = &sf.Defines[i]
 	}
 	tt := specfile.BuildTypeTable(sf.Datatypes, "", "")
-	m := &Machine{env: verify.SpecEnv(tt, defs)}
+	m := &Machine{spec: sf, env: verify.SpecEnv(tt, defs)}
 
-	find := func(name string, arity int) (*specfile.Define, error) {
-		d := sf.FindDefine(name)
-		if d == nil {
-			return nil, fmt.Errorf("spec has no (define %s ...)", name)
-		}
-		if d.Arity() != arity {
-			return nil, fmt.Errorf("define %s takes %d arguments, expected %d", name, d.Arity(), arity)
-		}
-		return d, nil
-	}
 	var err error
-	if m.init, err = find(n.Init, 0); err != nil {
+	if m.init, err = m.find(n.Init, 0); err != nil {
 		return nil, err
 	}
-	if m.next, err = find(n.Next, 1); err != nil {
+	if m.next, err = m.find(n.Next, 1); err != nil {
 		return nil, err
 	}
 	for _, name := range n.Invariants {
-		d, err := find(name, 1)
+		d, err := m.find(name, 1)
 		if err != nil {
 			return nil, err
 		}
 		m.invariants = append(m.invariants, d)
 	}
 	for _, name := range n.StepInvariants {
-		d, err := find(name, 2)
+		d, err := m.find(name, 2)
 		if err != nil {
 			return nil, err
 		}
 		m.stepInvariants = append(m.stepInvariants, d)
 	}
 	return m, nil
+}
+
+// Override replaces the body of the nullary define name with expr, the
+// way a TLC model config assigns CONSTANTS: the same spec can be checked
+// at different sizes or with a feature switched on. It must be called
+// before Load.
+func Override(sf *specfile.SpecFile, name, expr string) error {
+	d := sf.FindDefine(name)
+	if d == nil {
+		return fmt.Errorf("spec has no (define %s ...)", name)
+	}
+	if d.Arity() != 0 {
+		return fmt.Errorf("define %s takes arguments; only constants (nullary defines) can be overridden", name)
+	}
+	body, err := core.ParseSexpr(expr)
+	if err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	d.Clauses = []specfile.Clause{{Body: body}}
+	return nil
+}
+
+// find returns the named define, checking its arity.
+func (m *Machine) find(name string, arity int) (*specfile.Define, error) {
+	d := m.spec.FindDefine(name)
+	if d == nil {
+		return nil, fmt.Errorf("spec has no (define %s ...)", name)
+	}
+	if d.Arity() != arity {
+		return nil, fmt.Errorf("define %s takes %d arguments, expected %d", name, d.Arity(), arity)
+	}
+	return d, nil
 }
 
 // Step is one state in a trace and the action that produced it. The

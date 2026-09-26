@@ -178,3 +178,133 @@ func TestMutexExample(t *testing.T) {
 		}
 	}
 }
+
+func election(t *testing.T, consts map[string]string, n Names) *Machine {
+	t.Helper()
+	sf, err := specfile.ParseFile(filepath.Join("..", "..", "examples", "leader-election", "specs", "election.shen"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, expr := range consts {
+		if err := Override(sf, name, expr); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n.Init, n.Next = "init", "next"
+	m, err := Load(sf, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+// The election example reproduces the numbers in Reasonable's TLA+
+// tutorial, and walks through liveness and fairness on top of it.
+func TestElection(t *testing.T) {
+	safety := Names{Invariants: []string{"one-leader"}}
+	cases := []struct {
+		name     string
+		consts   map[string]string
+		temporal Temporal
+		states   int
+		kind     string // expected violation kind; empty for none
+		trace    int    // expected trace length, when kind is set
+		loop     int
+	}{
+		{"safe", nil, Temporal{}, 38, "", 0, 0},
+		{"double vote", map[string]string{"double-vote?": "true"}, Temporal{}, 190, "invariant", 7, 0},
+		{"split vote", nil, Temporal{Eventually: []string{"has-leader"}}, 38, "liveness", 4, -1},
+		{"no new election after a win", nil, Temporal{Possible: []string{"can-start"}}, 38, "possibility", 4, 0},
+		{"timeouts livelock", map[string]string{"timeouts?": "true"},
+			Temporal{Eventually: []string{"has-leader"}}, 38, "liveness", 4, 0},
+		{"weak fairness is not enough", map[string]string{"timeouts?": "true"},
+			Temporal{Eventually: []string{"has-leader"}, WF: []string{"* votes *"}}, 38, "liveness", 4, 0},
+		{"strong fairness is", map[string]string{"timeouts?": "true"},
+			Temporal{Eventually: []string{"has-leader"}, SF: []string{"* votes *"}}, 38, "", 0, 0},
+		{"quorum typo passes safety", map[string]string{"timeouts?": "true", "quorum": "4"}, Temporal{}, 23, "", 0, 0},
+		{"quorum typo fails liveness", map[string]string{"timeouts?": "true", "quorum": "4"},
+			Temporal{Eventually: []string{"has-leader"}, SF: []string{"* votes *"}}, 23, "liveness", 4, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := election(t, c.consts, safety)
+			res, err := m.Explore(ExploreOptions{Temporal: c.temporal})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.States != c.states {
+				t.Errorf("states: got %d, want %d", res.States, c.states)
+			}
+			v := res.Violation
+			switch {
+			case c.kind == "" && v != nil:
+				t.Fatalf("unexpected %s\n%s", v.Error(), FormatViolation(v))
+			case c.kind == "":
+			case v == nil:
+				t.Fatalf("want a %s violation", c.kind)
+			case v.Kind != c.kind || len(v.Trace) != c.trace || (c.kind == "liveness" && v.Loop != c.loop):
+				t.Fatalf("want %s with %d states (loop %d), got %s with %d (loop %d)\n%s",
+					c.kind, c.trace, c.loop, v.Kind, len(v.Trace), v.Loop, FormatViolation(v))
+			}
+		})
+	}
+}
+
+const ringSpec = `
+\* A token moves round a ring of three; at 1 it may "skip" back to 0
+   instead of advancing to 2. *\
+(define init -> [0])
+(define next
+  0 -> [(@p "step" 1)]
+  1 -> [(@p "advance" 2) (@p "skip" 0)]
+  2 -> [(@p "step" 0)])
+(define at-two S -> (= S 2))
+(define at-one S -> (= S 1))
+`
+
+func TestLivenessFairness(t *testing.T) {
+	m := load(t, ringSpec, Names{})
+	for _, c := range []struct {
+		name string
+		tmp  Temporal
+		ok   bool
+	}{
+		// 0 -> 1 -> 0 ... skips 2 forever.
+		{"unfair", Temporal{Eventually: []string{"at-two"}}, false},
+		// "advance" is disabled at 0, which the skip loop visits, so WF
+		// is met without ever advancing.
+		{"wf does not help", Temporal{Eventually: []string{"at-two"}, WF: []string{"advance"}}, false},
+		// "advance" is enabled at every visit to 1, so SF forces it.
+		{"sf does", Temporal{Eventually: []string{"at-two"}, SF: []string{"advance"}}, true},
+		{"leads-to holds", Temporal{LeadsTo: []LeadsTo{{"at-two", "at-one"}}}, true},
+		{"possible", Temporal{Possible: []string{"at-two"}}, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			res, err := m.Explore(ExploreOptions{Temporal: c.tmp})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (res.Violation == nil) != c.ok {
+				t.Fatalf("got %+v", res.Violation)
+			}
+			if v := res.Violation; v != nil && (v.Kind != "liveness" || v.Loop < 0) {
+				t.Fatalf("want a liveness lasso, got\n%s", FormatViolation(v))
+			}
+		})
+	}
+}
+
+func TestOverrideRejectsFunctions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "spec.shen")
+	os.WriteFile(path, []byte(counterSpec), 0o644)
+	sf, err := specfile.ParseFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Override(sf, "next", "[]"); err == nil {
+		t.Fatal("overriding a function should fail")
+	}
+	if err := Override(sf, "init", "[[5 5]]"); err != nil {
+		t.Fatal(err)
+	}
+}

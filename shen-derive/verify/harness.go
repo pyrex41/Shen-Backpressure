@@ -298,6 +298,22 @@ func buildBaseEnv(tt *specfile.TypeTable, defines []*specfile.Define) *core.Env 
 		env = env.Extend(def.Name, curriedDefineFn(def, shared))
 	}
 	shared.env = env
+
+	// A nullary define is a constant: evaluate it once and bind its
+	// value, so both `names` and Shen's call syntax `(names)` yield it.
+	// Constants are evaluated in file order, so one may use an earlier
+	// one. A constant that fails to evaluate stays unbound as a value;
+	// callers that need it (check.Load) evaluate it directly and report
+	// the error.
+	for _, def := range defines {
+		if def.Arity() != 0 {
+			continue
+		}
+		if v, err := evalDefine(def, nil, shared.env); err == nil {
+			env = env.Extend(def.Name, v)
+			shared.env = env
+		}
+	}
 	return env
 }
 
