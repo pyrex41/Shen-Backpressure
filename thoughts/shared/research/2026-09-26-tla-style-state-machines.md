@@ -231,33 +231,51 @@ explicit. A generated `record(state)` helper would make it cheap.
 The prototype runs specs on the shen-derive evaluator because it was
 already in this repo. It is neither real Shen nor fast.
 
-**Cost of one `next` call** (election, 5 computers, the same state, one
-4-core Xeon container):
+**Cost of one `next` call** (election, 5 computers, the same state;
+steady state after warm-up; one 4-core x86-64 container):
 
-| Runtime | µs per `next` | vs native |
-|---|---|---|
-| hand-written Go (compiled-spec ceiling) | 0.32 | 1× |
-| shen-cl on SBCL | 8.7 | 27× |
-| shen-go bytecode VM | 103 | 320× |
-| shen-rust, loop inside Shen | 166 | 520× |
-| shen-derive evaluator | 407 | 1,270× |
-| shen-rust via shencheck's FFI, one `eval` per call | 721 | 2,250× |
+| Runtime | µs per `next` |
+|---|---|
+| hand-written Go (compiled-spec ceiling) | 0.32 |
+| shen-cl on SBCL | 8.7–10 |
+| shen-lua on LuaJIT | 34–58 (noisy run to run) |
+| shen-rust, bytecode VM + AOT overlay of the spec | 43 |
+| shen-rust, bytecode VM (the `script` default at head) | 60–67 |
+| shen-go bytecode VM | 103 |
+| shen-rust tree-walker (what shencheck's pinned embedding runs) | 165 |
+| shen-derive evaluator | 407 |
+| shen-rust via shencheck's FFI, one `eval` per call | 721 |
 
-**Whole-search cross-check.** The same model and search, written in
-plain Shen with symbols and kernel list functions, gives:
+The shen-rust Cranelift JIT (`--features jit`) panics during kernel boot
+on x86-64 (a cranelift-codegen x64 emit assertion), so it was not
+measured.
 
-- the same state counts on shen-go at every size (38 / 132 / 762 /
-  3,526 / 23,634);
-- 6.0 s at 7 computers against shen-derive's 21 s, even with a weak
-  bucket hash.
+**Whole search at 7 computers** (23,634 states, 88,389 transitions).
+Every run found the same state counts at 3–7 computers (38 / 132 / 762
+/ 3,526 / 23,634):
+
+| Runtime and visited set | Time |
+|---|---|
+| shen-rust, VM + AOT overlay + Rust-native set (`register_native`) | 2.3 s |
+| shen-lua + Lua-side set (via `lua.call`) | 2.8 s |
+| shen-rust, tree-walker + AOT overlay + native set | 5.9 s |
+| shen-go, Shen-side bucket set with the kernel's weak `hash` | 6.0 s |
+| shen-derive (Go `check` package) | 21 s |
+| shen-cl | not run: Lisp interop unavailable in this bootstrap, so no native set |
 
 Measurement notes:
 
-- Shen's `hash` sums character codes and `floor` is slow, so a fast
-  search needs a host-native hash set. That set is the one piece of
-  port-specific code.
-- shen-cl was bootstrapped here from shen-go's S41 kernel, so its Lisp
-  interop was not available.
+- **The visited set needs host code.** Shen's `hash` sums character
+  codes and `floor` is slow, so a fast search needs a host-native set.
+  On shen-lua, building the key in Shen (`make-string`) cost as much as
+  `next` itself; moving it into Lua halved the search time.
+- **shen-rust's `register_native` is the cleanest hook.** It takes a
+  Rust closure over `Value`, with `shen_eq` for equality. A stub
+  `define` first records the arity for Shen's compiler.
+- **shencheck should enable the VM** (and ideally the overlay). Its
+  embedded shen-rust runs the tree-walker, 2.5–4× slower than it needs
+  to be for this workload.
+- shen-cl was bootstrapped here from shen-go's S41 kernel.
 
 What follows:
 
@@ -271,8 +289,10 @@ What follows:
 3. **shencheck is the natural host**, but only if the search runs
    inside Shen with a single `eval`. Its per-call FFI string bridge is
    the slowest option measured.
-4. **For speed, run on SBCL**, or shake with yggdrasil to a static
-   artifact.
+4. **For speed, use SBCL for raw `next` throughput.** shen-rust
+   (VM + overlay + native set) and shen-lua lead on complete searches
+   today because they have easy native-set hooks. yggdrasil can shake
+   any of them to a static artifact.
 5. **Compiling `next` to native Go is the remaining ~25×** over SBCL.
    Only pursue it if TLC-scale instances matter. shen-derive's v1
    codegen hit a ceiling doing exactly this kind of lowering.
