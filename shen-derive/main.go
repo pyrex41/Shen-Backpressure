@@ -9,6 +9,8 @@
 //   parse    Parse a .shen file and pretty-print its structure
 //   eval     Evaluate an s-expression
 //   verify   Generate a spec-equivalence test for a Go implementation
+//   check    Explore every reachable state of an init/next spec (TLC style)
+//   trace    Validate an implementation trace against an init/next spec
 //
 // See plan: /Users/reuben/.claude/plans/snazzy-conjuring-spring.md
 
@@ -47,6 +49,10 @@ func main() {
 		cmdParse(os.Args[2:])
 	case "verify":
 		cmdVerify(os.Args[2:])
+	case "check":
+		cmdCheck(os.Args[2:])
+	case "trace":
+		cmdTrace(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Printf("shen-derive %s\n", version)
 	case "help", "--help", "-h":
@@ -67,6 +73,8 @@ Commands:
   eval    <expr>           Evaluate an s-expression
   parse   <spec.shen>      Parse a .shen file and print its structure
   verify  <spec.shen>      Generate a spec-equivalence test (see "verify --help")
+  check   <spec.shen>      Explore every reachable state of an init/next spec
+  trace   <spec.shen>      Validate an implementation trace against an init/next spec
   version                  Print version
 
 The verify command:

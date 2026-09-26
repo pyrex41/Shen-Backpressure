@@ -697,3 +697,18 @@ func formatFloatLiteral(f float64) string {
 	}
 	return s
 }
+
+// SpecEnv returns the evaluation environment for a whole spec file:
+// field accessors from tt plus a curried binding for every define. It is
+// the same environment BuildHarness evaluates in, exposed so other
+// consumers of a spec (the check package's state explorer and trace
+// validator) evaluate defines with identical semantics.
+func SpecEnv(tt *specfile.TypeTable, defines []*specfile.Define) *core.Env {
+	return buildBaseEnv(tt, defines)
+}
+
+// EvalDefine applies def to vals in env, trying clauses in order. Unlike
+// the curried bindings in SpecEnv it also works for nullary defines.
+func EvalDefine(def *specfile.Define, vals []core.Value, env *core.Env) (core.Value, error) {
+	return evalDefine(def, vals, env)
+}

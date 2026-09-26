@@ -661,3 +661,26 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+func TestParseDefineNullaryAndListBodies(t *testing.T) {
+	d, err := parseDefine(`(define init -> [["idle" "idle" false]])`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Arity() != 0 || len(d.Clauses) != 1 {
+		t.Fatalf("init: arity %d, %d clauses", d.Arity(), len(d.Clauses))
+	}
+
+	d, err = parseDefine(`(define swap
+  [A B] -> [B A]
+  X -> [X "]" X])`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Clauses) != 2 {
+		t.Fatalf("swap: want 2 clauses, got %d", len(d.Clauses))
+	}
+	if got := d.Clauses[1].Body.String(); got != `(cons X (cons "]" (cons X nil)))` {
+		t.Fatalf("string containing ] split the body: %s", got)
+	}
+}
