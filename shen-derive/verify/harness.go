@@ -224,15 +224,11 @@ func evalDefine(def *specfile.Define, vals []core.Value, base *core.Env) (core.V
 func bindClausePatterns(base *core.Env, patterns []core.Sexpr, vals []core.Value) (*core.Env, bool, error) {
 	env := base
 	for i, p := range patterns {
-		bindings, ok, err := core.Match(p, vals[i])
-		if err != nil {
-			return nil, false, err
-		}
+		var ok bool
+		var err error
+		env, ok, err = core.MatchEnv(p, vals[i], env)
 		if !ok {
-			return nil, false, nil
-		}
-		for name, v := range bindings {
-			env = env.Extend(name, v)
+			return nil, false, err
 		}
 	}
 	return env, true, nil
@@ -298,6 +294,22 @@ func buildBaseEnv(tt *specfile.TypeTable, defines []*specfile.Define) *core.Env 
 		env = env.Extend(def.Name, curriedDefineFn(def, shared))
 	}
 	shared.env = env
+
+	// A nullary define is a constant: evaluate it once and bind its
+	// value, so both `names` and Shen's call syntax `(names)` yield it.
+	// Constants are evaluated in file order, so one may use an earlier
+	// one. A constant that fails to evaluate stays unbound as a value;
+	// callers that need it (check.Load) evaluate it directly and report
+	// the error.
+	for _, def := range defines {
+		if def.Arity() != 0 {
+			continue
+		}
+		if v, err := evalDefine(def, nil, shared.env); err == nil {
+			env = env.Extend(def.Name, v)
+			shared.env = env
+		}
+	}
 	return env
 }
 
@@ -325,7 +337,14 @@ func curriedDefineFn(def *specfile.Define, shared *envHolder) core.Value {
 			},
 		}
 	}
-	return build(nil)
+	root := build(nil).(*core.BuiltinFn)
+	if arity > 0 {
+		root.N = arity
+		root.FnN = func(vals []core.Value) (core.Value, error) {
+			return evalDefine(def, vals, shared.env)
+		}
+	}
+	return root
 }
 
 // goLiteralFor converts an evaluated spec value to a Go source expression
@@ -696,4 +715,19 @@ func formatFloatLiteral(f float64) string {
 		s += ".0"
 	}
 	return s
+}
+
+// SpecEnv returns the evaluation environment for a whole spec file:
+// field accessors from tt plus a curried binding for every define. It is
+// the same environment BuildHarness evaluates in, exposed so other
+// consumers of a spec (the check package's state explorer and trace
+// validator) evaluate defines with identical semantics.
+func SpecEnv(tt *specfile.TypeTable, defines []*specfile.Define) *core.Env {
+	return buildBaseEnv(tt, defines)
+}
+
+// EvalDefine applies def to vals in env, trying clauses in order. Unlike
+// the curried bindings in SpecEnv it also works for nullary defines.
+func EvalDefine(def *specfile.Define, vals []core.Value, env *core.Env) (core.Value, error) {
+	return evalDefine(def, vals, env)
 }

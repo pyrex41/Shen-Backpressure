@@ -780,6 +780,12 @@ func parseDefineClauses(body string) ([]Clause, error) {
 	//                  followed by next clause patterns (i = 1 .. n-2)
 	//   segments[n-1] = last clause result
 	bodyOneLine := strings.Join(strings.Fields(body), " ")
+	// A zero-arity define (`(define init -> [...])`) has no patterns
+	// before its arrow; pad it so the top-level split sees " -> ".
+	nullary := strings.HasPrefix(bodyOneLine, "-> ")
+	if nullary {
+		bodyOneLine = " " + bodyOneLine
+	}
 	segments := splitArrowTopLevel(bodyOneLine)
 	if len(segments) < 2 {
 		return nil, fmt.Errorf("missing '->' in define body")
@@ -810,7 +816,7 @@ func parseDefineClauses(body string) ([]Clause, error) {
 			}
 		} else {
 			seg = strings.TrimSpace(seg)
-			if strings.HasPrefix(seg, "(") {
+			if strings.HasPrefix(seg, "(") || strings.HasPrefix(seg, "[") {
 				expr, endIdx := extractBalancedParen(seg)
 				resultStr = expr
 				nextPatterns = strings.TrimSpace(seg[endIdx:])
@@ -827,7 +833,7 @@ func parseDefineClauses(body string) ([]Clause, error) {
 		}
 
 		patternStrs := splitPatterns(currentPatterns)
-		if len(patternStrs) == 0 {
+		if len(patternStrs) == 0 && !(nullary && len(segments) == 2) {
 			return nil, fmt.Errorf("clause %d: no patterns", len(clauses))
 		}
 
@@ -915,17 +921,28 @@ func splitPatterns(s string) []string {
 
 // extractBalancedParen returns the balanced parenthesized expression at the
 // start of s (including the outer parens) and the index just past its end.
-// Returns ("", 0) if s does not start with '('. Ported from shengen.
+// A leading '[' list literal is extracted the same way, and brackets inside
+// string literals are skipped. Returns ("", 0) if s does not start with '('
+// or '['. Ported from shengen.
 func extractBalancedParen(s string) (string, int) {
-	if len(s) == 0 || s[0] != '(' {
+	if len(s) == 0 || (s[0] != '(' && s[0] != '[') {
 		return "", 0
 	}
 	depth := 0
+	inString := false
 	for i, ch := range s {
+		if inString {
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
 		switch ch {
-		case '(':
+		case '"':
+			inString = true
+		case '(', '[':
 			depth++
-		case ')':
+		case ')', ']':
 			depth--
 			if depth == 0 {
 				return s[:i+1], i + 1
